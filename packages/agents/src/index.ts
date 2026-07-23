@@ -8,11 +8,15 @@ export class CopyAgent implements Agent<{ product: Product; tone?: string }, str
 export class SenderAgent implements Agent<{ to: string; message: string }, { id: string }> { constructor(private readonly evolution: EvolutionProvider) {} execute(input: { to: string; message: string }) { return this.evolution.sendMessage(input); } }
 export class AnalyticsAgent implements Agent<ScoredProduct, { tracked: true; productId: string; score: number }> { async execute(product: ScoredProduct) { return { tracked: true, productId: product.id, score: product.score }; } }
 export const calculateProductScore = (product: Product): Pick<ScoredProduct, 'score' | 'reasons'> => {
-  const rating = Math.min(product.rating ?? 0, 5) * 20;
-  const sales = Math.min(product.sales ?? 0, 500) / 5;
-  const commission = Math.min(product.commissionRate ?? 0, 0.2) * 500;
-  const affordability = product.price <= 100 ? 10 : product.price <= 250 ? 5 : 0;
+  const ratingValue = product.rating ?? product.nota ?? 0;
+  const salesValue = product.sales ?? product.vendidos ?? 0;
+  const commissionValue = product.commissionRate ?? product.comissao ?? 0;
+  const priceValue = product.price ?? product.preco;
+  const rating = Math.min(ratingValue, 5) * 20;
+  const sales = Math.min(salesValue, 500) / 5;
+  const commission = Math.min(commissionValue, 0.2) * 500;
+  const affordability = priceValue <= 100 ? 10 : priceValue <= 250 ? 5 : 0;
   const score = Math.round(Math.min(rating * 0.35 + sales * 0.3 + commission * 0.25 + affordability, 100));
-  const reasons = [`rating:${product.rating ?? 0}`, `sales:${product.sales ?? 0}`, `commission:${product.commissionRate ?? 0}`];
+  const reasons = [`rating:${ratingValue}`, `sales:${salesValue}`, `commission:${commissionValue}`];
   return { score, reasons };
 };
