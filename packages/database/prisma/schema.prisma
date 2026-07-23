@@ -1,3 +1,27 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-model ProductLead { id String @id @default(cuid()) title String url String? score Int? createdAt DateTime @default(now()) }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ProductLead {
+  id                String   @id @default(cuid())
+  providerProductId String   @unique
+  nome              String
+  categoria         String
+  preco             Float
+  desconto          Float
+  nota              Float
+  vendidos          Int
+  comissao          Float
+  loja              String
+  urlImagem         String
+  url               String?
+  title             String
+  score             Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

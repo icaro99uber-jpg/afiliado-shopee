@@ -4,13 +4,13 @@ Monorepo com pnpm workspaces e Turborepo para automatizar um pipeline afiliado m
 
 ## Estrutura
 
-- `apps/api`: API Fastify em TypeScript com `GET /health`.
+- `apps/api`: API Fastify em TypeScript com `GET /health` e `POST /hunter/run`.
 - `apps/worker`: worker BullMQ com job de teste `pipeline-product`.
 - `apps/dashboard`: Next.js App Router com Tailwind e base shadcn/ui.
-- `packages/database`: Prisma Client e schema PostgreSQL.
+- `packages/database`: Prisma Client e schema PostgreSQL para leads de produtos.
 - `packages/queue`: conexão Redis, filas e nomes dos jobs.
 - `packages/agents`: interfaces e implementações iniciais de Hunter, Score, Copy, Sender e Analytics.
-- `packages/providers`: contratos para Shopee, OpenAI e Evolution API com mocks.
+- `packages/providers`: contratos para Hunter/Shopee, OpenAI e Evolution API com mocks.
 - `packages/config`: validação das variáveis de ambiente com Zod.
 - `packages/shared`: tipos, erros e utilitários comuns.
 
@@ -31,6 +31,29 @@ pnpm dev
 ```
 
 A API ficará disponível em `http://localhost:3333/health` e o dashboard em `http://localhost:3000`.
+
+## Hunter Agent
+
+O Hunter Agent pode ser executado manualmente pela API:
+
+```bash
+curl -X POST http://localhost:3333/hunter/run \
+  -H 'Content-Type: application/json' \
+  -d '{"categoria":"Eletrônicos","notaMin":4.5}'
+```
+
+A resposta informa quantos produtos foram encontrados, criados e atualizados:
+
+```json
+{
+  "encontrados": 5,
+  "novos": 5,
+  "atualizados": 0,
+  "tempoExecucao": "20ms"
+}
+```
+
+Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `notaMin`, `vendidosMin` e `comissaoMin`.
 
 ## Scripts
 
