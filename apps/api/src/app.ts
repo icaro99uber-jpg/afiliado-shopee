@@ -21,11 +21,13 @@ import {
   createApplicationServices,
   createPrismaRepositories,
 } from './application-services';
+import type { AnalyticsService } from './analytics-service';
 
 type BuildAppOptions = {
   logger?: boolean;
   hunterProvider?: HunterProvider;
   prisma?: DatabaseClient;
+  analyticsService?: Pick<AnalyticsService, 'getSnapshot'>;
   pipelineQueue?: {
     add: (
       name: string,
@@ -84,6 +86,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   await app.register(cors, { origin: true });
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));
+
+  app.get('/analytics', async (request, reply) => {
+    try {
+      const analyticsService =
+        options.analyticsService ?? getApplicationServices().analytics;
+      return await analyticsService.getSnapshot();
+    } catch (error) {
+      request.log.error(
+        { event: 'analytics.route.failed', error },
+        'Analytics route failed',
+      );
+      return reply.status(500).send({
+        error: 'ANALYTICS_FETCH_FAILED',
+        message: 'Falha ao consultar analytics',
+      });
+    }
+  });
 
   app.post('/hunter/run', async (request, reply) => {
     try {
