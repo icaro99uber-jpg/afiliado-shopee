@@ -140,3 +140,78 @@ O processamento atualiza os campos `score` e `scoreUpdatedAt` em `ProductLead`.
 
 - Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
 - Conectar o endpoint a uma base PostgreSQL real nos ambientes de staging/produção.
+
+## Copy Engine
+
+O Copy Engine gera textos promocionais para produtos já persistidos, usando somente templates locais. Ele não utiliza OpenAI, LLM, IA, WhatsApp ou Analytics.
+
+Execute manualmente pela API:
+
+```bash
+curl -X POST http://localhost:3333/copy/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"productId":"ID_DO_PRODUTO"}'
+```
+
+Resposta esperada:
+
+```json
+{
+  "titulo": "🔥 Oferta Relâmpago: Fone Bluetooth por R$ 99,90",
+  "mensagem": "Corre! Fone Bluetooth na categoria Eletrônicos está com 25% de desconto, nota 4,8 e comissão de 12%.",
+  "cta": "Garanta agora antes que a oferta acabe!",
+  "hashtags": "#OfertaRelampago #Eletronicos #Desconto25"
+}
+```
+
+A cada chamada, uma nova linha é criada na tabela `GeneratedCopy`; registros antigos não são atualizados.
+
+Templates disponíveis:
+
+- 🔥 Oferta Relâmpago
+- 💥 Desconto Imperdível
+- 🚚 Frete Grátis
+- ⭐ Mais Vendido
+- ❤️ Produto Campeão
+- 🎁 Achado do Dia
+- ⚡ Promoção Limitada
+- 🏆 Melhor Custo Benefício
+
+Placeholders suportados pelo `TemplateEngine`: `{{nome}}`, `{{preco}}`, `{{desconto}}`, `{{comissao}}`, `{{categoria}}` e `{{nota}}`.
+
+## Relatório da Sprint - Copy Engine
+
+### Arquivos criados
+
+- `apps/api/src/copy-service.ts`: serviço de geração de copy, `TemplateEngine`, 8 templates, logs estruturados, persistência e tratamento de erros.
+- `apps/api/test/copy.test.ts`: testes de substituição de placeholders, cobertura de todos os templates, persistência e endpoint `POST /copy/generate`.
+
+### Arquivos modificados
+
+- `apps/api/src/app.ts`: registro do endpoint `POST /copy/generate` com validação de `productId` e respostas de erro.
+- `packages/database/prisma/schema.prisma`: criação do modelo `GeneratedCopy` relacionado a `ProductLead`.
+- `README.md`: documentação do Copy Engine e relatório da sprint.
+
+### Testes
+
+- Substituição de placeholders conhecidos e preservação de placeholders desconhecidos.
+- Renderização de todos os 8 templates sem placeholders pendentes.
+- Persistência de uma nova copy por chamada.
+- Erro para produto inexistente.
+- Endpoint `POST /copy/generate` com resposta no formato esperado.
+- Validação de `productId` obrigatório.
+
+### Decisões
+
+- A escolha do template é aleatória a cada geração para variar as copies sem IA.
+- Valores monetários e percentuais são formatados em `pt-BR`.
+- Hashtags são normalizadas para remover acentos e caracteres inválidos.
+- O histórico é preservado criando sempre novos registros em `GeneratedCopy`.
+
+### Problemas
+
+- Não havia migrações Prisma no repositório; o schema foi atualizado diretamente, mantendo o padrão das sprints anteriores.
+
+### Pendências
+
+- Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
