@@ -166,6 +166,9 @@ Proximos passos previstos:
 
 Protecoes Evolution atuais:
 
+- O endpoint `sendText` da Evolution API 2.3.6 local usa somente o payload
+  plano `{ number, text }`; nao ha fallback automatico para `textMessage`, pois
+  uma segunda tentativa poderia duplicar uma entrega.
 - Safe mode ativo por padrao, allowlist vazia bloqueando todos os destinos e
   limite padrao de um request iniciado por processo.
 - Destinos comparados apos normalizacao de formatacao, sempre por igualdade
@@ -173,14 +176,15 @@ Protecoes Evolution atuais:
 - Timeout e erro HTTP contam porque o request foi iniciado; bloqueios antes do
   HTTP nao contam.
 - Mock sem guard e sem alteracao de comportamento.
-- Esta protecao foi validada somente com clientes HTTP injetados e mocks;
-  nenhuma mensagem real foi enviada na task de implementacao.
+- Esta protecao e o contrato 2.3.6 foram validados com clientes HTTP injetados e
+  mocks; testes automatizados nunca chamam a internet.
 
 Fluxo de teste unico:
 
-- `pnpm evolution:test-message` apenas valida e mostra um resumo mascarado.
-- A flag exata `--confirm-one-real-message` e o unico caminho futuro de envio;
-  ela e bloqueada em CI e nao foi executada na task de criacao.
+- `corepack pnpm evolution:test-message` apenas valida e mostra um resumo
+  mascarado, sem exigir `pnpm` global no Windows.
+- A flag exata `--confirm-one-real-message`, direta ou depois de um unico
+  separador `--`, e o unico caminho de envio e permanece bloqueada em CI.
 - Safe mode deve estar ativo, a allowlist deve conter exatamente um destino, o
   limite deve ser 1 e o Scheduler deve estar desativado.
 - O destino vem somente da allowlist e a mensagem fixa nao usa produto, copy,
@@ -189,6 +193,12 @@ Fluxo de teste unico:
   Redis ou BullMQ.
 - Logs sao apenas locais e estruturados, sem persistencia, API key, destino
   completo, headers, payload ou resposta externa bruta.
+- Timeout, erro de rede, HTTP 5xx ou resultado ambiguo proibem qualquer retry
+  manual ou automatico.
+- Na Task 13.4, a stack e a instancia estavam saudaveis/conectadas, mas o
+  `.env` ignorado selecionava `mock` e tinha allowlist vazia. O dry-run bloqueou
+  antes do provider; nenhuma mensagem real foi enviada e nenhum segredo foi
+  versionado.
 
 Infraestrutura local da Evolution API:
 

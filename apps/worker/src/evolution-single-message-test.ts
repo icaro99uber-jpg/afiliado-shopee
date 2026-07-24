@@ -75,7 +75,13 @@ const isCiActive = (value: string | undefined) =>
 
 const validateExecutionMode = (args: readonly string[]) => {
   if (args.length === 0) return 'dry-run' as const;
-  if (args.length === 1 && args[0] === EVOLUTION_REAL_SEND_FLAG) {
+  const hasDirectConfirmation =
+    args.length === 1 && args[0] === EVOLUTION_REAL_SEND_FLAG;
+  const hasPnpmSeparatorConfirmation =
+    args.length === 2 &&
+    args[0] === '--' &&
+    args[1] === EVOLUTION_REAL_SEND_FLAG;
+  if (hasDirectConfirmation || hasPnpmSeparatorConfirmation) {
     return 'confirmed' as const;
   }
   throw new EvolutionTestError(

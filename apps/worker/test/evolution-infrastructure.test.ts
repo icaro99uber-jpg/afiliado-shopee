@@ -66,6 +66,15 @@ describe('Evolution local infrastructure', () => {
     expect(packageJson.scripts['evolution:logs']).not.toContain('config');
   });
 
+  it('executa o teste isolado pela raiz usando corepack no Windows', () => {
+    expect(packageJson.scripts['evolution:test-message']).toBe(
+      'corepack pnpm --filter @shopee-auto-affiliate-ai/worker evolution:test-message',
+    );
+    expect(packageJson.scripts['evolution:test-message']).not.toMatch(
+      /^pnpm\s/,
+    );
+  });
+
   it('nao automatiza instancia, QR Code, envio, pipeline ou Scheduler', () => {
     const infrastructure = `${compose}\n${envExample}\n${JSON.stringify(
       packageJson.scripts,

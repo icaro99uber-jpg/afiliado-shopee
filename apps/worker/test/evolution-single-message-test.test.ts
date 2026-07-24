@@ -89,8 +89,17 @@ describe('Evolution single message test command', () => {
     expect(httpClient).not.toHaveBeenCalled();
   });
 
-  it('aceita somente a flag exata para entrar no caminho confirmado', async () => {
+  it('aceita a flag exata diretamente para entrar no caminho confirmado', async () => {
     const { result, provider } = execute({ args: [EVOLUTION_REAL_SEND_FLAG] });
+
+    await expect(result).resolves.toMatchObject({ exitCode: 0 });
+    expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('aceita o separador do pnpm antes da flag exata', async () => {
+    const { result, provider } = execute({
+      args: ['--', EVOLUTION_REAL_SEND_FLAG],
+    });
 
     await expect(result).resolves.toMatchObject({ exitCode: 0 });
     expect(provider.sendMessage).toHaveBeenCalledTimes(1);
@@ -100,6 +109,9 @@ describe('Evolution single message test command', () => {
     ['--confirm-one-real-messag'],
     ['confirm-one-real-message'],
     ['--confirm-one-real-message=true'],
+    ['--'],
+    ['--', '--confirm-one-real-messag'],
+    ['--', EVOLUTION_REAL_SEND_FLAG, 'extra'],
     [EVOLUTION_REAL_SEND_FLAG, EVOLUTION_REAL_SEND_FLAG],
     ['--destination', SAFE_TEST_DESTINATION],
   ])('rejeita argumentos ou confirmacao parecida: %s', async (...args) => {
@@ -254,9 +266,7 @@ describe('Evolution single message test command', () => {
       new Error('Evolution API indisponivel'),
       { code: 'EVOLUTION_SERVER_ERROR' },
     );
-    provider.sendMessage.mockRejectedValueOnce(
-      providerError,
-    );
+    provider.sendMessage.mockRejectedValueOnce(providerError);
     const { result } = execute({
       args: [EVOLUTION_REAL_SEND_FLAG],
       provider,
