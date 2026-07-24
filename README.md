@@ -307,7 +307,7 @@ Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca 
 - Adicionar autenticação/autorização antes de uso em produção.
 - Criar painel operacional para reprocessar dispatches com falha.
 - Validar o envio Evolution em ambiente controlado antes de habilitar produção.
-- Integrar o dashboard ao Analytics em sprint separada.
+- Produtos pontuados continuam sem metrica agregada no contrato atual.
 - Fortalecer validação de status/filtros com schemas formais.
 
 ## Analytics
@@ -323,8 +323,15 @@ persistidos:
 - `totalFailedDispatches`
 - `totalActiveDestinations`
 
-O endpoint nao usa cache e nao calcula metricas na rota. O dashboard ainda nao
-consome esse contrato; essa integracao fica para uma etapa futura.
+O endpoint nao usa cache e nao calcula metricas na rota. A visao geral do
+dashboard consome esse contrato pela camada centralizada de API e mostra as sete
+metricas reais. Os dados refletem o estado persistido no momento da consulta.
+Produtos pontuados nao sao exibidos porque esse campo nao existe em
+`AnalyticsSnapshot`.
+
+Loading, erro e retry de Analytics ficam isolados do restante da pagina. Depois
+que um pipeline concluir, o botao `Atualizar metricas` faz uma nova consulta
+explicita, sem polling permanente ou cache.
 
 ## Dashboard operacional MVP
 
@@ -351,6 +358,7 @@ Paginas disponiveis:
 Endpoints usados pelo dashboard:
 
 - `GET /health`
+- `GET /analytics`
 - `POST /pipeline/run`
 - `GET /pipeline/jobs/:id`
 - `POST /copy/generate`
@@ -364,8 +372,8 @@ Limitacoes atuais:
 
 - Nao ha endpoint publico para listar todos os produtos; a tela de produtos
   mostra apenas produtos vinculados a dispatches existentes.
-- O endpoint agregado `GET /analytics` ainda nao e consumido pelo dashboard;
-  esses indicadores permanecem indisponiveis na interface atual.
+- Nao ha campo agregado para produtos pontuados em `AnalyticsSnapshot`; esse
+  indicador nao e inventado pelo dashboard.
 - Nao ha endpoint de historico de copies; o historico da tela e somente da
   sessao atual.
 - Nao ha endpoint de reprocessamento manual de dispatches; o dashboard nao

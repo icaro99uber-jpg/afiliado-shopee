@@ -32,7 +32,7 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
-- Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, ainda sem consumo pelo dashboard.
+- Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, consumido pela visao geral do dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
@@ -45,8 +45,8 @@ frontend e configurada por `NEXT_PUBLIC_API_URL`, com padrao local seguro
 
 Paginas disponiveis:
 
-- `Visao geral`: health da API, ultimo job da sessao, atalhos e resumo de
-  dispatches/destinos.
+- `Visao geral`: health da API, metricas reais de Analytics, ultimo job da
+  sessao, atalhos e resumo de dispatches.
 - `Produtos`: visualizacao derivada de produtos presentes em dispatches, com
   busca, filtros, ordenacao e paginacao local.
 - `Pipeline`: dispara `POST /pipeline/run`, consulta `GET /pipeline/jobs/:id`
@@ -61,7 +61,7 @@ Paginas disponiveis:
 Limitacoes por contrato atual:
 
 - Nao ha endpoint publico de listagem completa de produtos.
-- O endpoint agregado `GET /analytics` existe, mas ainda nao e consumido pelo dashboard.
+- Nao ha metrica de produtos pontuados no contrato `AnalyticsSnapshot`.
 - Nao ha endpoint de listagem de historico de copies.
 - Nao ha endpoint de reprocessamento manual de dispatches.
 
@@ -82,7 +82,11 @@ Metricas disponiveis na arquitetura:
 
 O endpoint `GET /analytics` retorna o snapshot atual diretamente do servico, sem
 cache e sem calculos na rota. As metricas refletem apenas os dados persistidos no
-momento da consulta. A integracao com o dashboard fica para uma etapa futura.
+momento da consulta. A visao geral consome esse endpoint pela camada centralizada
+de API e exibe as sete metricas do contrato. Loading, erro e retry sao isolados
+do restante da pagina. Apos executar o pipeline, o usuario pode fazer uma unica
+nova consulta pelo botao `Atualizar metricas`, sem polling permanente ou estado
+global entre paginas.
 
 Regras de seguranca do dashboard:
 

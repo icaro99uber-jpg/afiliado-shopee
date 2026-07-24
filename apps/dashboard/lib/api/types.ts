@@ -7,6 +7,16 @@ export type HealthResponse = {
   service: string;
 };
 
+export type AnalyticsSnapshot = {
+  totalProducts: number;
+  totalApprovedProducts: number;
+  totalGeneratedCopies: number;
+  totalQueuedDispatches: number;
+  totalSentDispatches: number;
+  totalFailedDispatches: number;
+  totalActiveDestinations: number;
+};
+
 export type ApiErrorPayload = {
   error?: string;
   message?: string;
