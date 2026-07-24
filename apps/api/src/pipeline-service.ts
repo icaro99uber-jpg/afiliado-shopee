@@ -15,6 +15,7 @@ import type {
   WhatsAppDestinationRepository,
   WhatsAppDispatchRepository,
 } from './repositories';
+import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 
 export type PipelineRunResult = {
   produtosEncontrados: number;
@@ -80,7 +81,9 @@ export class PipelineService {
 
       const hunterResult = await hunter.run(filters);
       const scoreResult = await score.run();
-      const approvedProducts = await this.options.products.listApproved(70);
+      const approvedProducts = await this.options.products.listApproved(
+        APPROVED_PRODUCT_MIN_SCORE,
+      );
       const activeDestinations =
         await this.options.whatsappDestinations.listActive();
 

@@ -10,13 +10,16 @@ import { ScoreService } from './score-service';
 import { CopyService } from './copy-service';
 import { SenderService } from './sender-service';
 import { PipelineService } from './pipeline-service';
+import { AnalyticsService } from './analytics-service';
 import {
+  PrismaAnalyticsRepository,
   PrismaGeneratedCopyRepository,
   PrismaProductRepository,
   PrismaWhatsAppDestinationRepository,
   PrismaWhatsAppDispatchRepository,
 } from './prisma-repositories';
 import type {
+  AnalyticsRepository,
   GeneratedCopyRepository,
   ProductRepository,
   WhatsAppDestinationRepository,
@@ -32,6 +35,7 @@ type DispatchQueue = {
 };
 
 export type ApplicationRepositories = {
+  analytics: AnalyticsRepository;
   products: ProductRepository;
   generatedCopies: GeneratedCopyRepository;
   whatsappDestinations: WhatsAppDestinationRepository;
@@ -39,6 +43,7 @@ export type ApplicationRepositories = {
 };
 
 export type ApplicationServices = {
+  analytics: AnalyticsService;
   hunter: HunterService;
   score: ScoreService;
   copy: CopyService;
@@ -49,6 +54,7 @@ export type ApplicationServices = {
 export const createPrismaRepositories = (
   prisma: DatabaseClient,
 ): ApplicationRepositories => ({
+  analytics: new PrismaAnalyticsRepository(prisma),
   products: new PrismaProductRepository(prisma),
   generatedCopies: new PrismaGeneratedCopyRepository(prisma),
   whatsappDestinations: new PrismaWhatsAppDestinationRepository(prisma),
@@ -68,6 +74,7 @@ export const createApplicationServices = ({
   whatsappDispatchQueue?: DispatchQueue;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 }): ApplicationServices => {
+  const analytics = new AnalyticsService(repositories.analytics);
   const hunter = new HunterService({
     provider: hunterProvider,
     products: repositories.products,
@@ -88,6 +95,7 @@ export const createApplicationServices = ({
     : undefined;
 
   return {
+    analytics,
     hunter,
     score,
     copy,

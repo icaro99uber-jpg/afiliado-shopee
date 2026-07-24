@@ -32,6 +32,7 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
+- Analytics: contrato, adaptador Prisma e servico de snapshot em `apps/api`, ainda sem endpoint ou consumo pelo dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
@@ -63,6 +64,23 @@ Limitacoes por contrato atual:
 - Nao ha endpoint agregado para metricas de produtos pontuados/aprovados.
 - Nao ha endpoint de listagem de historico de copies.
 - Nao ha endpoint de reprocessamento manual de dispatches.
+
+## Analytics
+
+O modulo de Analytics prepara agregacoes sobre os dados ja persistidos, sem criar
+tabelas ou alterar o comportamento operacional. `AnalyticsRepository` define as
+contagens e `PrismaAnalyticsRepository` usa somente `count` nos modelos atuais.
+`AnalyticsService` reune os resultados em `AnalyticsSnapshot`.
+
+Metricas disponiveis na arquitetura:
+
+- total de produtos;
+- total de produtos aprovados com `score >= 70`;
+- total de copies geradas;
+- total de dispatches pendentes, enviados e com falha;
+- total de destinos ativos.
+
+O modulo nao possui endpoint, cache ou integracao com o dashboard nesta etapa.
 
 Regras de seguranca do dashboard:
 
