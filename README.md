@@ -269,14 +269,23 @@ Destinos inativos permanecem cadastrados, mas não recebem dispatch no pipeline.
 
 `MockWhatsAppProvider` valida destino e mensagem não vazios, gera `externalMessageId` fictício, retorna `status: "sent"`, registra chamadas em memória para testes e permite simular falhas.
 
-### Evolution API futura
+### Evolution API preparada
 
-A Evolution API real deverá ser conectada criando outro implementation de `WhatsAppProvider` e injetando-a no worker/API via configuração. Essa implementação futura deverá concentrar autenticação, URLs, timeouts, mapeamento de erros e observabilidade sem alterar `SenderService` ou o contrato público.
+O `EvolutionApiWhatsAppProvider` implementa o [contrato HTTP documentado da Evolution API v2](https://docs.evolutionfoundation.com.br/evolution-api/send-text-message) para `POST /message/sendText/{instanceName}`, com payload `{ "number", "textMessage": { "text" } }`, header `apikey`, timeout, mapeamento de erros e resposta interna segura. A factory `createWhatsAppProvider` mantém `mock` como padrão e aceita `evolution` apenas com configuração completa.
+
+```env
+WHATSAPP_PROVIDER=mock
+EVOLUTION_API_URL=http://localhost:8080
+EVOLUTION_API_KEY=replace-with-your-api-key
+EVOLUTION_INSTANCE_NAME=affiliate-bot
+```
+
+Esta task não conecta a factory ao `SenderService` ou ao worker e, portanto, não envia mensagens reais. Essa integração fica para a próxima task. Nunca versione um arquivo `.env`, credenciais reais ou números reais de WhatsApp.
 
 ### Débito técnico
 
 - Adicionar autenticação/autorização antes de uso em produção.
 - Criar painel operacional para reprocessar dispatches com falha.
-- Implementar provider real da Evolution API apenas em sprint futura.
+- Conectar a factory da Evolution API ao sender e ao worker apenas em task futura.
 - Adicionar analytics em sprint separada.
 - Fortalecer validação de status/filtros com schemas formais.

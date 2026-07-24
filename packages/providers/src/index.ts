@@ -1,5 +1,17 @@
 import type { Product, ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 
+export {
+  EvolutionApiWhatsAppProvider,
+  type EvolutionApiWhatsAppProviderOptions,
+  type HttpClient,
+  type ProviderLogger,
+} from './evolution-api-whatsapp-provider';
+export {
+  createWhatsAppProvider,
+  type WhatsAppProviderFactoryConfig,
+  type WhatsAppProviderFactoryOptions,
+} from './whatsapp-provider-factory';
+
 export interface HunterProvider {
   buscarProdutos(filters?: ProductFilters): Promise<Product[]>;
 }

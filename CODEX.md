@@ -31,6 +31,7 @@ O estado atual nao executa scraping real, nao usa OpenAI real e nao envia mensag
 - Filas: BullMQ/Redis em `packages/queue`.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
+- Evolution API: provider HTTP v2 e factory segura em `packages/providers`, ainda sem conexao com o worker.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
@@ -84,6 +85,8 @@ Arquivos principais na raiz:
 - Manter regras de negocio dentro dos servicos existentes quando a mudanca pertencer a API.
 - Usar providers para isolar integracoes externas.
 - Preservar mocks enquanto uma integracao real nao estiver prevista na sprint.
+- Manter `WHATSAPP_PROVIDER=mock` como padrao; selecionar `evolution` exige URL, chave e nome da instancia validos.
+- Nunca acessar variaveis de ambiente dentro de providers nem registrar credenciais em logs ou erros.
 - Registrar eventos relevantes com logs estruturados nos servicos e workers.
 - Evitar acoplamento direto entre endpoints e detalhes de infraestrutura quando ja houver servico dedicado.
 - Manter contratos de repositorio pequenos e especificos, evitando interfaces genericas grandes.
