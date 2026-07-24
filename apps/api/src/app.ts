@@ -10,10 +10,14 @@ import {
 } from '@shopee-auto-affiliate-ai/providers';
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import {
+  createProductPipelineQueue,
+  createRedisConnection,
+  type PipelineProductJob,
+} from '@shopee-auto-affiliate-ai/queue';
 import { HunterService } from './hunter-service';
 import { ScoreService } from './score-service';
 import { CopyService } from './copy-service';
-
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -121,7 +125,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: 'SCORE_RUN_FAILED',
         message: 'Falha ao executar Score Engine',
       });
-
     }
   });
 
@@ -154,8 +157,162 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: 'COPY_GENERATE_FAILED',
         message: 'Falha ao gerar copy',
       });
-
     }
+  });
+
+  app.post('/pipeline/run', async (request, reply) => {
+    const body = (request.body ?? {}) as PipelineProductJob;
+    const job = await getPipelineQueue().add(
+      'pipeline-product',
+      { filters: body.filters },
+      undefined,
+    );
+    return reply.status(202).send({ jobId: job.id, status: 'queued' });
+  });
+
+  app.get('/pipeline/jobs/:id', async (request, reply) => {
+    const params = request.params as { id: string };
+    const job = await getPipelineQueue().getJob?.(params.id);
+    if (!job)
+      return reply
+        .status(404)
+        .send({ error: 'JOB_NOT_FOUND', message: 'Job não encontrado' });
+    return {
+      status: await job.getState(),
+      progress: job.progress,
+      startedAt: job.processedOn
+        ? new Date(job.processedOn).toISOString()
+        : null,
+      finishedAt: job.finishedOn
+        ? new Date(job.finishedOn).toISOString()
+        : null,
+      result: job.returnvalue ?? null,
+      error: job.failedReason ?? null,
+    };
+  });
+
+  app.post('/whatsapp/destinations', async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      name?: unknown;
+      destination?: unknown;
+      active?: unknown;
+    };
+    if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return reply
+        .status(400)
+        .send({
+          error: 'INVALID_DESTINATION_NAME',
+          message: 'name é obrigatório',
+        });
+    }
+    if (
+      typeof body.destination !== 'string' ||
+      body.destination.trim().length === 0
+    ) {
+      return reply
+        .status(400)
+        .send({
+          error: 'INVALID_DESTINATION',
+          message: 'destination é obrigatório',
+        });
+    }
+    return prisma.whatsAppDestination.create({
+      data: {
+        name: body.name.trim(),
+        destination: body.destination.trim(),
+        active: typeof body.active === 'boolean' ? body.active : true,
+      },
+    });
+  });
+
+  app.get('/whatsapp/destinations', async () =>
+    prisma.whatsAppDestination.findMany({ orderBy: { createdAt: 'desc' } }),
+  );
+
+  app.patch('/whatsapp/destinations/:id', async (request, reply) => {
+    const params = request.params as { id: string };
+    const body = (request.body ?? {}) as {
+      name?: unknown;
+      destination?: unknown;
+      active?: unknown;
+    };
+    const data: { name?: string; destination?: string; active?: boolean } = {};
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || body.name.trim().length === 0)
+        return reply
+          .status(400)
+          .send({
+            error: 'INVALID_DESTINATION_NAME',
+            message: 'name não pode ser vazio',
+          });
+      data.name = body.name.trim();
+    }
+    if (body.destination !== undefined) {
+      if (
+        typeof body.destination !== 'string' ||
+        body.destination.trim().length === 0
+      )
+        return reply
+          .status(400)
+          .send({
+            error: 'INVALID_DESTINATION',
+            message: 'destination não pode ser vazio',
+          });
+      data.destination = body.destination.trim();
+    }
+    if (body.active !== undefined) {
+      if (typeof body.active !== 'boolean')
+        return reply
+          .status(400)
+          .send({
+            error: 'INVALID_ACTIVE',
+            message: 'active deve ser boolean',
+          });
+      data.active = body.active;
+    }
+    try {
+      return await prisma.whatsAppDestination.update({
+        where: { id: params.id },
+        data,
+      });
+    } catch {
+      return reply
+        .status(404)
+        .send({
+          error: 'DESTINATION_NOT_FOUND',
+          message: 'Destino não encontrado',
+        });
+    }
+  });
+
+  app.get('/whatsapp/dispatches', async (request) => {
+    const query = request.query as {
+      status?: string;
+      destinationId?: string;
+      productId?: string;
+    };
+    return prisma.whatsAppDispatch.findMany({
+      where: {
+        status: query.status,
+        destinationId: query.destinationId,
+        productId: query.productId,
+      },
+      include: { product: true, generatedCopy: true, destination: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  });
+
+  app.get('/whatsapp/dispatches/:id', async (request, reply) => {
+    const params = request.params as { id: string };
+    const dispatch = await prisma.whatsAppDispatch.findUnique({
+      where: { id: params.id },
+      include: { product: true, generatedCopy: true, destination: true },
+    });
+    if (!dispatch)
+      return reply
+        .status(404)
+        .send({ error: 'DISPATCH_NOT_FOUND', message: 'Envio não encontrado' });
+    return dispatch;
   });
 
   app.addHook('onClose', async () => {

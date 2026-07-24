@@ -4,15 +4,19 @@ import { loadConfig } from '@shopee-auto-affiliate-ai/config';
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import {
   MockShopeeProvider,
+  MockWhatsAppProvider,
   type HunterProvider,
+  type WhatsAppProvider,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
   createRedisConnection,
   JOB_NAMES,
   QUEUE_NAMES,
   type PipelineProductJob,
+  type WhatsAppDispatchJob,
 } from '@shopee-auto-affiliate-ai/queue';
 import { PipelineService } from '../../../api/src/pipeline-service';
+import { SenderService } from '../../../api/src/sender-service';
 
 type WorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -23,6 +27,7 @@ type CreatePipelineProductWorkerOptions = {
   prisma?: ReturnType<typeof createPrismaClient>;
   hunterProvider?: HunterProvider;
   logger?: WorkerLogger;
+  whatsAppProvider?: WhatsAppProvider;
 };
 
 const consoleLogger: WorkerLogger = {
@@ -63,6 +68,18 @@ export const processPipelineProductJob = async (
   }
 };
 
+export const processWhatsAppDispatchJob = async (
+  job: Pick<Job<WhatsAppDispatchJob>, 'id' | 'name' | 'data'>,
+  options: Required<CreatePipelineProductWorkerOptions>,
+) => {
+  if (job.name !== JOB_NAMES.whatsappDispatch) return { skipped: true };
+  return new SenderService({
+    prisma: options.prisma,
+    provider: options.whatsAppProvider,
+    logger: options.logger,
+  }).sendDispatch(job.data.dispatchId);
+};
+
 export const createPipelineProductWorker = (
   redisUrl: string,
   options: CreatePipelineProductWorkerOptions = {},
@@ -73,6 +90,7 @@ export const createPipelineProductWorker = (
     prisma,
     hunterProvider: options.hunterProvider ?? new MockShopeeProvider(),
     logger: options.logger ?? consoleLogger,
+    whatsAppProvider: options.whatsAppProvider ?? new MockWhatsAppProvider(),
   };
 
   const worker = new Worker<PipelineProductJob>(
@@ -81,12 +99,23 @@ export const createPipelineProductWorker = (
     { connection },
   );
 
+  const whatsappWorker = new Worker<WhatsAppDispatchJob>(
+    QUEUE_NAMES.whatsappDispatch,
+    async (job) => processWhatsAppDispatchJob(job, workerOptions),
+    { connection },
+  );
+
+  whatsappWorker.on('closed', async () => undefined);
+
   worker.on('closed', async () => {
     await connection.quit();
     if (!options.prisma) await prisma.$disconnect();
   });
 
-  return worker;
+  return {
+    productPipelineWorker: worker,
+    whatsappDispatchWorker: whatsappWorker,
+  };
 };
 
 if (process.env.NODE_ENV !== 'test') {

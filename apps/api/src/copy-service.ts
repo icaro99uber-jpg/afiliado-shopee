@@ -156,10 +156,10 @@ export class CopyService {
       if (!product) throw new AppError('Produto não encontrado', 'PRODUCT_NOT_FOUND');
 
       const copy = this.generateFromProduct(product);
-      await this.options.prisma.generatedCopy.create({ data: { productId, ...copy } });
+      const persistedCopy = await this.options.prisma.generatedCopy.create({ data: { productId, ...copy } });
 
       this.options.logger.info({ event: 'copy.generate.completed', productId }, 'Copy generation completed');
-      return copy;
+      return persistedCopy;
     } catch (error) {
       this.options.logger.error({ event: 'copy.generate.failed', productId, error }, 'Copy generation failed');
       if (error instanceof AppError) throw error;

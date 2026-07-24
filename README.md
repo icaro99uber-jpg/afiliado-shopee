@@ -216,16 +216,62 @@ Placeholders suportados pelo `TemplateEngine`: `{{nome}}`, `{{preco}}`, `{{desco
 
 - Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
 
+## WhatsApp Sender Mock
 
+O módulo de envio usa exclusivamente `MockWhatsAppProvider`. Ele não faz chamadas HTTP, não integra Evolution API real e não envia mensagens reais. O pipeline cria registros `WhatsAppDispatch` pendentes e enfileira jobs `whatsapp-dispatch`; o worker consome esses jobs e chama o `SenderService` com o provider mock injetado.
 
-```bash
-curl -X POST http://localhost:3333/pipeline/run \
-  -H 'Content-Type: application/json' \
+### Arquitetura de envio
 
-```
+1. `pipeline-product` executa Hunter, persistência, Score e Copy.
+2. Após cada `GeneratedCopy`, o pipeline busca `WhatsAppDestination` ativos.
+3. Para cada combinação copy + destino ativo, cria um `WhatsAppDispatch` `PENDING`.
+4. Cada dispatch é enfileirado em `whatsapp-dispatch`.
+5. O worker executa `SenderService`, incrementa `attemptCount`, chama o mock e atualiza para `SENT` ou `FAILED`.
+6. O retry é responsabilidade do BullMQ (`attempts: 3`, backoff exponencial); não há retry manual no serviço.
 
-Resposta esperada:
+A mensagem pública enviada é formada por título, mensagem, CTA e hashtags. Comissão de afiliado não é adicionada pelo sender ao payload público.
+
+### Destinos
+
+`WhatsAppDestination` representa grupos ou números do provider:
 
 ```json
 {
+  "name": "Grupo de ofertas",
+  "destination": "mock-group-01",
+  "active": true
+}
+```
 
+Destinos inativos permanecem cadastrados, mas não recebem dispatch no pipeline.
+
+### Endpoints
+
+- `POST /whatsapp/destinations`: cria destino.
+- `GET /whatsapp/destinations`: lista destinos.
+- `PATCH /whatsapp/destinations/:id`: altera `name`, `destination` e/ou `active`.
+- `GET /whatsapp/dispatches`: lista envios com filtros opcionais `status`, `destinationId` e `productId`.
+- `GET /whatsapp/dispatches/:id`: consulta um envio com produto, copy e destino.
+- `POST /pipeline/run`: enfileira `pipeline-product`.
+- `GET /pipeline/jobs/:id`: consulta status do job de pipeline.
+
+### Filas
+
+- `product-pipeline` / job `pipeline-product`: orquestra Hunter, Score, Copy e criação dos dispatches.
+- `whatsapp-dispatch` / job `whatsapp-dispatch`: payload `{ "dispatchId": "..." }`, com `attempts: 3`, backoff exponencial, `removeOnComplete` e `removeOnFail` limitados.
+
+### Provider mock
+
+`MockWhatsAppProvider` valida destino e mensagem não vazios, gera `externalMessageId` fictício, retorna `status: "sent"`, registra chamadas em memória para testes e permite simular falhas.
+
+### Evolution API futura
+
+A Evolution API real deverá ser conectada criando outro implementation de `WhatsAppProvider` e injetando-a no worker/API via configuração. Essa implementação futura deverá concentrar autenticação, URLs, timeouts, mapeamento de erros e observabilidade sem alterar `SenderService` ou o contrato público.
+
+### Débito técnico
+
+- Adicionar autenticação/autorização antes de uso em produção.
+- Criar painel operacional para reprocessar dispatches com falha.
+- Implementar provider real da Evolution API apenas em sprint futura.
+- Adicionar analytics em sprint separada.
+- Fortalecer validação de status/filtros com schemas formais.
