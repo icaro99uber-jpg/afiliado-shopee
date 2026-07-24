@@ -190,6 +190,29 @@ Fluxo de teste unico:
 - Logs sao apenas locais e estruturados, sem persistencia, API key, destino
   completo, headers, payload ou resposta externa bruta.
 
+Infraestrutura local da Evolution API:
+
+- Compose isolado em `infra/evolution/docker-compose.yml` com Evolution API
+  2.3.6, PostgreSQL 16.4 e Redis 7.2.5 em imagens fixadas.
+- Rede e volumes possuem prefixo proprio; PostgreSQL e Redis nao publicam
+  portas ao host. Somente a API e exposta em `127.0.0.1:8080` por padrao.
+- `infra/evolution/.env.local` e gerado com segredos aleatorios, carregado
+  explicitamente pelo compose e ignorado pelo Git.
+- Healthchecks validam PostgreSQL, Redis e `GET /`, que e o status publico
+  suportado pela Evolution API 2.3.6.
+- Telemetria opcional, filas/eventos externos, webhooks, chatbots, S3 e
+  persistencia de mensagens, contatos e chats ficam desativadas.
+- Os scripts `evolution:up`, `evolution:down`, `evolution:status`,
+  `evolution:logs` e `evolution:restart` apenas operam containers; nao chamam
+  Sender, worker, pipeline, Scheduler ou endpoints da Evolution.
+- A stack nao cria instancia, nao gera QR Code, nao conecta WhatsApp e nao envia
+  mensagens. Criacao e conexao manuais exigem uma task futura e revisao
+  controlada separada.
+- A 2.3.6 incorpora a correcao da migracao Kafka publicada na 2.3.5 e nao exige
+  ativacao externa obrigatoria, mas sua Apache 2.0 possui
+  condicoes adicionais de marca/copyright e aviso de uso; o descumprimento pode
+  exigir licenca comercial.
+
 ## Pipeline
 
 Responsabilidade:

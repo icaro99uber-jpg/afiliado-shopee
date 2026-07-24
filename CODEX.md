@@ -195,6 +195,34 @@ Credenciais ficam apenas no `.env` local nao versionado. A implementacao deste
 comando foi validada somente em dry-run e com providers/clientes HTTP injetados
 nos testes; nenhuma mensagem real foi enviada.
 
+## Infraestrutura local da Evolution API
+
+`infra/evolution` contem um compose independente do compose principal. Ele fixa
+`evoapicloud/evolution-api:v2.3.6`, `postgres:16.4-alpine3.20` e
+`redis:7.2.5-alpine3.20`, usa uma rede exclusiva, volumes persistentes com
+prefixo proprio e publica somente a API em `127.0.0.1:8080` por padrao.
+PostgreSQL e Redis ficam acessiveis apenas na rede Docker da stack.
+
+`pnpm evolution:init` cria uma unica vez `infra/evolution/.env.local`, gera API
+key e senha PostgreSQL fortes e nao mostra seus valores. O arquivo local esta
+explicitamente ignorado. `evolution:config`, `evolution:pull`, `evolution:up`,
+`evolution:down`, `evolution:status`, `evolution:logs` e `evolution:restart`
+sempre apontam para esse compose e carregam esse arquivo local.
+
+A Evolution API 2.3.6 nao oferece `/health` ou `/server/ok`; sua rota publica
+`GET /` e o status suportado e retorna HTTP 200, mensagem, versao e clientName.
+O healthcheck da API usa essa rota. A versao foi escolhida por ser a ultima
+release estavel 2.3.x, incorporar a correcao da migracao Kafka da 2.3.5 e nao
+ter a ativacao remota obrigatoria introduzida na 2.4.0. A licenca da tag e
+Apache 2.0 com condicoes adicionais de marca/copyright e aviso de uso; o
+descumprimento pode exigir licenca comercial.
+
+A stack nao automatiza criacao/conexao de instancia, QR Code ou mensagens. Ela
+tambem nao inicia worker, pipeline nem Scheduler. Integracoes externas,
+telemetria opcional e persistencia de mensagens/contatos/chats ficam
+desativadas. O estado seguro desta task nao possui instancia criada, conta
+conectada ou mensagem enviada.
+
 O fluxo manual continua disponivel mesmo quando o Scheduler esta habilitado.
 
 Regra de dependencia:
