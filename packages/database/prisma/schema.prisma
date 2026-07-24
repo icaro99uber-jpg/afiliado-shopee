@@ -9,6 +9,7 @@ datasource db {
 
 model ProductLead {
   copies            GeneratedCopy[]
+  whatsappDispatches WhatsAppDispatch[]
   id                String   @id @default(cuid())
   providerProductId String   @unique
   nome              String
@@ -28,16 +29,54 @@ model ProductLead {
   updatedAt         DateTime @updatedAt
 }
 
-
 model GeneratedCopy {
-  id        String      @id @default(cuid())
-  productId String
-  product   ProductLead @relation(fields: [productId], references: [id], onDelete: Cascade)
-  titulo    String
-  mensagem  String
-  cta       String
-  hashtags  String
-  createdAt DateTime    @default(now())
+  id                 String             @id @default(cuid())
+  productId          String
+  product            ProductLead        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  whatsappDispatches WhatsAppDispatch[]
+  titulo             String
+  mensagem           String
+  cta                String
+  hashtags           String
+  createdAt          DateTime           @default(now())
 
   @@index([productId])
+}
+
+model WhatsAppDestination {
+  id         String             @id @default(cuid())
+  name       String
+  destination String
+  active     Boolean            @default(true)
+  dispatches WhatsAppDispatch[]
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+}
+
+model WhatsAppDispatch {
+  id                String              @id @default(cuid())
+  productId         String
+  product           ProductLead         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  generatedCopyId   String
+  generatedCopy     GeneratedCopy       @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
+  destinationId     String
+  destination       WhatsAppDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  externalMessageId String?
+  status            WhatsAppDispatchStatus @default(PENDING)
+  attemptCount      Int                 @default(0)
+  errorMessage      String?
+  sentAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@unique([generatedCopyId, destinationId])
+  @@index([productId])
+  @@index([destinationId])
+  @@index([status])
+}
+
+enum WhatsAppDispatchStatus {
+  PENDING
+  SENT
+  FAILED
 }

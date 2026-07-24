@@ -16,7 +16,71 @@ export interface EvolutionProvider {
   sendMessage(input: { to: string; message: string }): Promise<{ id: string }>;
 }
 
-const categorias = ['Eletrônicos', 'Casa', 'Beleza', 'Moda', 'Esportes', 'Pets', 'Bebês', 'Automotivo'];
+export type WhatsAppSendInput = { destination: string; message: string };
+
+export type WhatsAppSendResult = {
+  externalMessageId: string;
+  status: 'sent';
+  sentAt: Date;
+};
+
+export interface WhatsAppProvider {
+  sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult>;
+}
+
+export class MockWhatsAppProvider implements WhatsAppProvider {
+  private readonly calls: WhatsAppSendInput[] = [];
+  private shouldFail = false;
+  private failureMessage = 'Mock WhatsApp provider failure';
+  private sequence = 1;
+
+  get sentMessages() {
+    return [...this.calls];
+  }
+
+  simulateFailure(message = 'Mock WhatsApp provider failure') {
+    this.shouldFail = true;
+    this.failureMessage = message;
+  }
+
+  clearFailure() {
+    this.shouldFail = false;
+  }
+
+  reset() {
+    this.calls.length = 0;
+    this.sequence = 1;
+    this.clearFailure();
+  }
+
+  async sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
+    if (input.destination.trim().length === 0) {
+      throw new Error('Destino WhatsApp é obrigatório');
+    }
+    if (input.message.trim().length === 0) {
+      throw new Error('Mensagem WhatsApp é obrigatória');
+    }
+    if (this.shouldFail) throw new Error(this.failureMessage);
+
+    this.calls.push({ ...input });
+    return {
+      externalMessageId: `mock-whatsapp-${this.sequence++}`,
+      status: 'sent',
+      sentAt: new Date(),
+    };
+  }
+}
+
+const categorias = [
+  'Eletrônicos',
+  'Casa',
+  'Beleza',
+  'Moda',
+  'Esportes',
+  'Pets',
+  'Bebês',
+  'Automotivo',
+];
 
 const produtosBase = Array.from({ length: 40 }, (_, index) => {
   const numero = index + 1;
@@ -42,23 +106,30 @@ const produtoAtendeFiltros = (produto: Product, filters?: ProductFilters) => {
     (!filters.categoria || produto.categoria === filters.categoria) &&
     (filters.precoMin === undefined || produto.preco >= filters.precoMin) &&
     (filters.precoMax === undefined || produto.preco <= filters.precoMax) &&
-    (filters.descontoMin === undefined || produto.desconto >= filters.descontoMin) &&
+    (filters.descontoMin === undefined ||
+      produto.desconto >= filters.descontoMin) &&
     (filters.notaMin === undefined || produto.nota >= filters.notaMin) &&
-    (filters.vendidosMin === undefined || produto.vendidos >= filters.vendidosMin) &&
-    (filters.comissaoMin === undefined || produto.comissao >= filters.comissaoMin)
+    (filters.vendidosMin === undefined ||
+      produto.vendidos >= filters.vendidosMin) &&
+    (filters.comissaoMin === undefined ||
+      produto.comissao >= filters.comissaoMin)
   );
 };
 
 export class MockShopeeProvider implements ShopeeProvider {
   async buscarProdutos(filters?: ProductFilters) {
-    return produtosBase.filter((produto) => produtoAtendeFiltros(produto, filters));
+    return produtosBase.filter((produto) =>
+      produtoAtendeFiltros(produto, filters),
+    );
   }
 
   async searchProducts(query: string) {
     const normalizado = query.trim().toLocaleLowerCase('pt-BR');
     const produtos = await this.buscarProdutos();
     return normalizado
-      ? produtos.filter((produto) => produto.nome.toLocaleLowerCase('pt-BR').includes(normalizado))
+      ? produtos.filter((produto) =>
+          produto.nome.toLocaleLowerCase('pt-BR').includes(normalizado),
+        )
       : produtos;
   }
 }
