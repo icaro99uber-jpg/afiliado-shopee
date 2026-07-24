@@ -388,7 +388,15 @@ nenhum segredo ou detalhe interno e renderizado.
 
 ### Evolution API preparada
 
-O `EvolutionApiWhatsAppProvider` implementa o [contrato HTTP documentado da Evolution API v2](https://docs.evolutionfoundation.com.br/evolution-api/send-text-message) para `POST /message/sendText/{instanceName}`, com payload `{ "number", "textMessage": { "text" } }`, header `apikey`, timeout, mapeamento de erros e resposta interna segura. A factory `createWhatsAppProvider` mantém `mock` como padrão e aceita `evolution` apenas com configuração completa.
+O `EvolutionApiWhatsAppProvider` usa o contrato confirmado da Evolution API
+2.3.6 fixada na infraestrutura local para
+`POST /message/sendText/{instanceName}`: payload plano
+`{ "number": "<destination>", "text": "<message>" }`, header `apikey`,
+`Content-Type: application/json`, timeout, mapeamento de erros e resposta
+interna segura. Nao existe fallback automatico para `textMessage` ou outro
+formato, pois uma segunda tentativa poderia duplicar a mensagem. A factory
+`createWhatsAppProvider` mantem `mock` como padrao e aceita `evolution` apenas
+com configuracao completa.
 
 ```env
 WHATSAPP_PROVIDER=mock
@@ -423,7 +431,7 @@ O comando abaixo e isolado do bootstrap normal do worker e funciona em dry-run
 por padrao:
 
 ```bash
-pnpm evolution:test-message
+corepack pnpm evolution:test-message
 ```
 
 O dry-run carrega e valida a configuracao, cria uma unica instancia do provider
@@ -432,11 +440,11 @@ chamar `sendMessage` ou HTTP. Ele nao inicia workers BullMQ, nao acessa Redis,
 Prisma ou banco, nao registra Scheduler e nao usa pipeline, dispatch, copy ou
 produto.
 
-Um envio futuro exige exclusivamente a flag exata abaixo, sem confirmacao
-interativa:
+Um envio controlado exige exclusivamente a flag exata abaixo, sem confirmacao
+interativa e sem depender de `pnpm` global no Windows:
 
 ```bash
-pnpm evolution:test-message -- --confirm-one-real-message
+corepack pnpm evolution:test-message -- --confirm-one-real-message
 ```
 
 Esse modo nunca pode executar em CI e exige simultaneamente:
@@ -451,8 +459,15 @@ Esse modo nunca pode executar em CI e exige simultaneamente:
 
 A mensagem e fixa: "Teste controlado do sistema Afiliado Shopee. Nenhuma ação
 é necessária." Nao sao aceitos texto personalizado, dados de produto, links,
-hashtags ou copies. A task que criou o comando executou somente dry-run com
-valores ficticios; nenhuma mensagem real ou request externo foi realizado.
+hashtags ou copies. O comando tambem aceita a flag direta quando invocado no
+workspace do worker; qualquer separador, flag parcial ou argumento adicional e
+bloqueado. Se houver timeout, erro de rede, HTTP 5xx ou resultado ambiguo, e
+proibido repetir manual ou automaticamente o envio.
+
+Na validacao da Task 13.4, a stack 2.3.6 e a instancia foram confirmadas como
+saudaveis/conectadas, mas o arquivo local ignorado mantinha o provider `mock` e
+a allowlist vazia. O dry-run bloqueou antes do provider e nenhuma mensagem real
+foi enviada. Nenhuma credencial ou destino foi registrado neste repositorio.
 
 ### Débito técnico
 

@@ -86,8 +86,24 @@ Invoke-RestMethod http://localhost:8080/
 ```
 
 O CLI do projeto pode validar a configuracao em dry-run, mas suas variaveis
-devem ser fornecidas somente por ambiente local ignorado. Nunca use a flag de
-confirmacao real nesta etapa.
+devem ser fornecidas somente por ambiente local ignorado:
+
+```powershell
+corepack pnpm evolution:test-message
+```
+
+O `sendText` da imagem 2.3.6 usa o corpo plano `{ "number", "text" }`. O
+provider nao tenta o formato `textMessage` como fallback, pois uma segunda
+requisicao poderia duplicar a entrega. O unico caminho confirmado e
+`corepack pnpm evolution:test-message -- --confirm-one-real-message`; ele exige
+safe mode ativo, exatamente um destino permitido, limite 1 e Scheduler
+desativado. Timeout, erro de rede, HTTP 5xx ou resultado ambiguo nunca devem ser
+seguidos de retry manual ou automatico.
+
+Na validacao da Task 13.4, a API e a instancia estavam saudaveis/conectadas, mas
+o dry-run foi bloqueado porque a configuracao ignorada selecionava `mock` e
+mantinha a allowlist vazia. Nenhuma mensagem real foi enviada e nenhum segredo
+foi versionado.
 
 ## Proximo passo manual e controlado
 

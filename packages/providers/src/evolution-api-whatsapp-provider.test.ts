@@ -53,7 +53,7 @@ describe('EvolutionApiWhatsAppProvider', () => {
     });
   });
 
-  it('monta URL, headers e payload do contrato Evolution API v2', async () => {
+  it('monta URL, headers e payload do contrato Evolution API v2.3.6', async () => {
     const httpClient = vi
       .fn()
       .mockResolvedValue(response({ key: { id: 'message-123' } }));
@@ -74,11 +74,22 @@ describe('EvolutionApiWhatsAppProvider', () => {
         },
         body: JSON.stringify({
           number: '5511999999999',
-          textMessage: { text: 'Oferta do dia' },
+          text: 'Oferta do dia',
         }),
         signal: expect.any(AbortSignal),
       }),
     );
+
+    const request = vi.mocked(httpClient).mock.calls[0]?.[1];
+    const payload = JSON.parse(String(request?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toEqual({
+      number: '5511999999999',
+      text: 'Oferta do dia',
+    });
+    expect(payload).not.toHaveProperty('textMessage');
   });
 
   it.each([
@@ -128,6 +139,35 @@ describe('EvolutionApiWhatsAppProvider', () => {
     await expect(
       provider.sendMessage({ destination: '5511999999999', message: 'Oferta' }),
     ).rejects.toMatchObject({ code });
+  });
+
+  it('sanitiza a resposta HTTP 400 sem expor detalhes externos', async () => {
+    const externalDetail = `${API_KEY} 5511999999999 payload rejected`;
+    const logger = createLogger();
+    const provider = createProvider(
+      vi.fn().mockResolvedValue(response({ error: externalDetail }, 400)),
+      { logger },
+    );
+
+    let caught: unknown;
+    try {
+      await provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta',
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AppError);
+    expect(caught).toMatchObject({ code: 'EVOLUTION_BAD_REQUEST' });
+    expect(JSON.stringify(caught)).not.toContain(externalDetail);
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain(
+      API_KEY,
+    );
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain(
+      '5511999999999',
+    );
   });
 
   it('mapeia timeout sem realizar retry', async () => {

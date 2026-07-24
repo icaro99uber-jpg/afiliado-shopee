@@ -158,6 +158,9 @@ Fluxo operacional atual:
 
 Seguranca do provider Evolution:
 
+- A Evolution API 2.3.6 local recebe texto com o payload plano
+  `{ "number": "<destination>", "text": "<message>" }`. O provider nao tenta
+  automaticamente `textMessage` ou outro formato para evitar duplicidade.
 - `EVOLUTION_SAFE_MODE=true` e o padrao.
 - `EVOLUTION_ALLOWED_DESTINATIONS` e uma lista separada por virgulas; vazia
   bloqueia todos os envios reais.
@@ -175,7 +178,8 @@ Seguranca do provider Evolution:
 
 Teste isolado de uma mensagem Evolution:
 
-1. `pnpm evolution:test-message` executa dry-run por padrao.
+1. `corepack pnpm evolution:test-message` executa dry-run por padrao no Windows
+   sem exigir `pnpm` global.
 2. O comando rejeita CI, flags parecidas e qualquer argumento de destino ou
    mensagem.
 3. Exige provider Evolution, safe mode ativo, Scheduler desativado, exatamente
@@ -184,16 +188,20 @@ Teste isolado de uma mensagem Evolution:
    mascaramento e tratamento HTTP existentes.
 5. O dry-run cria provider e guard, exibe resumo seguro e encerra sem chamar
    `sendMessage`.
-6. O caminho futuro de envio exige a flag exata
-   `--confirm-one-real-message`, sem prompt ou timeout de confirmacao.
+6. O caminho de envio exige a flag exata `--confirm-one-real-message`, direta
+   ou apos um unico separador `--`, sem prompt ou timeout de confirmacao.
 7. A mensagem e fixa e nao usa produto, copy, link, hashtag, dispatch, pipeline
    ou banco.
 8. O modulo nao importa bootstrap do worker, BullMQ, Redis, Prisma, filas ou
    servicos da aplicacao.
+9. Timeout, erro de rede, HTTP 5xx ou resultado ambiguo proibem retry manual ou
+   automatico, pois o request pode ter sido aceito externamente.
 
-Credenciais ficam apenas no `.env` local nao versionado. A implementacao deste
-comando foi validada somente em dry-run e com providers/clientes HTTP injetados
-nos testes; nenhuma mensagem real foi enviada.
+Credenciais ficam apenas no `.env` local nao versionado. Na Task 13.4, a stack e
+a instancia local foram confirmadas como saudaveis/conectadas, mas o dry-run foi
+bloqueado porque a configuracao ignorada ainda selecionava `mock` e mantinha a
+allowlist vazia. Nenhuma mensagem real foi enviada e nenhum segredo foi
+versionado.
 
 ## Infraestrutura local da Evolution API
 
