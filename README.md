@@ -216,90 +216,16 @@ Placeholders suportados pelo `TemplateEngine`: `{{nome}}`, `{{preco}}`, `{{desco
 
 - Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
 
-## Pipeline Engine
 
-O Pipeline Engine executa, em memória e de forma síncrona, o fluxo completo desta sprint:
-
-1. Hunter busca produtos via provider injetado.
-2. Produtos encontrados são persistidos ou atualizados em `ProductLead`.
-3. Score Engine pontua os produtos persistidos.
-4. Produtos com `score >= 70` são selecionados como aprovados.
-5. Copy Engine gera copies locais por template para os produtos aprovados.
-6. Cada copy é persistida em `GeneratedCopy`.
-7. Um relatório consolidado da execução é retornado.
-
-Execute manualmente pela API:
 
 ```bash
 curl -X POST http://localhost:3333/pipeline/run \
   -H 'Content-Type: application/json' \
-  -d '{"categoria":"Eletrônicos"}'
+
 ```
 
 Resposta esperada:
 
 ```json
 {
-  "produtosEncontrados": 5,
-  "produtosPontuados": 40,
-  "produtosAprovados": 3,
-  "copiesGeradas": 3,
-  "tempoExecucao": "30ms"
-}
-```
 
-O endpoint aceita os mesmos filtros opcionais do Hunter: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `notaMin`, `vendidosMin` e `comissaoMin`.
-
-Logs emitidos por etapa:
-
-- `Hunter iniciado...`
-- `Hunter finalizado...`
-- `Score iniciado...`
-- `Score finalizado...`
-- `Copy iniciado...`
-- `Copy finalizado...`
-- `Pipeline finalizado.`
-
-O Pipeline Engine não usa filas, BullMQ, cron, WhatsApp, OpenAI ou Analytics. A execução atual é intencionalmente síncrona e em memória através de um serviço.
-
-## Relatório da Sprint - Pipeline Engine
-
-### Arquivos criados
-
-- `apps/api/src/pipeline-service.ts`: serviço orquestrador do fluxo Hunter → persistência → Score → persistência → aprovação por score → Copy → persistência de `GeneratedCopy` → relatório.
-- `apps/api/test/pipeline.test.ts`: cobertura dos cenários de pipeline completo, nenhum produto, todos reprovados, todos aprovados e falhas em Hunter, Score e Copy.
-
-### Arquivos modificados
-
-- `apps/api/src/app.ts`: registro do endpoint `POST /pipeline/run`, validação dos filtros e tratamento de erros da rota.
-- `README.md`: documentação do Pipeline Engine e relatório desta sprint.
-
-### Testes
-
-- Pipeline completo via endpoint `POST /pipeline/run`.
-- Nenhum produto encontrado.
-- Todos os produtos reprovados por `score < 70`.
-- Todos os produtos aprovados por `score >= 70`.
-- Erro no Hunter.
-- Erro no Score.
-- Erro no Copy.
-
-### Decisões
-
-- O corte de aprovação foi fixado em `score >= 70`, conforme o objetivo da sprint.
-- O pipeline reutiliza `HunterService`, `ScoreService` e `CopyService` para manter uma única regra de persistência e geração por etapa.
-- A seleção de aprovados consulta produtos já persistidos com score atualizado, preservando o comportamento atual do Score Engine.
-- Erros de serviços internos preservam seus códigos (`HUNTER_RUN_FAILED`, `SCORE_RUN_FAILED`, `COPY_GENERATE_FAILED`) e erros inesperados são encapsulados como `PIPELINE_RUN_FAILED`.
-
-### Débito técnico
-
-- O pipeline ainda é síncrono e em memória; não há controle de concorrência, retries, idempotência por execução ou histórico formal de runs.
-- O Score Engine pontua todos os produtos persistidos, não apenas os encontrados na execução atual.
-- Não há migração Prisma formal; o projeto segue o padrão atual de atualização direta do schema.
-
-### Pendências
-
-- Implementar filas/BullMQ em sprint futura, quando solicitado.
-- Implementar cron/agendamento em sprint futura, quando solicitado.
-- Implementar integrações reais com Shopee, OpenAI, WhatsApp e Analytics em sprints separadas.
-- Criar histórico/auditoria de execuções do pipeline quando o modelo de dados for definido.
