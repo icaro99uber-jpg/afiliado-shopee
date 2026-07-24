@@ -283,7 +283,7 @@ Destinos inativos permanecem cadastrados, mas não recebem dispatch no pipeline.
 - `product-pipeline` / job `pipeline-product`: orquestra Hunter, Score, Copy e criação dos dispatches.
 - `whatsapp-dispatch` / job `whatsapp-dispatch`: payload `{ "dispatchId": "..." }`, com `attempts: 3`, backoff exponencial, `removeOnComplete` e `removeOnFail` limitados.
 
-### Scheduler preparado
+### Scheduler do pipeline
 
 `SchedulerConfig` e `PipelineScheduler` definem o contrato para agendamentos do
 pipeline sem depender de BullMQ. O adaptador `BullMqPipelineScheduler` usa a
@@ -298,9 +298,17 @@ SCHEDULER_TIMEZONE=America/Sao_Paulo
 ```
 
 O Scheduler permanece desativado por padrao. Cron e timezone so sao exigidos
-quando `SCHEDULER_ENABLED=true`. Nesta etapa o worker nao inicia o adaptador e
-nenhum agendamento e criado automaticamente; o pipeline continua manual. A
-proxima task conectara essa arquitetura ao bootstrap do worker.
+quando `SCHEDULER_ENABLED=true`. O bootstrap do worker cria uma unica instancia
+do adaptador usando a conexao e a fila `product-pipeline` compartilhadas. Quando
+habilitado, registra o job recorrente com ID estavel; quando desabilitado,
+remove somente esse agendamento conhecido para evitar que um cron antigo
+permaneca ativo.
+
+O worker so inicia os consumidores depois de confirmar o estado configurado do
+Scheduler. Falhas de registro ou remocao interrompem o bootstrap. O shutdown
+fecha workers, fila e conexao, mas preserva o agendamento registrado. O endpoint
+manual `POST /pipeline/run` continua disponivel, e o Scheduler nunca chama o
+`PipelineService` diretamente.
 
 ### Provider mock
 

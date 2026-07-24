@@ -8,7 +8,10 @@ import {
   type HttpClient,
   type WhatsAppProvider,
 } from '@shopee-auto-affiliate-ai/providers';
-import { JOB_NAMES } from '@shopee-auto-affiliate-ai/queue';
+import {
+  DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+  JOB_NAMES,
+} from '@shopee-auto-affiliate-ai/queue';
 
 import { processWhatsAppDispatchJob, startWorker } from '../src/index';
 
@@ -19,6 +22,28 @@ const baseEnv = {
 };
 
 const logger = { info: vi.fn(), error: vi.fn() };
+
+const createInfrastructure = () => ({
+  connection: {} as never,
+  scheduler: {
+    register: vi.fn(),
+    remove: vi.fn(async (jobId: string) => ({
+      jobId,
+      status: 'not-registered' as const,
+      cronExpression: null,
+      timezone: null,
+      nextRunAt: null,
+    })),
+    getState: vi.fn(),
+  },
+  close: vi.fn(async () => undefined),
+});
+
+const createWorkerRuntime = () => ({
+  productPipelineWorker: {} as never,
+  whatsappDispatchWorker: {} as never,
+  close: vi.fn(async () => undefined),
+});
 
 const createDispatch = (status = 'PENDING') => ({
   id: 'dispatch-1',
@@ -70,37 +95,49 @@ const processDispatch = (
     whatsAppProvider,
   });
 
-const bootstrapProvider = (
+const bootstrapProvider = async (
   config: AppEnv,
   providerFactoryOptions: { httpClient?: HttpClient } = {},
 ) => {
   let provider: WhatsAppProvider | undefined;
+  const infrastructure = createInfrastructure();
   const workerFactory = vi.fn((_redisUrl, options) => {
     provider = options.whatsAppProvider;
-    return {} as never;
+    return createWorkerRuntime();
   });
 
-  startWorker(config, {
+  await startWorker(config, {
     logger,
     providerFactoryOptions,
+    infrastructureFactory: () => infrastructure,
     workerFactory,
   });
 
-  return { provider: provider as WhatsAppProvider, workerFactory };
+  return {
+    provider: provider as WhatsAppProvider,
+    workerFactory,
+    infrastructure,
+  };
 };
 
 describe('WhatsApp provider worker bootstrap', () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it('inicia em mock por padrao e registra a fila sem chamar HTTP', () => {
+  it('inicia em mock por padrao e registra a fila sem chamar HTTP', async () => {
     const httpClient = vi.fn();
     const config = loadConfig(baseEnv);
-    const { provider, workerFactory } = bootstrapProvider(config, {
-      httpClient,
-    });
+    const { provider, workerFactory, infrastructure } = await bootstrapProvider(
+      config,
+      {
+        httpClient,
+      },
+    );
 
     expect(provider).toBeInstanceOf(MockWhatsAppProvider);
     expect(workerFactory).toHaveBeenCalledTimes(1);
+    expect(infrastructure.scheduler.remove).toHaveBeenCalledWith(
+      DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+    );
     expect(httpClient).not.toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledWith(
       {
@@ -112,7 +149,7 @@ describe('WhatsApp provider worker bootstrap', () => {
     );
   });
 
-  it('seleciona mock somente por WHATSAPP_PROVIDER mesmo com dados Evolution', () => {
+  it('seleciona mock somente por WHATSAPP_PROVIDER mesmo com dados Evolution', async () => {
     const config = loadConfig({
       ...baseEnv,
       WHATSAPP_PROVIDER: 'mock',
@@ -121,12 +158,12 @@ describe('WhatsApp provider worker bootstrap', () => {
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
     });
 
-    expect(bootstrapProvider(config).provider).toBeInstanceOf(
+    expect((await bootstrapProvider(config)).provider).toBeInstanceOf(
       MockWhatsAppProvider,
     );
   });
 
-  it('registra configuracao Evolution sem API key ou credenciais da URL', () => {
+  it('registra configuracao Evolution sem API key ou credenciais da URL', async () => {
     const apiKey = 'test-only-api-key';
     const config = loadConfig({
       ...baseEnv,
@@ -136,7 +173,7 @@ describe('WhatsApp provider worker bootstrap', () => {
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
     });
 
-    bootstrapProvider(config, { httpClient: vi.fn() });
+    await bootstrapProvider(config, { httpClient: vi.fn() });
 
     expect(logger.info).toHaveBeenCalledWith(
       {
@@ -180,12 +217,14 @@ describe('WhatsApp provider worker bootstrap', () => {
     const config = loadConfig(baseEnv);
     let provider: WhatsAppProvider | undefined;
 
-    startWorker(config, {
+    const infrastructure = createInfrastructure();
+    await startWorker(config, {
       logger,
       providerFactory,
+      infrastructureFactory: () => infrastructure,
       workerFactory: (_redisUrl, options) => {
         provider = options.whatsAppProvider;
-        return {} as never;
+        return createWorkerRuntime();
       },
     });
 
@@ -201,7 +240,7 @@ describe('whatsapp-dispatch worker provider integration', () => {
 
   it('processa dispatch em modo mock sem chamar fetch', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const { provider } = bootstrapProvider(loadConfig(baseEnv));
+    const { provider } = await bootstrapProvider(loadConfig(baseEnv));
 
     await expect(
       processDispatch(createPrismaMock(), provider),
@@ -225,7 +264,7 @@ describe('whatsapp-dispatch worker provider integration', () => {
       EVOLUTION_API_KEY: 'test-only-api-key',
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
     });
-    const { provider } = bootstrapProvider(config, { httpClient });
+    const { provider } = await bootstrapProvider(config, { httpClient });
 
     expect(provider).toBeInstanceOf(EvolutionApiWhatsAppProvider);
     await expect(
@@ -250,7 +289,7 @@ describe('whatsapp-dispatch worker provider integration', () => {
       EVOLUTION_API_KEY: 'test-only-api-key',
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
     });
-    const { provider } = bootstrapProvider(config, { httpClient });
+    const { provider } = await bootstrapProvider(config, { httpClient });
 
     await expect(
       processDispatch(createPrismaMock(), provider),

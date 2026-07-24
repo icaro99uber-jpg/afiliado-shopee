@@ -29,8 +29,8 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Dashboard: Next.js App Router em `apps/dashboard`.
 - Banco: Prisma Client e schema PostgreSQL em `packages/database`.
 - Filas: BullMQ/Redis em `packages/queue`.
-- Scheduler: contratos e adaptador BullMQ em `packages/queue`, desativados e
-  ainda sem conexao com o bootstrap do worker.
+- Scheduler: contratos e adaptador BullMQ em `packages/queue`, compostos uma
+  unica vez no bootstrap do worker e desativados por padrao.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
@@ -92,7 +92,7 @@ global entre paginas.
 
 ## Scheduler
 
-O modulo de Scheduler prepara o agendamento recorrente do pipeline sem executar
+O modulo de Scheduler oferece o agendamento recorrente do pipeline sem executar
 `PipelineService` diretamente. `SchedulerConfig` e `PipelineScheduler` formam o
 contrato independente de BullMQ. `BullMqPipelineScheduler` usa a API de Job
 Schedulers da fila `product-pipeline` para registrar apenas jobs
@@ -104,10 +104,15 @@ Configuracao opcional:
 - `SCHEDULER_CRON`, exigido e validado somente quando habilitado;
 - `SCHEDULER_TIMEZONE`, exigido como timezone IANA somente quando habilitado.
 
-Nesta etapa nenhum cron e registrado automaticamente. O bootstrap do worker nao
-instancia nem chama o adaptador, portanto o pipeline continua manual. A proxima
-task podera conectar o Scheduler ao bootstrap usando `loadConfig`, sem duplicar
-a logica de processamento existente.
+O bootstrap do worker cria uma unica instancia do Scheduler com a conexao e a
+fila `product-pipeline` compartilhadas. Quando habilitado, registra o job com o
+cron e timezone validados; quando desabilitado, remove apenas o ID estavel
+conhecido. Os consumidores so iniciam depois que essa operacao termina com
+sucesso, e qualquer falha interrompe o bootstrap com log estruturado seguro.
+
+O encerramento fecha workers, fila e conexao sem remover o agendamento. O fluxo
+manual por `POST /pipeline/run` permanece disponivel, e tanto o job manual quanto
+o recorrente reutilizam o mesmo processor `pipeline-product`.
 
 Regras de seguranca do dashboard:
 
@@ -118,7 +123,7 @@ Regras de seguranca do dashboard:
 
 Fluxo operacional atual:
 
-1. `POST /pipeline/run` enfileira um job `pipeline-product`.
+1. `POST /pipeline/run` ou o Scheduler enfileira um job `pipeline-product`.
 2. O worker consome `product-pipeline`.
 3. `PipelineService` executa Hunter, Score e Copy.
 4. Produtos com `score >= 70` sao considerados aprovados.
@@ -127,8 +132,7 @@ Fluxo operacional atual:
 7. O bootstrap do worker cria uma unica instancia do provider configurado e a injeta no `SenderService`.
 8. `WHATSAPP_PROVIDER=mock` permanece como padrao; `evolution` exige configuracao completa e explicita.
 
-O fluxo acima continua sendo iniciado manualmente; a arquitetura do Scheduler
-nao altera esse comportamento.
+O fluxo manual continua disponivel mesmo quando o Scheduler esta habilitado.
 
 Regra de dependencia:
 

@@ -223,18 +223,25 @@ Dependencias:
 - `BullMqPipelineScheduler` e fila `product-pipeline` em
   `packages/queue/src/index.ts`.
 - Configuracao validada por `loadConfig` em `packages/config`.
+- Composicao unica em `startWorker`, usando a conexao e a fila compartilhadas.
 
-Restricoes atuais:
+Comportamento operacional:
 
 - `SCHEDULER_ENABLED` e `false` por padrao.
-- O worker nao instancia nem inicia o Scheduler nesta etapa.
-- Nao ha cron ativo, Redis real em testes ou chamada direta a
-  `PipelineService`.
+- Quando habilitado, o bootstrap registra o job recorrente com cron, timezone e
+  ID estavel antes de iniciar os consumidores.
+- Quando desabilitado, remove somente o agendamento conhecido e tolera sua
+  inexistencia.
+- Falha de registro ou remocao interrompe o bootstrap para evitar estado
+  desconhecido.
+- O shutdown fecha workers, fila e conexao sem remover o agendamento.
+- O Scheduler nao chama `PipelineService`; apenas enfileira `pipeline-product`.
+- Testes usam doubles em memoria, sem Redis, cron ou HTTP reais.
 
 Proximos passos previstos:
 
-- Conectar o Scheduler ao bootstrap do worker em task dedicada, mantendo uma
-  unica implementacao do processamento em `pipeline-product`.
+- Adicionar observabilidade operacional do estado do agendamento em task
+  dedicada, sem duplicar o processamento de `pipeline-product`.
 
 ## Analytics
 
