@@ -1,5 +1,4 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type { HunterProvider } from '@shopee-auto-affiliate-ai/providers';
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
@@ -10,6 +9,12 @@ import {
 import { HunterService } from './hunter-service';
 import { ScoreService } from './score-service';
 import { CopyService } from './copy-service';
+import type {
+  GeneratedCopyRepository,
+  ProductRepository,
+  WhatsAppDestinationRepository,
+  WhatsAppDispatchRepository,
+} from './repositories';
 
 export type PipelineRunResult = {
   produtosEncontrados: number;
@@ -30,19 +35,16 @@ type DispatchQueue = {
 
 type PipelineServiceOptions = {
   provider: HunterProvider;
-  prisma: DatabaseClient;
+  products: ProductRepository;
+  generatedCopies: GeneratedCopyRepository;
+  whatsappDestinations: WhatsAppDestinationRepository;
+  whatsappDispatches: WhatsAppDispatchRepository;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
   hunterService?: Pick<HunterService, 'run'>;
   scoreService?: Pick<ScoreService, 'run'>;
   copyService?: Pick<CopyService, 'generate'>;
   whatsappDispatchQueue?: DispatchQueue;
 };
-
-const isUniqueConstraintError = (error: unknown) =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: string }).code === 'P2002';
 
 export class PipelineService {
   constructor(private readonly options: PipelineServiceOptions) {}
@@ -59,72 +61,60 @@ export class PipelineService {
         this.options.hunterService ??
         new HunterService({
           provider: this.options.provider,
-          prisma: this.options.prisma,
+          products: this.options.products,
           logger: this.options.logger,
         });
       const score =
         this.options.scoreService ??
         new ScoreService({
-          prisma: this.options.prisma,
+          products: this.options.products,
           logger: this.options.logger,
         });
       const copy =
         this.options.copyService ??
         new CopyService({
-          prisma: this.options.prisma,
+          products: this.options.products,
+          generatedCopies: this.options.generatedCopies,
           logger: this.options.logger,
         });
 
       const hunterResult = await hunter.run(filters);
       const scoreResult = await score.run();
-      const approvedProducts = await this.options.prisma.productLead.findMany({
-        where: { score: { gte: 70 } },
-      });
-      const activeDestinations = this.options.prisma.whatsAppDestination
-        ? await this.options.prisma.whatsAppDestination.findMany({
-            where: { active: true },
-          })
-        : [];
+      const approvedProducts = await this.options.products.listApproved(70);
+      const activeDestinations =
+        await this.options.whatsappDestinations.listActive();
 
       let copiesGeradas = 0;
       let enviosEnfileirados = 0;
 
       for (const product of approvedProducts) {
-        const generatedCopy = (await copy.generate(product.id)) as {
+        const generatedCopy = (await copy.generate(product.id)) as unknown as {
           id: string;
         };
         copiesGeradas += 1;
 
         for (const destination of activeDestinations) {
-          try {
-            if (!this.options.prisma.whatsAppDispatch) continue;
-            const dispatch = await this.options.prisma.whatsAppDispatch.create({
-              data: {
-                productId: product.id,
+          const dispatch = await this.options.whatsappDispatches.createPending({
+            productId: product.id,
+            generatedCopyId: generatedCopy.id,
+            destinationId: destination.id,
+          });
+          if (!dispatch) {
+            this.options.logger.info(
+              {
+                event: 'pipeline.dispatch.duplicate',
                 generatedCopyId: generatedCopy.id,
                 destinationId: destination.id,
-                status: 'PENDING',
               },
-            });
-            await this.options.whatsappDispatchQueue?.add(
-              JOB_NAMES.whatsappDispatch,
-              { dispatchId: dispatch.id },
+              'Duplicate WhatsApp dispatch skipped',
             );
-            enviosEnfileirados += 1;
-          } catch (error) {
-            if (isUniqueConstraintError(error)) {
-              this.options.logger.info(
-                {
-                  event: 'pipeline.dispatch.duplicate',
-                  generatedCopyId: generatedCopy.id,
-                  destinationId: destination.id,
-                },
-                'Duplicate WhatsApp dispatch skipped',
-              );
-              continue;
-            }
-            throw error;
+            continue;
           }
+          await this.options.whatsappDispatchQueue?.add(
+            JOB_NAMES.whatsappDispatch,
+            { dispatchId: dispatch.id },
+          );
+          enviosEnfileirados += 1;
         }
       }
 

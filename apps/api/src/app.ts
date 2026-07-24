@@ -13,11 +13,14 @@ import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import {
   createProductPipelineQueue,
   createRedisConnection,
+  JOB_NAMES,
+  type JobsOptions,
   type PipelineProductJob,
 } from '@shopee-auto-affiliate-ai/queue';
-import { HunterService } from './hunter-service';
-import { ScoreService } from './score-service';
-import { CopyService } from './copy-service';
+import {
+  createApplicationServices,
+  createPrismaRepositories,
+} from './application-services';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -27,9 +30,9 @@ type BuildAppOptions = {
     add: (
       name: string,
       data: PipelineProductJob,
-      opts?: unknown,
+      opts?: JobsOptions,
     ) => Promise<{ id?: string | number }>;
-    getJob?: (id: string) => Promise<PipelineJobLike | null>;
+    getJob?: (id: string) => Promise<PipelineJobLike | null | undefined>;
     close?: () => Promise<void>;
   };
   redisUrl?: string;
@@ -59,6 +62,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   const app = Fastify({ logger: options.logger ?? true });
   const prisma = options.prisma ?? createPrismaClient();
   const hunterProvider = options.hunterProvider ?? new MockShopeeProvider();
+  const repositories = createPrismaRepositories(prisma);
   let redisConnection: ReturnType<typeof createRedisConnection> | undefined;
   let pipelineQueue = options.pipelineQueue;
   const getPipelineQueue = () => {
@@ -68,8 +72,14 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       );
       pipelineQueue = createProductPipelineQueue(redisConnection);
     }
-    return pipelineQueue;
+    return pipelineQueue as NonNullable<typeof pipelineQueue>;
   };
+  const getApplicationServices = () =>
+    createApplicationServices({
+      repositories,
+      hunterProvider,
+      logger: app.log,
+    });
 
   await app.register(cors, { origin: true });
 
@@ -89,12 +99,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         comissaoMin: parseNumberFilter(body.comissaoMin, 'comissaoMin'),
       };
 
-      const service = new HunterService({
-        provider: hunterProvider,
-        prisma,
-        logger: app.log,
-      });
-      return await service.run(filters);
+      return await getApplicationServices().hunter.run(filters);
     } catch (error) {
       request.log.error(
         { event: 'hunter.route.failed', error },
@@ -114,8 +119,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   app.post('/score/run', async (request, reply) => {
     try {
-      const service = new ScoreService({ prisma, logger: app.log });
-      return await service.run();
+      return await getApplicationServices().score.run();
     } catch (error) {
       request.log.error(
         { event: 'score.route.failed', error },
@@ -141,8 +145,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         });
       }
 
-      const service = new CopyService({ prisma, logger: app.log });
-      return await service.generate(body.productId);
+      return await getApplicationServices().copy.generate(body.productId);
     } catch (error) {
       request.log.error(
         { event: 'copy.route.failed', error },
@@ -162,8 +165,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   app.post('/pipeline/run', async (request, reply) => {
     const body = (request.body ?? {}) as PipelineProductJob;
-    const job = await getPipelineQueue().add(
-      'pipeline-product',
+    const queue = getPipelineQueue();
+    const job = await queue.add(
+      JOB_NAMES.pipelineProduct,
       { filters: body.filters },
       undefined,
     );
@@ -172,7 +176,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   app.get('/pipeline/jobs/:id', async (request, reply) => {
     const params = request.params as { id: string };
-    const job = await getPipelineQueue().getJob?.(params.id);
+    const queue = getPipelineQueue();
+    const job = await queue.getJob?.(params.id);
     if (!job)
       return reply
         .status(404)
@@ -216,17 +221,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           message: 'destination é obrigatório',
         });
     }
-    return prisma.whatsAppDestination.create({
-      data: {
-        name: body.name.trim(),
-        destination: body.destination.trim(),
-        active: typeof body.active === 'boolean' ? body.active : true,
-      },
+    return repositories.whatsappDestinations.create({
+      name: body.name.trim(),
+      destination: body.destination.trim(),
+      active: typeof body.active === 'boolean' ? body.active : true,
     });
   });
 
   app.get('/whatsapp/destinations', async () =>
-    prisma.whatsAppDestination.findMany({ orderBy: { createdAt: 'desc' } }),
+    repositories.whatsappDestinations.list(),
   );
 
   app.patch('/whatsapp/destinations/:id', async (request, reply) => {
@@ -270,12 +273,11 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           });
       data.active = body.active;
     }
-    try {
-      return await prisma.whatsAppDestination.update({
-        where: { id: params.id },
-        data,
-      });
-    } catch {
+    const updated = await repositories.whatsappDestinations.update(
+      params.id,
+      data,
+    );
+    if (!updated) {
       return reply
         .status(404)
         .send({
@@ -283,6 +285,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           message: 'Destino não encontrado',
         });
     }
+    return updated;
   });
 
   app.get('/whatsapp/dispatches', async (request) => {
@@ -291,23 +294,17 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       destinationId?: string;
       productId?: string;
     };
-    return prisma.whatsAppDispatch.findMany({
-      where: {
-        status: query.status,
-        destinationId: query.destinationId,
-        productId: query.productId,
-      },
-      include: { product: true, generatedCopy: true, destination: true },
-      orderBy: { createdAt: 'desc' },
+    return repositories.whatsappDispatches.list({
+      status: query.status,
+      destinationId: query.destinationId,
+      productId: query.productId,
     });
   });
 
   app.get('/whatsapp/dispatches/:id', async (request, reply) => {
     const params = request.params as { id: string };
-    const dispatch = await prisma.whatsAppDispatch.findUnique({
-      where: { id: params.id },
-      include: { product: true, generatedCopy: true, destination: true },
-    });
+    const dispatch =
+      await repositories.whatsappDispatches.findByIdWithDetails(params.id);
     if (!dispatch)
       return reply
         .status(404)

@@ -1,6 +1,9 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import type {
+  GeneratedCopyRepository,
+  ProductRepository,
+} from './repositories';
 
 export type CopyProduct = {
   id: string;
@@ -28,7 +31,8 @@ type CopyTemplate = {
 };
 
 export type CopyServiceOptions = {
-  prisma: Pick<DatabaseClient, 'productLead' | 'generatedCopy'>;
+  products: ProductRepository;
+  generatedCopies: GeneratedCopyRepository;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 };
 
@@ -152,11 +156,14 @@ export class CopyService {
     this.options.logger.info({ event: 'copy.generate.started', productId }, 'Copy generation started');
 
     try {
-      const product = await this.options.prisma.productLead.findUnique({ where: { id: productId } });
+      const product = await this.options.products.findById(productId);
       if (!product) throw new AppError('Produto não encontrado', 'PRODUCT_NOT_FOUND');
 
       const copy = this.generateFromProduct(product);
-      const persistedCopy = await this.options.prisma.generatedCopy.create({ data: { productId, ...copy } });
+      const persistedCopy = await this.options.generatedCopies.create({
+        productId,
+        ...copy,
+      });
 
       this.options.logger.info({ event: 'copy.generate.completed', productId }, 'Copy generation completed');
       return persistedCopy;

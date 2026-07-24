@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MockWhatsAppProvider } from '../../../packages/providers/src';
+import { MockWhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import {
   buildWhatsAppPublicMessage,
   SenderService,
 } from '../src/sender-service';
+import { PrismaWhatsAppDispatchRepository } from '../src/prisma-repositories';
 
 const logger = { info: vi.fn(), error: vi.fn() };
 const dispatch = {
@@ -19,23 +20,30 @@ const dispatch = {
   },
   destination: { destination: 'mock-group-01' },
   product: { comissao: 0.2 },
+  status: 'PENDING',
 };
 
-const prismaMock = () => ({
+const prismaMock = (dispatchData = dispatch) => ({
   whatsAppDispatch: {
-    findUnique: vi.fn(async () => dispatch),
+    findUnique: vi.fn(async () => dispatchData),
     update: vi.fn(async ({ data }) => ({ ...dispatch, ...data })),
   },
 });
 
+const createService = (
+  prisma = prismaMock(),
+  provider = new MockWhatsAppProvider(),
+) =>
+  new SenderService({
+    dispatches: new PrismaWhatsAppDispatchRepository(prisma as never),
+    provider,
+    logger,
+  });
+
 describe('SenderService', () => {
   it('altera PENDING para SENT e incrementa attemptCount', async () => {
     const prisma = prismaMock();
-    const result = await new SenderService({
-      prisma: prisma as never,
-      provider: new MockWhatsAppProvider(),
-      logger,
-    }).sendDispatch('dispatch-1');
+    const result = await createService(prisma).sendDispatch('dispatch-1');
     expect(prisma.whatsAppDispatch.update).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -55,7 +63,7 @@ describe('SenderService', () => {
     provider.simulateFailure('provider indisponível');
     await expect(
       new SenderService({
-        prisma: prisma as never,
+        dispatches: new PrismaWhatsAppDispatchRepository(prisma as never),
         provider,
         logger,
       }).sendDispatch('dispatch-1'),
@@ -80,5 +88,33 @@ describe('SenderService', () => {
       'comissão de afiliado',
     );
     expect(message).not.toContain('0.2');
+  });
+
+  it('permite retry de FAILED para SENT', async () => {
+    const prisma = prismaMock({ ...dispatch, status: 'FAILED' });
+    const result = await createService(prisma).sendDispatch('dispatch-1');
+
+    expect(prisma.whatsAppDispatch.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'PENDING',
+          attemptCount: { increment: 1 },
+        }),
+      }),
+    );
+    expect(result).toMatchObject({ status: 'SENT' });
+  });
+
+  it('nÃ£o reenvia dispatch SENT', async () => {
+    const prisma = prismaMock({ ...dispatch, status: 'SENT' });
+    const provider = new MockWhatsAppProvider();
+    const result = await createService(prisma, provider).sendDispatch(
+      'dispatch-1',
+    );
+
+    expect(result).toMatchObject({ status: 'SENT' });
+    expect(provider.sentMessages).toHaveLength(0);
+    expect(prisma.whatsAppDispatch.update).not.toHaveBeenCalled();
   });
 });

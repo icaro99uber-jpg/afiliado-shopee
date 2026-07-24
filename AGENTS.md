@@ -4,6 +4,15 @@
 
 Este documento descreve os agentes e componentes de orquestracao atuais do projeto. O estado atual usa implementacoes locais e mocks para preservar contratos sem executar integracoes reais com Shopee, OpenAI, Evolution API ou WhatsApp.
 
+## Camadas de aplicacao e persistencia
+
+- Servicos de aplicacao: `HunterService`, `ScoreService`, `CopyService`, `SenderService` e `PipelineService`.
+- Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository` e `WhatsAppDispatchRepository`.
+- Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository` e `PrismaWhatsAppDispatchRepository`.
+- Composicao: `createApplicationServices` e `createPrismaRepositories` em `apps/api/src/application-services.ts`.
+
+Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
+
 ## Hunter
 
 Responsabilidade:
@@ -29,7 +38,8 @@ Dependencias:
 
 - `HunterService` em `apps/api/src/hunter-service.ts`.
 - `HunterProvider` e `MockShopeeProvider` em `packages/providers`.
-- Prisma via `packages/database`.
+- `ProductRepository`.
+- Adaptador Prisma apenas na composicao.
 - Tipos compartilhados em `packages/shared`.
 
 Proximos passos previstos:
@@ -61,7 +71,8 @@ Saidas:
 Dependencias:
 
 - `ScoreService` em `apps/api/src/score-service.ts`.
-- Prisma via `packages/database`.
+- `ProductRepository`.
+- Adaptador Prisma apenas na composicao.
 - Pesos matematicos locais.
 - Testes de score em `apps/api/test/score.test.ts` e `packages/agents/src/score.test.ts`.
 
@@ -96,7 +107,8 @@ Saidas:
 Dependencias:
 
 - `CopyService` e `TemplateEngine` em `apps/api/src/copy-service.ts`.
-- Prisma via `packages/database`.
+- `ProductRepository`.
+- `GeneratedCopyRepository`.
 - Modelo `GeneratedCopy`.
 - Testes de copy em `apps/api/test/copy.test.ts`.
 
@@ -132,6 +144,7 @@ Dependencias:
 
 - `SenderService` em `apps/api/src/sender-service.ts`.
 - `MockWhatsAppProvider` em `packages/providers`.
+- `WhatsAppDispatchRepository`.
 - Fila `whatsapp-dispatch` em `packages/queue`.
 - Worker em `apps/worker`.
 - Modelos `WhatsAppDestination` e `WhatsAppDispatch`.
@@ -168,9 +181,10 @@ Dependencias:
 
 - `PipelineService` em `apps/api/src/pipeline-service.ts`.
 - `HunterService`, `ScoreService` e `CopyService`.
+- `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository` e `WhatsAppDispatchRepository`.
 - BullMQ e Redis via `packages/queue`.
 - Worker em `apps/worker`.
-- Prisma via `packages/database`.
+- Adaptadores Prisma apenas na composicao.
 
 Proximos passos previstos:
 
