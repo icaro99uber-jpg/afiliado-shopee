@@ -2,6 +2,11 @@
 
 Monorepo com pnpm workspaces e Turborepo para automatizar um pipeline afiliado modular da Shopee com agentes de IA, filas e dashboard.
 
+## Documentacao
+
+- [CODEX.md](CODEX.md): guia de organizacao, arquitetura, convencoes e fluxo de desenvolvimento.
+- [AGENTS.md](AGENTS.md): responsabilidades, entradas, saidas, dependencias e proximos passos dos agentes.
+
 ## Estrutura
 
 - `apps/api`: API Fastify em TypeScript com `GET /health` e `POST /hunter/run`.
