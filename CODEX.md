@@ -49,7 +49,7 @@ frontend e configurada por `NEXT_PUBLIC_API_URL`, com padrao local seguro
 Paginas disponiveis:
 
 - `Visao geral`: health da API, metricas reais de Analytics, ultimo job da
-  sessao, atalhos e resumo de dispatches.
+  sessao, resumo somente leitura do Scheduler, atalhos e resumo de dispatches.
 - `Produtos`: visualizacao derivada de produtos presentes em dispatches, com
   busca, filtros, ordenacao e paginacao local.
 - `Pipeline`: dispara `POST /pipeline/run`, consulta `GET /pipeline/jobs/:id`
@@ -58,8 +58,8 @@ Paginas disponiveis:
   apenas durante a sessao da tela.
 - `WhatsApp`: lista/cria/edita destinos e lista/filtra/abre detalhes de
   dispatches existentes.
-- `Configuracoes`: mostra URL publica da API, estado de conexao, orientacoes de
-  mock/evolution e limites atuais.
+- `Configuracoes`: mostra URL publica da API, estado de conexao, detalhes
+  somente leitura do Scheduler, orientacoes de mock/evolution e limites atuais.
 
 Limitacoes por contrato atual:
 
@@ -123,8 +123,14 @@ BullMQ. A rota depende apenas da facade, nao cria filas por request e nao chama
 
 Se o estado nao puder ser consultado, a API retorna HTTP 503 com
 `SCHEDULER_STATUS_UNAVAILABLE` e mensagem publica segura. O fechamento da API
-encerra a fila e a conexao criadas pela aplicacao. O dashboard ainda nao consome
-esse endpoint e sera integrado em task posterior.
+encerra a fila e a conexao criadas pela aplicacao.
+
+O dashboard consulta `GET /scheduler` somente pela camada centralizada de API.
+A Visao geral mostra status e proxima execucao, enquanto Configuracoes apresenta
+enabled, status, jobId, fila, nome do job, cron, timezone e proxima execucao. As
+consultas possuem loading, erro e retry isolados; HTTP 503 nao e convertido em
+estado desativado. A interface nao possui campos para editar cron nem acoes para
+ativar ou desativar o Scheduler.
 
 Regras de seguranca do dashboard:
 

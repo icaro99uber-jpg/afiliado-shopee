@@ -2,18 +2,32 @@ import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { click, render } from '../test/render';
-import type { AnalyticsSnapshot } from '../lib/api';
+import type { AnalyticsSnapshot, SchedulerStatus } from '../lib/api';
 import OverviewPage from './page';
 
 const getAnalyticsMock = vi.fn();
 const getHealthMock = vi.fn();
+const getSchedulerStatusMock = vi.fn();
 const listDispatchesMock = vi.fn();
 
 vi.mock('../lib/api', () => ({
   getAnalytics: (...args: unknown[]) => getAnalyticsMock(...args),
   getHealth: (...args: unknown[]) => getHealthMock(...args),
+  getSchedulerStatus: (...args: unknown[]) =>
+    getSchedulerStatusMock(...args),
   listDispatches: (...args: unknown[]) => listDispatchesMock(...args),
 }));
+
+const schedulerStatus: SchedulerStatus = {
+  enabled: true,
+  status: 'registered',
+  jobId: 'scheduled-pipeline-product',
+  queue: 'product-pipeline',
+  jobName: 'pipeline-product',
+  cronExpression: '0 8 * * *',
+  timezone: 'America/Sao_Paulo',
+  nextRunAt: '2026-07-25T11:00:00.000Z',
+};
 
 const snapshot: AnalyticsSnapshot = {
   totalProducts: 40,
@@ -49,6 +63,7 @@ const flush = async () => {
 beforeEach(() => {
   getAnalyticsMock.mockReset();
   getHealthMock.mockReset().mockResolvedValue({ status: 'ok', service: 'api' });
+  getSchedulerStatusMock.mockReset().mockResolvedValue(schedulerStatus);
   listDispatchesMock.mockReset().mockResolvedValue([]);
   sessionStorage.clear();
 });
@@ -153,6 +168,76 @@ describe('OverviewPage Analytics', () => {
 
     expect(getAnalyticsMock).toHaveBeenCalledTimes(2);
     expect(metricValue(screen.container, 'Produtos encontrados')).toContain('40');
+    await screen.unmount();
+  });
+});
+
+describe('OverviewPage Scheduler', () => {
+  it.each([
+    ['disabled', 'Desativado'],
+    ['registered', 'Agendado'],
+    ['not-registered', 'Não registrado'],
+  ] as const)('exibe o estado %s como %s', async (status, label) => {
+    getAnalyticsMock.mockResolvedValue(snapshot);
+    getSchedulerStatusMock.mockResolvedValue({
+      ...schedulerStatus,
+      enabled: status !== 'disabled',
+      status,
+    });
+
+    const screen = await render(<OverviewPage />);
+    await flush();
+
+    expect(screen.container.textContent).toContain(label);
+    await screen.unmount();
+  });
+
+  it('formata a proxima execucao e trata valor nulo', async () => {
+    getAnalyticsMock.mockResolvedValue(snapshot);
+    const screen = await render(<OverviewPage />);
+    await flush();
+
+    expect(screen.container.textContent).toContain('25/07/2026');
+    expect(screen.container.textContent).toContain('08:00');
+    await screen.unmount();
+
+    getSchedulerStatusMock.mockResolvedValue({
+      ...schedulerStatus,
+      nextRunAt: null,
+    });
+    const nullScreen = await render(<OverviewPage />);
+    await flush();
+
+    expect(nullScreen.container.textContent).toContain('Não disponível');
+    await nullScreen.unmount();
+  });
+
+  it('isola erro do Scheduler e permite tentar novamente', async () => {
+    getAnalyticsMock.mockResolvedValue(snapshot);
+    getSchedulerStatusMock
+      .mockRejectedValueOnce(new Error('Estado do Scheduler indisponível'))
+      .mockResolvedValueOnce(schedulerStatus);
+
+    const screen = await render(<OverviewPage />);
+    await flush();
+
+    expect(screen.container.textContent).toContain(
+      'Estado do Scheduler indisponível',
+    );
+    expect(screen.container.textContent).not.toContain('Desativado');
+    expect(metricValue(screen.container, 'Produtos encontrados')).toContain(
+      '40',
+    );
+    expect(screen.container.textContent).toContain('Estado da API');
+
+    const retryButton = Array.from(
+      screen.container.querySelectorAll('button'),
+    ).find((button) => button.textContent?.includes('Tentar novamente'));
+    await click(retryButton as HTMLButtonElement);
+    await flush();
+
+    expect(getSchedulerStatusMock).toHaveBeenCalledTimes(2);
+    expect(screen.container.textContent).toContain('Agendado');
     await screen.unmount();
   });
 });

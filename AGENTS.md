@@ -247,7 +247,6 @@ Proximos passos previstos:
 
 - Adicionar observabilidade operacional do estado do agendamento em task
   dedicada, sem duplicar o processamento de `pipeline-product`.
-- Integrar o dashboard ao endpoint somente de leitura em task posterior.
 
 ## Analytics
 
@@ -299,7 +298,7 @@ Responsabilidade:
 Entradas:
 
 - `NEXT_PUBLIC_API_URL`, com padrao local `http://localhost:3333`.
-- Endpoints publicos de health, Analytics, pipeline, copy e WhatsApp.
+- Endpoints publicos de health, Analytics, Scheduler, pipeline, copy e WhatsApp.
 - Produtos derivados apenas de dispatches quando presentes.
 
 Saidas:
@@ -307,6 +306,8 @@ Saidas:
 - Paginas de visao geral, produtos, pipeline, copies, WhatsApp e configuracoes.
 - Sete metricas reais de `GET /analytics` na visao geral, sem metrica inventada
   para produtos pontuados.
+- Resumo do Scheduler na Visao geral e detalhes em Configuracoes por
+  `GET /scheduler`.
 - Estados de loading, empty, erro, sucesso e retry manual.
 - Polling moderado de jobs ativos com cleanup ao desmontar a tela.
 
@@ -325,9 +326,21 @@ Atualizacao de Analytics:
   pipeline, sem polling permanente e sem dependencia circular entre paginas.
 - Os dados nao possuem cache no dashboard.
 
+Consulta do Scheduler:
+
+- A camada centralizada usa `GET /scheduler`, sem `fetch` direto nas paginas.
+- `disabled`, `registered` e `not-registered` sao exibidos como Desativado,
+  Agendado e Nao registrado.
+- Data e hora usam formato pt-BR e timezone informado, com fallback seguro.
+- Loading, HTTP 503 e retry ficam isolados das outras secoes.
+- Configuracoes e somente leitura; cron e enabled permanecem no ambiente do
+  worker.
+
 Restricoes:
 
 - Nao acessar Prisma, Redis ou BullMQ diretamente pelo dashboard.
 - Nao expor `EVOLUTION_API_KEY` ou segredos no frontend.
+- Nao exibir Redis URL, stack ou detalhes internos do Scheduler.
+- Nao criar campos ou acoes para editar, ativar ou desativar Scheduler.
 - Nao criar acoes sem endpoint existente, como envio manual real ou
   reprocessamento manual de dispatch.

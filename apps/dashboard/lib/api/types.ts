@@ -17,6 +17,22 @@ export type AnalyticsSnapshot = {
   totalActiveDestinations: number;
 };
 
+export type SchedulerStatusValue =
+  | 'disabled'
+  | 'registered'
+  | 'not-registered';
+
+export type SchedulerStatus = {
+  enabled: boolean;
+  status: SchedulerStatusValue;
+  jobId: string;
+  queue: 'product-pipeline';
+  jobName: 'pipeline-product';
+  cronExpression: string | null;
+  timezone: string | null;
+  nextRunAt: string | null;
+};
+
 export type ApiErrorPayload = {
   error?: string;
   message?: string;
