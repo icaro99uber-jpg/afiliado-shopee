@@ -1,3 +1,4 @@
+export * from './analytics';
 export * from './client';
 export * from './copy';
 export * from './health';

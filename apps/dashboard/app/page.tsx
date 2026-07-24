@@ -1,13 +1,13 @@
 'use client';
 
-import { ClipboardList, PlayCircle, Plus } from 'lucide-react';
+import { ClipboardList, PlayCircle, Plus, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  getAnalytics,
   getHealth,
-  listDestinations,
   listDispatches,
-  type WhatsAppDestination,
+  type AnalyticsSnapshot,
   type WhatsAppDispatch,
 } from '../lib/api';
 import { EmptyState } from '../components/empty-state';
@@ -19,40 +19,55 @@ import { StatusBadge } from '../components/status-badge';
 
 type OverviewState = {
   apiOnline: boolean;
-  destinations: WhatsAppDestination[];
   dispatches: WhatsAppDispatch[];
 };
 
 export default function OverviewPage() {
   const [data, setData] = useState<OverviewState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [lastJobId, setLastJobId] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
+  const loadOverview = async () => {
+    setOverviewLoading(true);
+    setOverviewError(null);
     try {
-      const [health, destinations, dispatches] = await Promise.all([
+      const [health, dispatches] = await Promise.all([
         getHealth(),
-        listDestinations(),
         listDispatches(),
       ]);
       setData({
         apiOnline: health.status === 'ok',
-        destinations,
         dispatches,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro inesperado.');
+      setOverviewError(err instanceof Error ? err.message : 'Erro inesperado.');
     } finally {
-      setLoading(false);
+      setOverviewLoading(false);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+    try {
+      setAnalytics(await getAnalytics());
+    } catch (err) {
+      setAnalyticsError(
+        err instanceof Error ? err.message : 'Erro inesperado.',
+      );
+    } finally {
+      setAnalyticsLoading(false);
     }
   };
 
   useEffect(() => {
     setLastJobId(sessionStorage.getItem('lastPipelineJobId'));
-    void load();
+    void loadOverview();
+    void loadAnalytics();
   }, []);
 
   const dispatchSummary = useMemo(() => {
@@ -63,9 +78,6 @@ export default function OverviewPage() {
       sent: dispatches.filter((dispatch) => dispatch.status === 'SENT').length,
       failed: dispatches.filter((dispatch) => dispatch.status === 'FAILED')
         .length,
-      activeDestinations:
-        data?.destinations.filter((destination) => destination.active).length ??
-        0,
     };
   }, [data]);
 
@@ -94,54 +106,91 @@ export default function OverviewPage() {
         }
       />
 
-      {loading ? <LoadingState label="Carregando resumo operacional" /> : null}
-      {error ? <ErrorState message={error} onRetry={load} /> : null}
+      <section className="grid gap-4" aria-labelledby="analytics-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="analytics-heading" className="font-semibold text-slate-950">
+              Metricas operacionais
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Estado persistido no momento da consulta.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadAnalytics()}
+            disabled={analyticsLoading}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${analyticsLoading ? 'animate-spin' : ''}`}
+              aria-hidden="true"
+            />
+            Atualizar metricas
+          </button>
+        </div>
 
-      {data && !loading ? (
-        <>
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {analyticsLoading ? (
+          <LoadingState label="Carregando metricas operacionais" />
+        ) : null}
+        {analyticsError ? (
+          <ErrorState
+            title="Nao foi possivel carregar as metricas"
+            message={analyticsError}
+            onRetry={loadAnalytics}
+          />
+        ) : null}
+
+        {analytics && !analyticsLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Produtos encontrados"
-              value="—"
-              description="Nao ha endpoint publico de listagem ou metricas de produtos."
-            />
-            <MetricCard
-              title="Produtos pontuados"
-              value="—"
-              description="Sem endpoint agregado para score no estado atual."
+              value={analytics.totalProducts}
+              description="Produtos persistidos encontrados pelo Hunter."
             />
             <MetricCard
               title="Produtos aprovados"
-              value="—"
-              description="Aprovacao existe no pipeline, mas nao ha consulta agregada."
+              value={analytics.totalApprovedProducts}
+              description="Produtos com score igual ou superior a 70."
             />
             <MetricCard
               title="Copies geradas"
-              value="—"
-              description="A API gera copy manualmente, mas nao lista historico."
+              value={analytics.totalGeneratedCopies}
+              description="Copies persistidas pelo pipeline ou geracao manual."
             />
             <MetricCard
               title="Envios enfileirados"
-              value={dispatchSummary.pending}
+              value={analytics.totalQueuedDispatches}
               description="Dispatches com status PENDING."
             />
             <MetricCard
               title="Envios enviados"
-              value={dispatchSummary.sent}
+              value={analytics.totalSentDispatches}
               description="Dispatches com status SENT."
             />
             <MetricCard
               title="Envios com falha"
-              value={dispatchSummary.failed}
+              value={analytics.totalFailedDispatches}
               description="Dispatches com status FAILED."
             />
             <MetricCard
               title="Destinos ativos"
-              value={dispatchSummary.activeDestinations}
+              value={analytics.totalActiveDestinations}
               description="Destinos WhatsApp ativos cadastrados."
             />
-          </section>
+          </div>
+        ) : null}
+      </section>
 
+      {overviewLoading ? (
+        <LoadingState label="Carregando resumo operacional" />
+      ) : null}
+      {overviewError ? (
+        <ErrorState message={overviewError} onRetry={loadOverview} />
+      ) : null}
+
+      {data && !overviewLoading ? (
+        <>
           <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between gap-3">

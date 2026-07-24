@@ -226,12 +226,13 @@ Dependencias:
 Restricoes atuais:
 
 - O endpoint apenas delega a consulta ao `AnalyticsService`.
-- Nao possui cache nem integracao ou logica de dashboard.
+- Nao possui cache; cada consulta reflete o estado persistido naquele momento.
 - Nao cria tabelas, migracoes ou novos dados.
 
 Proximos passos previstos:
 
-- Integrar o dashboard ao endpoint em sprint futura dedicada.
+- Adicionar novas metricas somente quando o contrato do backend for ampliado em
+  sprint dedicada.
 
 ## Dashboard operacional
 
@@ -245,12 +246,14 @@ Responsabilidade:
 Entradas:
 
 - `NEXT_PUBLIC_API_URL`, com padrao local `http://localhost:3333`.
-- Endpoints publicos de health, pipeline, copy e WhatsApp.
+- Endpoints publicos de health, Analytics, pipeline, copy e WhatsApp.
 - Produtos derivados apenas de dispatches quando presentes.
 
 Saidas:
 
 - Paginas de visao geral, produtos, pipeline, copies, WhatsApp e configuracoes.
+- Sete metricas reais de `GET /analytics` na visao geral, sem metrica inventada
+  para produtos pontuados.
 - Estados de loading, empty, erro, sucesso e retry manual.
 - Polling moderado de jobs ativos com cleanup ao desmontar a tela.
 
@@ -261,6 +264,13 @@ Dependencias:
 - `lucide-react` para icones.
 - Camada centralizada em `apps/dashboard/lib/api`.
 - Testes Vitest/jsdom com fetch e funcoes da API mockados.
+
+Atualizacao de Analytics:
+
+- A consulta inicial e o retry afetam apenas a secao de metricas.
+- O botao `Atualizar metricas` permite uma nova consulta depois da conclusao do
+  pipeline, sem polling permanente e sem dependencia circular entre paginas.
+- Os dados nao possuem cache no dashboard.
 
 Restricoes:
 
