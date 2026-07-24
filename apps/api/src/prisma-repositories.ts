@@ -1,5 +1,6 @@
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
+  AnalyticsRepository,
   GeneratedCopyData,
   GeneratedCopyRecord,
   GeneratedCopyRepository,
@@ -17,12 +18,63 @@ import type {
   WhatsAppDispatchRepository,
   WhatsAppDispatchStatus,
 } from './repositories';
+import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 
 const isUniqueConstraintError = (error: unknown) =>
   typeof error === 'object' &&
   error !== null &&
   'code' in error &&
   (error as { code?: string }).code === 'P2002';
+
+export class PrismaAnalyticsRepository implements AnalyticsRepository {
+  constructor(
+    private readonly prisma: Pick<
+      DatabaseClient,
+      | 'productLead'
+      | 'generatedCopy'
+      | 'whatsAppDispatch'
+      | 'whatsAppDestination'
+    >,
+  ) {}
+
+  totalProducts(): Promise<number> {
+    return this.prisma.productLead.count();
+  }
+
+  totalApprovedProducts(): Promise<number> {
+    return this.prisma.productLead.count({
+      where: { score: { gte: APPROVED_PRODUCT_MIN_SCORE } },
+    });
+  }
+
+  totalGeneratedCopies(): Promise<number> {
+    return this.prisma.generatedCopy.count();
+  }
+
+  totalQueuedDispatches(): Promise<number> {
+    return this.prisma.whatsAppDispatch.count({
+      where: { status: 'PENDING' },
+    });
+  }
+
+  totalSentDispatches(): Promise<number> {
+    return this.prisma.whatsAppDispatch.count({
+      where: { status: 'SENT' },
+    });
+  }
+
+  totalFailedDispatches(): Promise<number> {
+    return this.prisma.whatsAppDispatch.count({
+      where: { status: 'FAILED' },
+    });
+  }
+
+  totalActiveDestinations(): Promise<number> {
+    return this.prisma.whatsAppDestination.count({
+      where: { active: true },
+    });
+  }
+}
 
 export class PrismaProductRepository implements ProductRepository {
   constructor(private readonly prisma: Pick<DatabaseClient, 'productLead'>) {}
@@ -78,9 +130,7 @@ export class PrismaProductRepository implements ProductRepository {
   }
 }
 
-export class PrismaGeneratedCopyRepository
-  implements GeneratedCopyRepository
-{
+export class PrismaGeneratedCopyRepository implements GeneratedCopyRepository {
   constructor(private readonly prisma: Pick<DatabaseClient, 'generatedCopy'>) {}
 
   async create(data: GeneratedCopyData): Promise<GeneratedCopyRecord> {
@@ -141,7 +191,9 @@ export class PrismaWhatsAppDestinationRepository
 export class PrismaWhatsAppDispatchRepository
   implements WhatsAppDispatchRepository
 {
-  constructor(private readonly prisma: Pick<DatabaseClient, 'whatsAppDispatch'>) {}
+  constructor(
+    private readonly prisma: Pick<DatabaseClient, 'whatsAppDispatch'>,
+  ) {}
 
   async createPending(
     data: WhatsAppDispatchCreateData,

@@ -6,9 +6,9 @@ Este documento descreve os agentes e componentes de orquestracao atuais do proje
 
 ## Camadas de aplicacao e persistencia
 
-- Servicos de aplicacao: `HunterService`, `ScoreService`, `CopyService`, `SenderService` e `PipelineService`.
-- Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository` e `WhatsAppDispatchRepository`.
-- Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository` e `PrismaWhatsAppDispatchRepository`.
+- Servicos de aplicacao: `HunterService`, `ScoreService`, `CopyService`, `SenderService`, `PipelineService` e `AnalyticsService`.
+- Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository`, `WhatsAppDispatchRepository` e `AnalyticsRepository`.
+- Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository`, `PrismaWhatsAppDispatchRepository` e `PrismaAnalyticsRepository`.
 - Composicao: `createApplicationServices` e `createPrismaRepositories` em `apps/api/src/application-services.ts`.
 
 Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
@@ -195,6 +195,43 @@ Proximos passos previstos:
 - Adicionar painel operacional para acompanhar jobs e dispatches.
 - Melhorar rastreabilidade entre produto, copy, destino e envio.
 - Separar integracoes reais em providers sem alterar o contrato publico do pipeline.
+
+## Analytics
+
+Responsabilidade:
+
+- Reunir contagens operacionais ja disponiveis nos modelos atuais.
+- Retornar um `AnalyticsSnapshot` sem expor Prisma ao servico de aplicacao.
+
+Entradas:
+
+- `AnalyticsRepository` injetado em `AnalyticsService`.
+- Produtos, copies, dispatches e destinos ja persistidos.
+
+Saidas:
+
+- Total de produtos e produtos aprovados com `score >= 70`.
+- Total de copies geradas.
+- Totais de dispatches `PENDING`, `SENT` e `FAILED`.
+- Total de destinos ativos.
+
+Dependencias:
+
+- `AnalyticsService` em `apps/api/src/analytics-service.ts`.
+- `AnalyticsRepository` e `AnalyticsSnapshot` em `apps/api/src/repositories.ts`.
+- `PrismaAnalyticsRepository` em `apps/api/src/prisma-repositories.ts`.
+- Factory de repositorios e servicos em `apps/api/src/application-services.ts`.
+
+Restricoes atuais:
+
+- Nao possui endpoint publico.
+- Nao possui cache nem logica de dashboard.
+- Nao cria tabelas, migracoes ou novos dados.
+
+Proximos passos previstos:
+
+- Expor o snapshot somente em sprint futura que defina contrato de endpoint.
+- Integrar o dashboard apenas depois da existencia desse endpoint publico.
 
 ## Dashboard operacional
 

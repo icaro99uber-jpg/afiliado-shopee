@@ -1,5 +1,27 @@
 import type { Product } from '@shopee-auto-affiliate-ai/shared';
 
+export const APPROVED_PRODUCT_MIN_SCORE = 70;
+
+export type AnalyticsSnapshot = {
+  totalProducts: number;
+  totalApprovedProducts: number;
+  totalGeneratedCopies: number;
+  totalQueuedDispatches: number;
+  totalSentDispatches: number;
+  totalFailedDispatches: number;
+  totalActiveDestinations: number;
+};
+
+export interface AnalyticsRepository {
+  totalProducts(): Promise<number>;
+  totalApprovedProducts(): Promise<number>;
+  totalGeneratedCopies(): Promise<number>;
+  totalQueuedDispatches(): Promise<number>;
+  totalSentDispatches(): Promise<number>;
+  totalFailedDispatches(): Promise<number>;
+  totalActiveDestinations(): Promise<number>;
+}
+
 export type ProductLeadData = {
   providerProductId: string;
   nome: string;
@@ -86,11 +108,20 @@ export type WhatsAppDispatchDetails = WhatsAppDispatchRecord & {
 
 export interface ProductRepository {
   findById(id: string): Promise<ProductLeadRecord | null>;
-  findByProviderProductId(providerProductId: string): Promise<Pick<ProductLeadRecord, 'id'> | null>;
+  findByProviderProductId(
+    providerProductId: string,
+  ): Promise<Pick<ProductLeadRecord, 'id'> | null>;
   create(data: ProductLeadData): Promise<ProductLeadRecord>;
-  updateByProviderProductId(providerProductId: string, data: ProductLeadData): Promise<ProductLeadRecord>;
+  updateByProviderProductId(
+    providerProductId: string,
+    data: ProductLeadData,
+  ): Promise<ProductLeadRecord>;
   listForScoring(): Promise<ProductLeadRecord[]>;
-  updateScore(id: string, score: number, scoreUpdatedAt: Date): Promise<ProductLeadRecord>;
+  updateScore(
+    id: string,
+    score: number,
+    scoreUpdatedAt: Date,
+  ): Promise<ProductLeadRecord>;
   listApproved(minScore: number): Promise<ProductLeadRecord[]>;
 }
 
@@ -103,11 +134,16 @@ export interface WhatsAppDestinationRepository {
   listActive(): Promise<WhatsAppDestinationRecord[]>;
   create(data: WhatsAppDestinationData): Promise<WhatsAppDestinationRecord>;
   list(): Promise<WhatsAppDestinationRecord[]>;
-  update(id: string, data: WhatsAppDestinationUpdate): Promise<WhatsAppDestinationRecord | null>;
+  update(
+    id: string,
+    data: WhatsAppDestinationUpdate,
+  ): Promise<WhatsAppDestinationRecord | null>;
 }
 
 export interface WhatsAppDispatchRepository {
-  createPending(data: WhatsAppDispatchCreateData): Promise<WhatsAppDispatchRecord | null>;
+  createPending(
+    data: WhatsAppDispatchCreateData,
+  ): Promise<WhatsAppDispatchRecord | null>;
   findByIdForSending(id: string): Promise<WhatsAppDispatchDetails | null>;
   findByIdWithDetails(id: string): Promise<WhatsAppDispatchDetails | null>;
   list(filters: WhatsAppDispatchFilters): Promise<WhatsAppDispatchDetails[]>;
