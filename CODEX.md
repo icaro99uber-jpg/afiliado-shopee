@@ -36,6 +36,9 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2, `EvolutionSendGuard` e factory segura em
   `packages/providers`, conectados uma unica vez ao bootstrap do worker.
+- Teste Evolution isolado: CLI em
+  `apps/worker/src/evolution-single-message-test.ts`, separado do bootstrap,
+  filas, banco, Scheduler e pipeline.
 - Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, consumido pela visao geral do dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
@@ -170,6 +173,28 @@ Seguranca do provider Evolution:
 - Logs podem registrar estado, limite, quantidade permitida, contador, codigo
   e destino mascarado, nunca chaves, allowlist ou payload completo.
 
+Teste isolado de uma mensagem Evolution:
+
+1. `pnpm evolution:test-message` executa dry-run por padrao.
+2. O comando rejeita CI, flags parecidas e qualquer argumento de destino ou
+   mensagem.
+3. Exige provider Evolution, safe mode ativo, Scheduler desativado, exatamente
+   um destino permitido e limite igual a 1.
+4. Reutiliza `createWhatsAppProvider`, `EvolutionSendGuard`, normalizacao,
+   mascaramento e tratamento HTTP existentes.
+5. O dry-run cria provider e guard, exibe resumo seguro e encerra sem chamar
+   `sendMessage`.
+6. O caminho futuro de envio exige a flag exata
+   `--confirm-one-real-message`, sem prompt ou timeout de confirmacao.
+7. A mensagem e fixa e nao usa produto, copy, link, hashtag, dispatch, pipeline
+   ou banco.
+8. O modulo nao importa bootstrap do worker, BullMQ, Redis, Prisma, filas ou
+   servicos da aplicacao.
+
+Credenciais ficam apenas no `.env` local nao versionado. A implementacao deste
+comando foi validada somente em dry-run e com providers/clientes HTTP injetados
+nos testes; nenhuma mensagem real foi enviada.
+
 O fluxo manual continua disponivel mesmo quando o Scheduler esta habilitado.
 
 Regra de dependencia:
@@ -216,6 +241,8 @@ Arquivos principais na raiz:
 - Manter `WHATSAPP_PROVIDER=mock` como padrao; selecionar `evolution` exige URL, chave e nome da instancia validos.
 - Manter o safe mode Evolution ativo por padrao e nunca inserir destinos reais
   em arquivos versionados.
+- Manter o comando de teste Evolution isolado e dry-run por padrao; qualquer
+  mudanca no caminho confirmado exige revisao de seguranca dedicada.
 - Nunca acessar variaveis de ambiente dentro de providers nem registrar credenciais em logs ou erros.
 - Registrar eventos relevantes com logs estruturados nos servicos e workers.
 - Evitar acoplamento direto entre endpoints e detalhes de infraestrutura quando ja houver servico dedicado.

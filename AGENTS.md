@@ -147,6 +147,8 @@ Dependencias:
 - `EvolutionApiWhatsAppProvider` em `packages/providers`, injetado no sender pelo bootstrap quando selecionado.
 - `EvolutionSendGuard` em `packages/providers`, criado uma vez para Evolution e
   responsavel por allowlist exata e limite de requests por processo.
+- CLI `evolution-single-message-test.ts` em `apps/worker`, isolado do Sender,
+  dispatches, filas e banco e em dry-run por padrao.
 - Factory `createWhatsAppProvider`, com `mock` como selecao padrao segura.
 - Bootstrap `startWorker` em `apps/worker/src/index.ts`, ponto unico de selecao e injecao do provider.
 - `WhatsAppDispatchRepository`.
@@ -156,8 +158,8 @@ Dependencias:
 
 Proximos passos previstos:
 
-- Criar em uma proxima task um fluxo explicito, isolado e auditavel para um
-  unico teste real com destino controlado.
+- Revisar explicitamente ambiente, instancia e destino controlado antes de
+  qualquer uso futuro da flag de envio unico.
 - Validar a integracao Evolution em ambiente controlado antes de qualquer ativacao em producao.
 - Adicionar autenticacao, autorizacao e controles operacionais antes de producao.
 - Criar fluxo de reprocessamento manual para falhas.
@@ -173,6 +175,20 @@ Protecoes Evolution atuais:
 - Mock sem guard e sem alteracao de comportamento.
 - Esta protecao foi validada somente com clientes HTTP injetados e mocks;
   nenhuma mensagem real foi enviada na task de implementacao.
+
+Fluxo de teste unico:
+
+- `pnpm evolution:test-message` apenas valida e mostra um resumo mascarado.
+- A flag exata `--confirm-one-real-message` e o unico caminho futuro de envio;
+  ela e bloqueada em CI e nao foi executada na task de criacao.
+- Safe mode deve estar ativo, a allowlist deve conter exatamente um destino, o
+  limite deve ser 1 e o Scheduler deve estar desativado.
+- O destino vem somente da allowlist e a mensagem fixa nao usa produto, copy,
+  comissao, link, hashtag, pipeline ou `WhatsAppDispatch`.
+- O comando nao inicia consumers, nao registra Scheduler e nao acessa Prisma,
+  Redis ou BullMQ.
+- Logs sao apenas locais e estruturados, sem persistencia, API key, destino
+  completo, headers, payload ou resposta externa bruta.
 
 ## Pipeline
 

@@ -371,6 +371,43 @@ fluxo explicito, isolado e auditavel para um unico teste real.
 
 Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca versione um arquivo `.env`, credenciais reais ou números reais de WhatsApp.
 
+### Teste isolado de uma mensagem
+
+O comando abaixo e isolado do bootstrap normal do worker e funciona em dry-run
+por padrao:
+
+```bash
+pnpm evolution:test-message
+```
+
+O dry-run carrega e valida a configuracao, cria uma unica instancia do provider
+Evolution com o guard existente, mostra apenas um resumo mascarado e encerra sem
+chamar `sendMessage` ou HTTP. Ele nao inicia workers BullMQ, nao acessa Redis,
+Prisma ou banco, nao registra Scheduler e nao usa pipeline, dispatch, copy ou
+produto.
+
+Um envio futuro exige exclusivamente a flag exata abaixo, sem confirmacao
+interativa:
+
+```bash
+pnpm evolution:test-message -- --confirm-one-real-message
+```
+
+Esse modo nunca pode executar em CI e exige simultaneamente:
+
+- `WHATSAPP_PROVIDER=evolution` e credenciais Evolution completas somente no
+  `.env` local nao versionado.
+- `EVOLUTION_SAFE_MODE=true`.
+- Exatamente um destino em `EVOLUTION_ALLOWED_DESTINATIONS`; o destino nao pode
+  ser informado por argumento e aparece apenas mascarado.
+- `EVOLUTION_MAX_MESSAGES_PER_BOOT=1`.
+- `SCHEDULER_ENABLED=false`.
+
+A mensagem e fixa: "Teste controlado do sistema Afiliado Shopee. Nenhuma ação
+é necessária." Nao sao aceitos texto personalizado, dados de produto, links,
+hashtags ou copies. A task que criou o comando executou somente dry-run com
+valores ficticios; nenhuma mensagem real ou request externo foi realizado.
+
 ### Débito técnico
 
 - Adicionar autenticação/autorização antes de uso em produção.
