@@ -22,6 +22,7 @@ model ProductLead {
   url               String?
   title             String
   score             Int?
+  scoreUpdatedAt    DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

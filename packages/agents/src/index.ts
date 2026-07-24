@@ -10,13 +10,21 @@ export class AnalyticsAgent implements Agent<ScoredProduct, { tracked: true; pro
 export const calculateProductScore = (product: Product): Pick<ScoredProduct, 'score' | 'reasons'> => {
   const ratingValue = product.rating ?? product.nota ?? 0;
   const salesValue = product.sales ?? product.vendidos ?? 0;
-  const commissionValue = product.commissionRate ?? product.comissao ?? 0;
-  const priceValue = product.price ?? product.preco;
-  const rating = Math.min(ratingValue, 5) * 20;
-  const sales = Math.min(salesValue, 500) / 5;
-  const commission = Math.min(commissionValue, 0.2) * 500;
-  const affordability = priceValue <= 100 ? 10 : priceValue <= 250 ? 5 : 0;
-  const score = Math.round(Math.min(rating * 0.35 + sales * 0.3 + commission * 0.25 + affordability, 100));
-  const reasons = [`rating:${ratingValue}`, `sales:${salesValue}`, `commission:${commissionValue}`];
+  const commissionRawValue = product.commissionRate ?? product.comissao ?? 0;
+  const commissionValue = commissionRawValue <= 1 ? commissionRawValue * 100 : commissionRawValue;
+  const discountValue = product.desconto ?? 0;
+  const officialStoreValue = product.loja.toLocaleLowerCase('pt-BR').includes('oficial') ? 100 : 0;
+
+  const rating = (Math.min(Math.max(ratingValue, 0), 5) / 5) * 100;
+  const sales = (Math.min(Math.max(salesValue, 0), 10000) / 10000) * 100;
+  const commission = (Math.min(Math.max(commissionValue, 0), 20) / 20) * 100;
+  const discount = Math.min(Math.max(discountValue, 0), 100);
+  const score = Math.round(
+    Math.min(
+      commission * 0.35 + rating * 0.25 + sales * 0.2 + discount * 0.1 + officialStoreValue * 0.1,
+      100,
+    ),
+  );
+  const reasons = [`rating:${ratingValue}`, `sales:${salesValue}`, `commission:${commissionRawValue}`];
   return { score, reasons };
 };
