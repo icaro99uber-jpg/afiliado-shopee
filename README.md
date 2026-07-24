@@ -216,108 +216,16 @@ Placeholders suportados pelo `TemplateEngine`: `{{nome}}`, `{{preco}}`, `{{desco
 
 - Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
 
-## Pipeline BullMQ
 
-A execução manual do Pipeline foi migrada para BullMQ. O endpoint `POST /pipeline/run` não executa mais o `PipelineService` diretamente; ele apenas cria um job `pipeline-product` na fila `product-pipeline` com payload opcional de filtros:
-
-```json
-{
-  "filters": {
-    "categoria": "Eletrônicos",
-    "notaMin": 4.5
-  }
-}
-```
-
-Execute pela API:
 
 ```bash
 curl -X POST http://localhost:3333/pipeline/run \
   -H 'Content-Type: application/json' \
-  -d '{"filters":{"categoria":"Eletrônicos"}}'
+
 ```
 
 Resposta esperada:
 
 ```json
 {
-  "jobId": "123",
-  "status": "queued"
-}
-```
 
-O worker registra o consumer do job `pipeline-product` e, ao receber o job, executa o `PipelineService` completo com os filtros recebidos: Hunter, persistência, Score, persistência, seleção de produtos com score maior ou igual a 70, Copy e persistência em `GeneratedCopy`. Os logs estruturados cobrem: job recebido, pipeline iniciado, pipeline concluído e pipeline falhou.
-
-Consulte o status de um job:
-
-```bash
-curl http://localhost:3333/pipeline/jobs/123
-```
-
-Resposta esperada:
-
-```json
-{
-  "status": "completed",
-  "progress": 100,
-  "startedAt": "2026-01-01T10:00:00.000Z",
-  "finishedAt": "2026-01-01T10:00:01.000Z",
-  "result": {
-    "produtosEncontrados": 40,
-    "produtosPontuados": 40,
-    "produtosAprovados": 8,
-    "copiesGeradas": 8,
-    "tempoExecucao": "20ms"
-  },
-  "error": null
-}
-```
-
-Esta sprint não implementa cron, WhatsApp, OpenAI nem Analytics.
-
-## Relatório da Sprint - Pipeline BullMQ
-
-### Arquivos criados
-
-- `apps/api/src/pipeline-service.ts`: orquestra Hunter, Score e Copy como serviço reutilizável pelo worker.
-- `apps/api/test/pipeline-queue.test.ts`: cobre criação do job e consulta de status pela API.
-- `apps/worker/test/pipeline-product.test.ts`: cobre processamento e falha do consumer `pipeline-product`.
-
-### Arquivos modificados
-
-- `apps/api/src/app.ts`: `POST /pipeline/run` passa a enfileirar o job; `GET /pipeline/jobs/:id` consulta status no BullMQ.
-- `apps/worker/src/index.ts`: registra o consumer `pipeline-product`, executa o `PipelineService` e adiciona logs/progresso.
-- `packages/queue/src/index.ts`: ajusta payload do job para `{ filters?: ProductFilters }` e mantém nomes de fila/job centralizados.
-- `apps/api/package.json`, `apps/worker/package.json`, `packages/queue/package.json`: adicionam dependências workspace necessárias para fila, worker e tipos compartilhados.
-- `apps/worker/tsconfig.json`: inclui as fontes necessárias para testar o worker com o `PipelineService`.
-- `README.md`: documenta uso da fila, endpoints e relatório da sprint.
-
-### Testes
-
-- Criação do job `pipeline-product` via `POST /pipeline/run`.
-- Processamento do job no worker com atualização de progresso.
-- Execução de Hunter, Score e Copy no worker.
-- Bloqueio de copy para produtos abaixo de score 70.
-- Persistência de `GeneratedCopy` para produtos aprovados.
-- Resultado do job contendo `copiesGeradas`.
-- Falha do processamento com log `Pipeline falhou`.
-- Consulta de status via `GET /pipeline/jobs/:id`.
-- Consulta de job inexistente retornando 404.
-
-### Decisões
-
-- O endpoint de disparo retorna HTTP 202 para representar processamento assíncrono enfileirado.
-- O payload do job preserva apenas `filters?: ProductFilters`, sem WhatsApp, OpenAI, Analytics ou destino de envio.
-- O progresso é atualizado para 10 ao iniciar o processamento e 100 ao concluir.
-- A seleção para Copy usa score mínimo 70 e preserva o comportamento funcional completo da Sprint 5.
-- A consulta de status usa os metadados nativos do BullMQ (`getState`, `progress`, `processedOn`, `finishedOn`, `returnvalue` e `failedReason`).
-
-### Débito técnico
-
-- O projeto ainda não possui ambiente Redis de teste isolado; os testes usam mocks/invocação direta do processor.
-- O worker importa o `PipelineService` da aplicação API para evitar duplicação, mas uma futura extração para um pacote `packages/pipeline` reduziria acoplamento entre apps.
-
-### Pendências
-
-- Criar testes de integração com Redis real em pipeline CI.
-- Definir política de retenção, retry e backoff dos jobs em produção.

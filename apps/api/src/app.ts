@@ -13,12 +13,7 @@ import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import { HunterService } from './hunter-service';
 import { ScoreService } from './score-service';
 import { CopyService } from './copy-service';
-import {
-  createProductPipelineQueue,
-  createRedisConnection,
-  enqueuePipelineProduct,
-  type PipelineProductJob,
-} from '@shopee-auto-affiliate-ai/queue';
+
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -126,6 +121,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: 'SCORE_RUN_FAILED',
         message: 'Falha ao executar Score Engine',
       });
+
     }
   });
 
@@ -158,66 +154,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: 'COPY_GENERATE_FAILED',
         message: 'Falha ao gerar copy',
       });
-    }
-  });
 
-  app.post('/pipeline/run', async (request, reply) => {
-    try {
-      const body = (request.body ?? {}) as { filters?: ProductFilters };
-      const job = await enqueuePipelineProduct(getPipelineQueue() as never, {
-        filters: body.filters,
-      });
-      return reply
-        .status(202)
-        .send({ jobId: String(job.id), status: 'queued' });
-    } catch (error) {
-      request.log.error(
-        { event: 'pipeline.queue.failed', error },
-        'Failed to enqueue pipeline job',
-      );
-      return reply.status(500).send({
-        error: 'PIPELINE_QUEUE_FAILED',
-        message: 'Falha ao enfileirar Pipeline',
-      });
-    }
-  });
-
-  app.get('/pipeline/jobs/:id', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const queue = getPipelineQueue();
-      if (!queue.getJob)
-        return reply.status(501).send({
-          error: 'JOB_STATUS_UNAVAILABLE',
-          message: 'Consulta de status indisponível',
-        });
-      const job = await queue.getJob(id);
-      if (!job)
-        return reply
-          .status(404)
-          .send({ error: 'JOB_NOT_FOUND', message: 'Job não encontrado' });
-      const status = await job.getState();
-      return {
-        status,
-        progress: job.progress ?? 0,
-        startedAt: job.processedOn
-          ? new Date(job.processedOn).toISOString()
-          : null,
-        finishedAt: job.finishedOn
-          ? new Date(job.finishedOn).toISOString()
-          : null,
-        result: job.returnvalue ?? null,
-        error: job.failedReason ?? null,
-      };
-    } catch (error) {
-      request.log.error(
-        { event: 'pipeline.status.failed', error },
-        'Failed to fetch pipeline job status',
-      );
-      return reply.status(500).send({
-        error: 'PIPELINE_STATUS_FAILED',
-        message: 'Falha ao consultar Job do Pipeline',
-      });
     }
   });
 
