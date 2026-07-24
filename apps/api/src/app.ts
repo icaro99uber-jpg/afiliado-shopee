@@ -5,6 +5,7 @@ import { MockShopeeProvider, type HunterProvider } from '@shopee-auto-affiliate-
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import { HunterService } from './hunter-service';
+import { ScoreService } from './score-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -50,6 +51,16 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         return reply.status(400).send({ error: error.code, message: error.message });
       }
       return reply.status(500).send({ error: 'HUNTER_RUN_FAILED', message: 'Falha ao executar Hunter Agent' });
+    }
+  });
+
+  app.post('/score/run', async (request, reply) => {
+    try {
+      const service = new ScoreService({ prisma, logger: app.log });
+      return await service.run();
+    } catch (error) {
+      request.log.error({ event: 'score.route.failed', error }, 'Score route failed');
+      return reply.status(500).send({ error: 'SCORE_RUN_FAILED', message: 'Falha ao executar Score Engine' });
     }
   });
 
