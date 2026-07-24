@@ -10,10 +10,15 @@ import {
   type WhatsAppProvider,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
+  createBullMqPipelineScheduler,
+  createProductPipelineQueue,
   createRedisConnection,
+  DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
   JOB_NAMES,
   QUEUE_NAMES,
+  type PipelineScheduler,
   type PipelineProductJob,
+  type SchedulerConfig,
   type WhatsAppDispatchJob,
 } from '@shopee-auto-affiliate-ai/queue';
 import {
@@ -27,13 +32,24 @@ type WorkerLogger = {
 };
 
 type CreatePipelineProductWorkerOptions = {
+  connection?: ReturnType<typeof createRedisConnection>;
   prisma?: ReturnType<typeof createPrismaClient>;
   hunterProvider?: HunterProvider;
   logger?: WorkerLogger;
   whatsAppProvider: WhatsAppProvider;
 };
 
+type WorkerProcessorOptions = Required<
+  Omit<CreatePipelineProductWorkerOptions, 'connection'>
+>;
+
 type WorkerFactory = typeof createPipelineProductWorker;
+
+type WorkerInfrastructure = {
+  connection: ReturnType<typeof createRedisConnection>;
+  scheduler: PipelineScheduler;
+  close: () => Promise<void>;
+};
 
 type StartWorkerOptions = {
   prisma?: ReturnType<typeof createPrismaClient>;
@@ -41,6 +57,7 @@ type StartWorkerOptions = {
   logger?: WorkerLogger;
   providerFactory?: typeof createWhatsAppProvider;
   providerFactoryOptions?: WhatsAppProviderFactoryOptions;
+  infrastructureFactory?: (redisUrl: string) => WorkerInfrastructure;
   workerFactory?: WorkerFactory;
 };
 
@@ -51,7 +68,7 @@ const consoleLogger: WorkerLogger = {
 
 export const processPipelineProductJob = async (
   job: Pick<Job<PipelineProductJob>, 'id' | 'name' | 'data' | 'updateProgress'>,
-  options: Required<CreatePipelineProductWorkerOptions>,
+  options: WorkerProcessorOptions,
 ) => {
   if (job.name !== JOB_NAMES.pipelineProduct) return { skipped: true };
 
@@ -91,7 +108,7 @@ export const processPipelineProductJob = async (
 
 export const processWhatsAppDispatchJob = async (
   job: Pick<Job<WhatsAppDispatchJob>, 'id' | 'name' | 'data'>,
-  options: Required<CreatePipelineProductWorkerOptions>,
+  options: WorkerProcessorOptions,
 ) => {
   if (job.name !== JOB_NAMES.whatsappDispatch) return { skipped: true };
   const repositories = createPrismaRepositories(options.prisma);
@@ -108,7 +125,8 @@ export const createPipelineProductWorker = (
   redisUrl: string,
   options: CreatePipelineProductWorkerOptions,
 ) => {
-  const connection = createRedisConnection(redisUrl);
+  const ownsConnection = !options.connection;
+  const connection = options.connection ?? createRedisConnection(redisUrl);
   const prisma = options.prisma ?? createPrismaClient();
   const workerOptions = {
     prisma,
@@ -129,16 +147,57 @@ export const createPipelineProductWorker = (
     { connection },
   );
 
-  whatsappWorker.on('closed', async () => undefined);
-
-  worker.on('closed', async () => {
-    await connection.quit();
-    if (!options.prisma) await prisma.$disconnect();
-  });
+  let closePromise: Promise<void> | undefined;
 
   return {
     productPipelineWorker: worker,
     whatsappDispatchWorker: whatsappWorker,
+    close: () => {
+      closePromise ??= closeResources([
+        () => worker.close(),
+        () => whatsappWorker.close(),
+        ...(!options.prisma ? [() => prisma.$disconnect()] : []),
+        ...(ownsConnection
+          ? [() => connection.quit().then(() => undefined)]
+          : []),
+      ]);
+      return closePromise;
+    },
+  };
+};
+
+const closeResources = async (cleanups: Array<() => Promise<unknown>>) => {
+  let firstError: unknown;
+
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup();
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+
+  if (firstError) throw firstError;
+};
+
+export const createWorkerInfrastructure = (
+  redisUrl: string,
+): WorkerInfrastructure => {
+  const connection = createRedisConnection(redisUrl);
+  const productPipelineQueue = createProductPipelineQueue(connection);
+  const scheduler = createBullMqPipelineScheduler(productPipelineQueue);
+  let closePromise: Promise<void> | undefined;
+
+  return {
+    connection,
+    scheduler,
+    close: () => {
+      closePromise ??= closeResources([
+        () => productPipelineQueue.close(),
+        () => connection.quit().then(() => undefined),
+      ]);
+      return closePromise;
+    },
   };
 };
 
@@ -149,7 +208,7 @@ const safeBaseUrl = (baseUrl: string) => {
   return url.toString().replace(/\/$/, '');
 };
 
-export const startWorker = (
+export const startWorker = async (
   config: AppEnv,
   options: StartWorkerOptions = {},
 ) => {
@@ -175,16 +234,110 @@ export const startWorker = (
     'WhatsApp provider selected',
   );
 
+  const infrastructureFactory =
+    options.infrastructureFactory ?? createWorkerInfrastructure;
+  const infrastructure = infrastructureFactory(config.REDIS_URL);
+
+  try {
+    if (config.SCHEDULER_ENABLED) {
+      if (!config.SCHEDULER_CRON || !config.SCHEDULER_TIMEZONE) {
+        throw new Error('Enabled scheduler configuration is incomplete');
+      }
+      const schedulerConfig: SchedulerConfig = {
+        enabled: true,
+        cronExpression: config.SCHEDULER_CRON,
+        timezone: config.SCHEDULER_TIMEZONE,
+        jobId: DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+      };
+      const state = await infrastructure.scheduler.register(schedulerConfig);
+      logger.info(
+        {
+          event: 'worker.scheduler.registered',
+          status: state.status,
+          cron: schedulerConfig.cronExpression,
+          timezone: schedulerConfig.timezone,
+          jobId: schedulerConfig.jobId,
+          queue: QUEUE_NAMES.productPipeline,
+        },
+        'Pipeline scheduler registered',
+      );
+    } else {
+      const state = await infrastructure.scheduler.remove(
+        DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+      );
+      logger.info(
+        {
+          event: 'worker.scheduler.disabled',
+          status: 'disabled',
+          schedulerState: state.status,
+          jobId: DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+          queue: QUEUE_NAMES.productPipeline,
+        },
+        'Pipeline scheduler disabled',
+      );
+    }
+  } catch (error) {
+    logger.error(
+      {
+        event: 'worker.scheduler.configuration-failed',
+        operation: config.SCHEDULER_ENABLED ? 'register' : 'remove',
+        jobId: DEFAULT_PIPELINE_SCHEDULER_JOB_ID,
+        queue: QUEUE_NAMES.productPipeline,
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+      },
+      'Pipeline scheduler configuration failed',
+    );
+    await infrastructure.close().catch(() => undefined);
+    throw error;
+  }
+
   const workerFactory = options.workerFactory ?? createPipelineProductWorker;
-  return workerFactory(config.REDIS_URL, {
-    prisma: options.prisma,
-    hunterProvider: options.hunterProvider,
-    logger,
-    whatsAppProvider,
-  });
+  let workers: ReturnType<WorkerFactory>;
+
+  try {
+    workers = workerFactory(config.REDIS_URL, {
+      connection: infrastructure.connection,
+      prisma: options.prisma,
+      hunterProvider: options.hunterProvider,
+      logger,
+      whatsAppProvider,
+    });
+  } catch (error) {
+    await infrastructure.close().catch(() => undefined);
+    throw error;
+  }
+
+  let closePromise: Promise<void> | undefined;
+  return {
+    ...workers,
+    close: () => {
+      closePromise ??= closeResources([
+        () => workers.close(),
+        () => infrastructure.close(),
+      ]);
+      return closePromise;
+    },
+  };
 };
 
 if (process.env.NODE_ENV !== 'test') {
   const config = loadConfig();
-  startWorker(config);
+  const runtime = await startWorker(config);
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => {
+    shutdownPromise ??= runtime.close().catch((error) => {
+      consoleLogger.error(
+        {
+          event: 'worker.shutdown.failed',
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        },
+        'Worker shutdown failed',
+      );
+      process.exitCode = 1;
+    });
+    return shutdownPromise;
+  };
+
+  process.once('SIGINT', () => void shutdown());
+  process.once('SIGTERM', () => void shutdown());
 }
