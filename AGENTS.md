@@ -200,6 +200,35 @@ Fluxo de teste unico:
   antes do provider; nenhuma mensagem real foi enviada e nenhum segredo foi
   versionado.
 
+Fluxo E2E de dispatch controlado:
+
+- `corepack pnpm whatsapp:e2e-test` e dry-run por padrao, carrega o `.env` raiz
+  sem sobrescrever variaveis de processo e valida Evolution, instancia, banco e
+  Redis sem criar registros, jobs ou workers.
+- A unica confirmacao aceita e `--confirm-one-real-dispatch`; CI, mock, safe
+  mode falso, Scheduler ativo, allowlist diferente de um destino, limite
+  diferente de 1 e argumentos adicionais bloqueiam antes do envio.
+- O cenario usa IDs deterministas para produto/copy/destino/dispatch/job. O
+  destino tecnico permanece inativo e destinos normais nao sao alterados.
+- Um dispatch anterior em qualquer estado bloqueia reexecucao. Historico e job
+  sao preservados para auditoria e nunca apagados pelo comando.
+- O job E2E usa `attempts: 1`, sem backoff e sem remocao automatica. Isso nao
+  modifica as tres tentativas dos dispatches normais.
+- O consumer isolado compoe apenas repositorios, `SenderService`, uma instancia
+  de provider/guard e o worker `whatsapp-dispatch`; nao compoe Pipeline, Hunter,
+  Score, Copy, Scheduler, API ou dashboard.
+- O texto entregue ao provider e a constante fixa da Task 13.5. A copy tecnica
+  preserva titulo e mensagem para auditoria, e o message builder E2E evita
+  concatenar conteudo adicional no envio real.
+- Depois do job, banco e `GET /whatsapp/dispatches/:id` via `app.inject` sao
+  comparados. A resposta de detalhe mascara o destino.
+- Falha, timeout ou ambiguidade nao reenfileiram e exigem investigacao manual.
+
+Estado sanitizado da preparacao da Task 13.5: Evolution 2.3.6 saudavel,
+instancia open e infraestrutura principal disponivel. O `.env` raiz ainda
+selecionava mock, instancia de exemplo e allowlist vazia; logo nenhuma mensagem
+real foi enviada e nenhum registro E2E foi criado pela execucao local.
+
 Infraestrutura local da Evolution API:
 
 - Compose isolado em `infra/evolution/docker-compose.yml` com Evolution API

@@ -51,6 +51,26 @@ export type ApplicationServices = {
   pipeline: PipelineService;
 };
 
+export const createSenderService = ({
+  repositories,
+  whatsAppProvider,
+  logger,
+  messageBuilder,
+}: {
+  repositories: Pick<ApplicationRepositories, 'whatsappDispatches'>;
+  whatsAppProvider: WhatsAppProvider;
+  logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+  messageBuilder?: ConstructorParameters<
+    typeof SenderService
+  >[0]['messageBuilder'];
+}) =>
+  new SenderService({
+    dispatches: repositories.whatsappDispatches,
+    provider: whatsAppProvider,
+    logger,
+    messageBuilder,
+  });
+
 export const createPrismaRepositories = (
   prisma: DatabaseClient,
 ): ApplicationRepositories => ({
@@ -87,11 +107,7 @@ export const createApplicationServices = ({
     logger,
   });
   const sender = whatsAppProvider
-    ? new SenderService({
-        dispatches: repositories.whatsappDispatches,
-        provider: whatsAppProvider,
-        logger,
-      })
+    ? createSenderService({ repositories, whatsAppProvider, logger })
     : undefined;
 
   return {

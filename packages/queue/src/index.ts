@@ -39,6 +39,12 @@ export const DEFAULT_WHATSAPP_DISPATCH_JOB_OPTIONS: JobsOptions = {
   removeOnFail: { count: 1_000 },
 };
 
+export const CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS: JobsOptions = {
+  attempts: 1,
+  removeOnComplete: false,
+  removeOnFail: false,
+};
+
 export const createRedisConnection = (url: string) =>
   new IORedis(url, { maxRetriesPerRequest: null });
 
@@ -65,6 +71,16 @@ export const enqueueWhatsAppDispatch = (
   queue.add(JOB_NAMES.whatsappDispatch, data, {
     ...DEFAULT_WHATSAPP_DISPATCH_JOB_OPTIONS,
     ...opts,
+  });
+
+export const enqueueControlledE2EWhatsAppDispatch = (
+  queue: Queue<WhatsAppDispatchJob>,
+  data: WhatsAppDispatchJob,
+  jobId: string,
+) =>
+  queue.add(JOB_NAMES.whatsappDispatch, data, {
+    ...CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS,
+    jobId,
   });
 
 export type BullMqPipelineSchedulerQueue = {

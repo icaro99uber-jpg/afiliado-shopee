@@ -7,6 +7,7 @@ export type SenderServiceOptions = {
   dispatches: WhatsAppDispatchRepository;
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+  messageBuilder?: (copy: DispatchWithRelations['generatedCopy']) => string;
 };
 
 type DispatchWithRelations = {
@@ -63,7 +64,9 @@ export class SenderService {
 
     if (dispatch.status === 'SENT') return dispatch;
 
-    const message = buildWhatsAppPublicMessage(dispatch.generatedCopy);
+    const message = this.options.messageBuilder
+      ? this.options.messageBuilder(dispatch.generatedCopy)
+      : buildWhatsAppPublicMessage(dispatch.generatedCopy);
 
     try {
       await this.options.dispatches.markAttemptPending(dispatch.id);

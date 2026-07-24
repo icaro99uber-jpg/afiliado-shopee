@@ -203,6 +203,34 @@ bloqueado porque a configuracao ignorada ainda selecionava `mock` e mantinha a
 allowlist vazia. Nenhuma mensagem real foi enviada e nenhum segredo foi
 versionado.
 
+Teste E2E controlado de dispatch:
+
+1. `corepack pnpm whatsapp:e2e-test` carrega o `.env` raiz com precedencia para
+   variaveis de processo, valida Evolution 2.3.6, instancia open, banco e Redis
+   principais e termina em dry-run sem escrita, job, worker ou envio.
+2. O caminho real aceita somente a flag exata
+   `--confirm-one-real-dispatch`, permanece bloqueado em CI e exige provider
+   Evolution, URL/instancia locais esperadas, safe mode ativo, allowlist com um
+   destino, limite 1 e Scheduler desativado.
+3. Produto, copy, destino, dispatch e job possuem identidade deterministica. O
+   destino tecnico e inativo. Qualquer dispatch/job anterior ou trabalho
+   concorrente bloqueia uma nova execucao sem apagar historico.
+4. O job `whatsapp-dispatch` usa `attempts: 1`, nao possui backoff e nao e
+   removido automaticamente. A politica normal de tres tentativas permanece
+   inalterada.
+5. O worker E2E instancia somente o consumer de dispatch e cria uma unica
+   factory de provider/guard. `SenderService` recebe um message builder fixo
+   para entregar exatamente a frase controlada, sem alterar mensagens normais.
+6. O resultado e relido do banco e por `GET /whatsapp/dispatches/:id` usando
+   `app.inject`; o detalhe publico mascara o destino.
+7. Timeout, erro de rede, HTTP 5xx, `FAILED`, `PENDING` inesperado ou resultado
+   ambiguo exigem investigacao manual. O comando nunca reenfileira ou repete.
+
+Na preparacao da Task 13.5, Evolution e a instancia foram validadas como
+saudaveis/open, e o banco/Redis principais ficaram disponiveis. O `.env` raiz
+continuou em `mock`, com instancia de exemplo e allowlist vazia, bloqueando o
+dry-run antes de qualquer escrita. Nenhuma mensagem real foi enviada.
+
 ## Infraestrutura local da Evolution API
 
 `infra/evolution` contem um compose independente do compose principal. Ele fixa
