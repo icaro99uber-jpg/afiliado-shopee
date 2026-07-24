@@ -2,6 +2,8 @@ import { Queue, type JobsOptions } from 'bullmq';
 import IORedis from 'ioredis';
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 
+export type { JobsOptions };
+
 export const QUEUE_NAMES = {
   productPipeline: 'product-pipeline',
   whatsappDispatch: 'whatsapp-dispatch',

@@ -6,7 +6,24 @@
     "types": [
       "node",
       "vitest/globals"
-    ]
+    ],
+    "paths": {
+      "@shopee-auto-affiliate-ai/config": [
+        "packages/config/dist/index.d.ts"
+      ],
+      "@shopee-auto-affiliate-ai/database": [
+        "packages/database/dist/index.d.ts"
+      ],
+      "@shopee-auto-affiliate-ai/providers": [
+        "packages/providers/dist/index.d.ts"
+      ],
+      "@shopee-auto-affiliate-ai/queue": [
+        "packages/queue/dist/index.d.ts"
+      ],
+      "@shopee-auto-affiliate-ai/shared": [
+        "packages/shared/dist/index.d.ts"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",

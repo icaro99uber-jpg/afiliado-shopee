@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MockShopeeProvider } from '@shopee-auto-affiliate-ai/providers';
 import { HunterService } from '../src/hunter-service';
 import { buildApp } from '../src/app';
+import { PrismaProductRepository } from '../src/prisma-repositories';
 
 const createPrismaMock = () => {
   const store = new Map<string, unknown>();
@@ -48,7 +49,11 @@ describe('Hunter Agent', () => {
 
   it('cria produtos novos e atualiza existentes', async () => {
     const prisma = createPrismaMock();
-    const service = new HunterService({ provider: new MockShopeeProvider(), prisma, logger });
+    const service = new HunterService({
+      provider: new MockShopeeProvider(),
+      products: new PrismaProductRepository(prisma as never),
+      logger,
+    });
 
     const primeiraExecucao = await service.run({ categoria: 'Eletrônicos' });
     const segundaExecucao = await service.run({ categoria: 'Eletrônicos' });

@@ -21,6 +21,10 @@ O estado atual nao executa scraping real, nao usa OpenAI real e nao envia mensag
 
 - Monorepo: gerenciado por `pnpm-workspace.yaml` e `turbo.json`.
 - API: Fastify em `apps/api`, expondo endpoints de health, Hunter, Score, Copy, Pipeline e WhatsApp.
+- Camada de aplicacao: servicos em `apps/api/src/*-service.ts`, sem dependencia direta do Prisma Client.
+- Contratos de repositorio: interfaces pequenas em `apps/api/src/repositories.ts`.
+- Adaptadores Prisma: implementacoes concretas em `apps/api/src/prisma-repositories.ts`.
+- Composicao: factory em `apps/api/src/application-services.ts`, reutilizada pela API e pelo worker.
 - Worker: BullMQ em `apps/worker`, consumindo filas de pipeline e dispatch.
 - Dashboard: Next.js App Router em `apps/dashboard`.
 - Banco: Prisma Client e schema PostgreSQL em `packages/database`.
@@ -40,11 +44,18 @@ Fluxo operacional atual:
 6. O pipeline enfileira jobs `whatsapp-dispatch`.
 7. O worker usa `SenderService` e `MockWhatsAppProvider` para marcar dispatches como `SENT` ou `FAILED`.
 
+Regra de dependencia:
+
+- Servicos de aplicacao recebem contratos por injecao de dependencia.
+- Servicos de aplicacao nao importam Prisma Client nem tipos internos do Prisma.
+- Operacoes `findUnique`, `findMany`, `create`, `update`, `select`, `include` e tratamento de codigos Prisma ficam nos adaptadores Prisma.
+- API e worker devem montar servicos por `createApplicationServices` ou factories equivalentes, sem espalhar novas instanciacoes manuais.
+
 ## Estrutura de pastas
 
 ```text
 apps/
-  api/         API Fastify, servicos de dominio e testes da API.
+  api/         API Fastify, servicos de aplicacao, repositorios e testes da API.
   dashboard/   Aplicacao Next.js.
   worker/      Workers BullMQ para pipeline e envios.
 packages/
@@ -75,6 +86,9 @@ Arquivos principais na raiz:
 - Preservar mocks enquanto uma integracao real nao estiver prevista na sprint.
 - Registrar eventos relevantes com logs estruturados nos servicos e workers.
 - Evitar acoplamento direto entre endpoints e detalhes de infraestrutura quando ja houver servico dedicado.
+- Manter contratos de repositorio pequenos e especificos, evitando interfaces genericas grandes.
+- Implementacoes Prisma devem permanecer atras dos contratos de repositorio.
+- Novos servicos de aplicacao devem receber dependencias por construtor/factory.
 - Manter formatacao compativel com Prettier e validacao por ESLint.
 
 ## Regras de commits

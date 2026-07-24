@@ -1,8 +1,9 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type { HunterProvider } from '@shopee-auto-affiliate-ai/providers';
-import type { Product, ProductFilters } from '@shopee-auto-affiliate-ai/shared';
+import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import type { ProductRepository } from './repositories';
+import { toProductLeadData } from './repositories';
 
 export type HunterRunResult = {
   encontrados: number;
@@ -13,24 +14,9 @@ export type HunterRunResult = {
 
 export type HunterServiceOptions = {
   provider: HunterProvider;
-  prisma: Pick<DatabaseClient, 'productLead'>;
+  products: ProductRepository;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 };
-
-const toProductLeadData = (produto: Product) => ({
-  providerProductId: produto.id,
-  nome: produto.nome,
-  categoria: produto.categoria,
-  preco: produto.preco,
-  desconto: produto.desconto,
-  nota: produto.nota,
-  vendidos: produto.vendidos,
-  comissao: produto.comissao,
-  loja: produto.loja,
-  urlImagem: produto.urlImagem,
-  url: produto.url,
-  title: produto.nome,
-});
 
 export class HunterService {
   constructor(private readonly options: HunterServiceOptions) {}
@@ -45,19 +31,18 @@ export class HunterService {
       let atualizados = 0;
 
       for (const produto of produtos) {
-        const existente = await this.options.prisma.productLead.findUnique({
-          where: { providerProductId: produto.id },
-          select: { id: true },
-        });
+        const existente =
+          await this.options.products.findByProviderProductId(produto.id);
+        const productData = toProductLeadData(produto);
 
         if (existente) {
-          await this.options.prisma.productLead.update({
-            where: { providerProductId: produto.id },
-            data: toProductLeadData(produto),
-          });
+          await this.options.products.updateByProviderProductId(
+            produto.id,
+            productData,
+          );
           atualizados += 1;
         } else {
-          await this.options.prisma.productLead.create({ data: toProductLeadData(produto) });
+          await this.options.products.create(productData);
           novos += 1;
         }
       }

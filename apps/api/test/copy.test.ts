@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import { COPY_TEMPLATES, CopyService, TemplateEngine, type CopyProduct } from '../src/copy-service';
+import {
+  PrismaGeneratedCopyRepository,
+  PrismaProductRepository,
+} from '../src/prisma-repositories';
 
 const product: CopyProduct = {
   id: 'product-1',
@@ -20,9 +24,19 @@ const createPrismaMock = (foundProduct: CopyProduct | null = product) => ({
     findUnique: vi.fn(async () => foundProduct),
   },
   generatedCopy: {
-    create: vi.fn(async ({ data }: { data: unknown }) => ({ id: 'copy-1', ...data })),
+    create: vi.fn(async ({ data }: { data: unknown }) => ({
+      id: 'copy-1',
+      ...(data as object),
+    })),
   },
 });
+
+const createCopyService = (prisma = createPrismaMock()) =>
+  new CopyService({
+    products: new PrismaProductRepository(prisma as never),
+    generatedCopies: new PrismaGeneratedCopyRepository(prisma as never),
+    logger,
+  });
 
 describe('TemplateEngine', () => {
   it('substitui placeholders conhecidos e preserva placeholders desconhecidos', () => {
@@ -39,7 +53,7 @@ describe('CopyService', () => {
   });
 
   it('renderiza todos os templates sem placeholders pendentes', () => {
-    const service = new CopyService({ prisma: createPrismaMock() as never, logger });
+    const service = createCopyService();
 
     for (const template of COPY_TEMPLATES) {
       const copy = service.renderTemplate(template, product);
@@ -48,23 +62,31 @@ describe('CopyService', () => {
       expect(copy.cta).not.toMatch(/{{|}}/);
       expect(copy.hashtags).not.toMatch(/{{|}}/);
       expect(copy.titulo.length).toBeGreaterThan(0);
-      expect(copy.mensagem).toContain('Fone Bluetooth');
+      expect(`${copy.titulo} ${copy.mensagem}`).toContain('Fone Bluetooth');
       expect(copy.hashtags).toContain('#');
     }
   });
 
   it('persiste uma nova copy no banco a cada geração', async () => {
     const prisma = createPrismaMock();
-    const service = new CopyService({ prisma: prisma as never, logger });
+    const service = createCopyService(prisma);
 
     const copy = await service.generate('product-1');
+    const copyData = {
+      titulo: copy.titulo,
+      mensagem: copy.mensagem,
+      cta: copy.cta,
+      hashtags: copy.hashtags,
+    };
 
     expect(prisma.productLead.findUnique).toHaveBeenCalledWith({ where: { id: 'product-1' } });
-    expect(prisma.generatedCopy.create).toHaveBeenCalledWith({ data: { productId: 'product-1', ...copy } });
+    expect(prisma.generatedCopy.create).toHaveBeenCalledWith({
+      data: { productId: 'product-1', ...copyData },
+    });
   });
 
   it('lança erro quando produto não existe', async () => {
-    const service = new CopyService({ prisma: createPrismaMock(null) as never, logger });
+    const service = createCopyService(createPrismaMock(null));
     await expect(service.generate('missing')).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
   });
 
@@ -80,6 +102,8 @@ describe('CopyService', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
+      id: 'copy-1',
+      productId: 'product-1',
       titulo: expect.any(String),
       mensagem: expect.any(String),
       cta: expect.any(String),

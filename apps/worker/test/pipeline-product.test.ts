@@ -3,9 +3,26 @@ import {
   JOB_NAMES,
   type PipelineProductJob,
 } from '@shopee-auto-affiliate-ai/queue';
+import { MockWhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import { processPipelineProductJob } from '../src/index';
 
-const createProduct = (overrides: Record<string, unknown> = {}) => ({
+type WorkerProduct = {
+  id: string;
+  providerProductId: string;
+  nome: string;
+  categoria: string;
+  preco: number;
+  desconto: number;
+  nota: number;
+  vendidos: number;
+  comissao: number;
+  loja: string;
+  urlImagem: string;
+  title: string;
+  score?: number;
+};
+
+const createProduct = (overrides: Partial<WorkerProduct> = {}): WorkerProduct => ({
   id: 'product-1',
   providerProductId: 'provider-1',
   nome: 'Produto aprovado',
@@ -91,6 +108,12 @@ const createPrismaMock = (fail = false) => {
         return { id: `copy-${generatedCopies.length}`, ...(data as object) };
       }),
     },
+    whatsAppDestination: {
+      findMany: vi.fn(async () => []),
+    },
+    whatsAppDispatch: {
+      create: vi.fn(),
+    },
   };
 };
 
@@ -131,6 +154,7 @@ describe('pipeline-product worker', () => {
       prisma: prisma as never,
       hunterProvider: createHunterProvider(),
       logger,
+      whatsAppProvider: new MockWhatsAppProvider(),
     });
 
     expect(result).toMatchObject({
@@ -158,8 +182,9 @@ describe('pipeline-product worker', () => {
         prisma: createPrismaMock(true) as never,
         hunterProvider: createHunterProvider(),
         logger,
+        whatsAppProvider: new MockWhatsAppProvider(),
       }),
-    ).rejects.toThrow('database unavailable');
+    ).rejects.toMatchObject({ code: 'HUNTER_RUN_FAILED' });
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'pipeline.job.failed', jobId: 'job-1' }),
       'Pipeline falhou',

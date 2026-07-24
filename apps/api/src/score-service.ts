@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import type { ProductRepository } from './repositories';
 
 export type ScorableProduct = {
   id: string;
@@ -22,7 +22,7 @@ export type ScoreRunResult = {
 };
 
 export type ScoreServiceOptions = {
-  prisma: Pick<DatabaseClient, 'productLead'>;
+  products: ProductRepository;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 };
 
@@ -71,15 +71,12 @@ export class ScoreService {
     this.options.logger.info({ event: 'score.run.started' }, 'Score execution started');
 
     try {
-      const produtos = await this.options.prisma.productLead.findMany();
+      const produtos = await this.options.products.listForScoring();
       const scores: number[] = [];
 
       for (const produto of produtos) {
         const score = this.calculate(produto);
-        await this.options.prisma.productLead.update({
-          where: { id: produto.id },
-          data: { score, scoreUpdatedAt: new Date() },
-        });
+        await this.options.products.updateScore(produto.id, score, new Date());
         scores.push(score);
       }
 

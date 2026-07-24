@@ -6,7 +6,7 @@ export class HunterAgent implements Agent<{ query: string }, Product[]> { constr
 export class ScoreAgent implements Agent<Product, ScoredProduct> { async execute(product: Product): Promise<ScoredProduct> { return { ...product, ...calculateProductScore(product) }; } }
 export class CopyAgent implements Agent<{ product: Product; tone?: string }, string> { constructor(private readonly openai: OpenAIProvider) {} execute(input: { product: Product; tone?: string }) { return this.openai.generateCopy(input); } }
 export class SenderAgent implements Agent<{ to: string; message: string }, { id: string }> { constructor(private readonly evolution: EvolutionProvider) {} execute(input: { to: string; message: string }) { return this.evolution.sendMessage(input); } }
-export class AnalyticsAgent implements Agent<ScoredProduct, { tracked: true; productId: string; score: number }> { async execute(product: ScoredProduct) { return { tracked: true, productId: product.id, score: product.score }; } }
+export class AnalyticsAgent implements Agent<ScoredProduct, { tracked: true; productId: string; score: number }> { async execute(product: ScoredProduct) { return { tracked: true as const, productId: product.id, score: product.score }; } }
 export const calculateProductScore = (product: Product): Pick<ScoredProduct, 'score' | 'reasons'> => {
   const ratingValue = product.rating ?? product.nota ?? 0;
   const salesValue = product.sales ?? product.vendidos ?? 0;

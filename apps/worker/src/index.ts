@@ -15,8 +15,10 @@ import {
   type PipelineProductJob,
   type WhatsAppDispatchJob,
 } from '@shopee-auto-affiliate-ai/queue';
-import { PipelineService } from '../../../api/src/pipeline-service';
-import { SenderService } from '../../../api/src/sender-service';
+import {
+  createApplicationServices,
+  createPrismaRepositories,
+} from '../../api/src/application-services';
 
 type WorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -52,7 +54,14 @@ export const processPipelineProductJob = async (
   );
 
   try {
-    const result = await new PipelineService(options).run(job.data.filters);
+    const repositories = createPrismaRepositories(options.prisma);
+    const services = createApplicationServices({
+      repositories,
+      hunterProvider: options.hunterProvider,
+      whatsAppProvider: options.whatsAppProvider,
+      logger: options.logger,
+    });
+    const result = await services.pipeline.run(job.data.filters);
     await job.updateProgress(100);
     options.logger.info(
       { event: 'pipeline.job.completed', jobId: job.id, result },
@@ -73,11 +82,14 @@ export const processWhatsAppDispatchJob = async (
   options: Required<CreatePipelineProductWorkerOptions>,
 ) => {
   if (job.name !== JOB_NAMES.whatsappDispatch) return { skipped: true };
-  return new SenderService({
-    prisma: options.prisma,
-    provider: options.whatsAppProvider,
+  const repositories = createPrismaRepositories(options.prisma);
+  const services = createApplicationServices({
+    repositories,
+    hunterProvider: options.hunterProvider,
+    whatsAppProvider: options.whatsAppProvider,
     logger: options.logger,
-  }).sendDispatch(job.data.dispatchId);
+  });
+  return services.sender?.sendDispatch(job.data.dispatchId);
 };
 
 export const createPipelineProductWorker = (

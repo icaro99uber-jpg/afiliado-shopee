@@ -1,1 +1,16 @@
-{"extends":"../../tsconfig.base.json","compilerOptions":{"outDir":"dist","rootDir":"src"},"include":["src/**/*.ts"]}
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@shopee-auto-affiliate-ai/providers": [
+        "packages/providers/dist/index.d.ts"
+      ],
+      "@shopee-auto-affiliate-ai/shared": [
+        "packages/shared/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

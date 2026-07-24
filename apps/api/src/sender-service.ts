@@ -1,10 +1,10 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type { WhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import type { WhatsAppDispatchRepository } from './repositories';
 
 export type SenderServiceOptions = {
-  prisma: Pick<DatabaseClient, 'whatsAppDispatch'>;
+  dispatches: WhatsAppDispatchRepository;
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 };
@@ -22,6 +22,7 @@ type DispatchWithRelations = {
   };
   destination: { destination: string };
   product?: { comissao?: number | null } | null;
+  status?: string;
 };
 
 const errorMessage = (error: unknown) =>
@@ -48,10 +49,10 @@ export class SenderService {
       'WhatsApp dispatch started',
     );
 
-    const dispatch = (await this.options.prisma.whatsAppDispatch.findUnique({
-      where: { id: dispatchId },
-      include: { generatedCopy: true, destination: true, product: true },
-    })) as DispatchWithRelations | null;
+    const dispatch =
+      (await this.options.dispatches.findByIdForSending(
+        dispatchId,
+      )) as DispatchWithRelations | null;
 
     if (!dispatch) {
       throw new AppError(
@@ -60,31 +61,21 @@ export class SenderService {
       );
     }
 
+    if (dispatch.status === 'SENT') return dispatch;
+
     const message = buildWhatsAppPublicMessage(dispatch.generatedCopy);
 
     try {
-      await this.options.prisma.whatsAppDispatch.update({
-        where: { id: dispatch.id },
-        data: {
-          status: 'PENDING',
-          attemptCount: { increment: 1 },
-          errorMessage: null,
-        },
-      });
+      await this.options.dispatches.markAttemptPending(dispatch.id);
 
       const result = await this.options.provider.sendMessage({
         destination: dispatch.destination.destination,
         message,
       });
 
-      const updated = await this.options.prisma.whatsAppDispatch.update({
-        where: { id: dispatch.id },
-        data: {
-          status: 'SENT',
-          externalMessageId: result.externalMessageId,
-          sentAt: result.sentAt,
-          errorMessage: null,
-        },
+      const updated = await this.options.dispatches.markSent(dispatch.id, {
+        externalMessageId: result.externalMessageId,
+        sentAt: result.sentAt,
       });
 
       this.options.logger.info(
@@ -98,10 +89,7 @@ export class SenderService {
       return updated;
     } catch (error) {
       const messageError = errorMessage(error);
-      await this.options.prisma.whatsAppDispatch.update({
-        where: { id: dispatch.id },
-        data: { status: 'FAILED', errorMessage: messageError },
-      });
+      await this.options.dispatches.markFailed(dispatch.id, messageError);
       this.options.logger.error(
         { event: 'whatsapp.dispatch.failed', dispatchId, error },
         'WhatsApp dispatch failed',

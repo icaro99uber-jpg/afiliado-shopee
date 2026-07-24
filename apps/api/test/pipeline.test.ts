@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Product } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
-import { buildApp } from '../src/app';
 import { PipelineService } from '../src/pipeline-service';
+import type { ApplicationRepositories } from '../src/application-services';
+import {
+  PrismaGeneratedCopyRepository,
+  PrismaProductRepository,
+} from '../src/prisma-repositories';
 
 const createProduct = (overrides: Partial<Product> = {}): Product => ({
   id: 'provider-1',
@@ -131,13 +135,34 @@ const createPrismaMock = () => {
     generatedCopy: {
       create: vi.fn(async ({ data }: { data: unknown }) => ({
         id: 'copy-1',
-        ...data,
+        ...(data as object),
       })),
     },
   };
 };
 
 const logger = () => ({ info: vi.fn(), error: vi.fn() });
+
+const createRepositories = (prisma: ReturnType<typeof createPrismaMock>) =>
+  ({
+    products: new PrismaProductRepository(prisma as never),
+    generatedCopies: new PrismaGeneratedCopyRepository(prisma as never),
+    whatsappDestinations: {
+      listActive: vi.fn(async () => []),
+      create: vi.fn(),
+      list: vi.fn(),
+      update: vi.fn(),
+    },
+    whatsappDispatches: {
+      createPending: vi.fn(),
+      findByIdForSending: vi.fn(),
+      findByIdWithDetails: vi.fn(),
+      list: vi.fn(),
+      markAttemptPending: vi.fn(),
+      markSent: vi.fn(),
+      markFailed: vi.fn(),
+    },
+  }) as unknown as ApplicationRepositories;
 
 describe('PipelineService', () => {
   it('executa o pipeline completo e expõe POST /pipeline/run', async () => {
@@ -153,30 +178,29 @@ describe('PipelineService', () => {
       }),
     ]);
     const prisma = createPrismaMock();
-    const app = await buildApp({
-      logger: false,
-      prisma: prisma as never,
-      hunterProvider: provider,
+    const service = new PipelineService({
+      provider,
+      ...createRepositories(prisma),
+      logger: logger(),
     });
 
-    const response = await app.inject({ method: 'POST', url: '/pipeline/run' });
+    const report = await service.run();
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(report).toEqual({
       produtosEncontrados: 2,
       produtosPontuados: 2,
       produtosAprovados: 1,
       copiesGeradas: 1,
+      enviosEnfileirados: 0,
       tempoExecucao: expect.stringMatching(/ms$/),
     });
     expect(prisma.generatedCopy.create).toHaveBeenCalledTimes(1);
-    await app.close();
   });
 
   it('retorna relatório zerado quando nenhum produto é encontrado', async () => {
     const service = new PipelineService({
       provider: createProvider([]),
-      prisma: createPrismaMock() as never,
+      ...createRepositories(createPrismaMock()),
       logger: logger(),
     });
     await expect(service.run()).resolves.toMatchObject({
@@ -199,7 +223,7 @@ describe('PipelineService', () => {
           loja: 'Loja Parceira',
         }),
       ]),
-      prisma: prisma as never,
+      ...createRepositories(prisma),
       logger: logger(),
     });
     const report = await service.run();
@@ -219,7 +243,7 @@ describe('PipelineService', () => {
         createProduct({ id: 'approved-1' }),
         createProduct({ id: 'approved-2', nome: 'Produto B' }),
       ]),
-      prisma: prisma as never,
+      ...createRepositories(prisma),
       logger: logger(),
     });
     const report = await service.run();
@@ -235,7 +259,7 @@ describe('PipelineService', () => {
   it('trata erro no Hunter', async () => {
     const service = new PipelineService({
       provider: createProvider([]),
-      prisma: createPrismaMock() as never,
+      ...createRepositories(createPrismaMock()),
       logger: logger(),
       hunterService: {
         run: vi.fn(async () => {
@@ -251,7 +275,7 @@ describe('PipelineService', () => {
   it('trata erro no Score', async () => {
     const service = new PipelineService({
       provider: createProvider([]),
-      prisma: createPrismaMock() as never,
+      ...createRepositories(createPrismaMock()),
       logger: logger(),
       hunterService: {
         run: vi.fn(async () => ({
@@ -283,7 +307,7 @@ describe('PipelineService', () => {
     });
     const service = new PipelineService({
       provider: createProvider([]),
-      prisma: prisma as never,
+      ...createRepositories(prisma),
       logger: logger(),
       hunterService: {
         run: vi.fn(async () => ({
