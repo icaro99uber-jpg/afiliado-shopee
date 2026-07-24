@@ -144,6 +144,8 @@ Dependencias:
 
 - `SenderService` em `apps/api/src/sender-service.ts`.
 - `MockWhatsAppProvider` em `packages/providers`.
+- `EvolutionApiWhatsAppProvider` em `packages/providers`, preparado mas ainda nao injetado no sender ou worker.
+- Factory `createWhatsAppProvider`, com `mock` como selecao padrao segura.
 - `WhatsAppDispatchRepository`.
 - Fila `whatsapp-dispatch` em `packages/queue`.
 - Worker em `apps/worker`.
@@ -151,7 +153,7 @@ Dependencias:
 
 Proximos passos previstos:
 
-- Implementar provider real da Evolution API em sprint futura.
+- Integrar a factory ao `SenderService` e ao worker em task futura, com ativacao explicita por ambiente.
 - Adicionar autenticacao, autorizacao e controles operacionais antes de producao.
 - Criar fluxo de reprocessamento manual para falhas.
 
