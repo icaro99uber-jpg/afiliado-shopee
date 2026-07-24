@@ -1,15 +1,28 @@
 'use client';
 
-import { ClipboardList, PlayCircle, Plus, RefreshCw } from 'lucide-react';
+import {
+  CalendarClock,
+  ClipboardList,
+  PlayCircle,
+  Plus,
+  RefreshCw,
+  Settings,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   getAnalytics,
   getHealth,
+  getSchedulerStatus,
   listDispatches,
   type AnalyticsSnapshot,
+  type SchedulerStatus,
   type WhatsAppDispatch,
 } from '../lib/api';
+import {
+  formatSchedulerDate,
+  schedulerStatusDisplay,
+} from '../lib/scheduler-display';
 import { EmptyState } from '../components/empty-state';
 import { ErrorState } from '../components/error-state';
 import { LoadingState } from '../components/loading-state';
@@ -29,6 +42,10 @@ export default function OverviewPage() {
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
+  const [schedulerLoading, setSchedulerLoading] = useState(true);
+  const [schedulerError, setSchedulerError] = useState<string | null>(null);
+  const schedulerRequestInFlight = useRef(false);
   const [lastJobId, setLastJobId] = useState<string | null>(null);
 
   const loadOverview = async () => {
@@ -64,10 +81,28 @@ export default function OverviewPage() {
     }
   };
 
+  const loadScheduler = async () => {
+    if (schedulerRequestInFlight.current) return;
+    schedulerRequestInFlight.current = true;
+    setSchedulerLoading(true);
+    setSchedulerError(null);
+    try {
+      setScheduler(await getSchedulerStatus());
+    } catch (err) {
+      setSchedulerError(
+        err instanceof Error ? err.message : 'Erro inesperado.',
+      );
+    } finally {
+      schedulerRequestInFlight.current = false;
+      setSchedulerLoading(false);
+    }
+  };
+
   useEffect(() => {
     setLastJobId(sessionStorage.getItem('lastPipelineJobId'));
     void loadOverview();
     void loadAnalytics();
+    void loadScheduler();
   }, []);
 
   const dispatchSummary = useMemo(() => {
@@ -178,6 +213,70 @@ export default function OverviewPage() {
               value={analytics.totalActiveDestinations}
               description="Destinos WhatsApp ativos cadastrados."
             />
+          </div>
+        ) : null}
+      </section>
+
+      <section className="grid gap-4" aria-labelledby="scheduler-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="scheduler-heading" className="font-semibold text-slate-950">
+              Scheduler do pipeline
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Resumo somente leitura do agendamento atual.
+            </p>
+          </div>
+          <Link
+            href="/configuracoes"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
+          >
+            <Settings className="h-4 w-4" aria-hidden="true" />
+            Ver configurações
+          </Link>
+        </div>
+
+        {schedulerLoading ? (
+          <LoadingState label="Consultando Scheduler" />
+        ) : null}
+        {schedulerError ? (
+          <ErrorState
+            title="Não foi possível consultar o Scheduler"
+            message={schedulerError}
+            onRetry={loadScheduler}
+          />
+        ) : null}
+        {scheduler && !schedulerLoading ? (
+          <div className="rounded-lg border border-slate-200 bg-white p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <CalendarClock
+                  className="h-5 w-5 text-slate-500"
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="text-sm font-medium text-slate-950">Status</p>
+                  <div className="mt-1">
+                    <StatusBadge
+                      tone={schedulerStatusDisplay[scheduler.status].tone}
+                    >
+                      {schedulerStatusDisplay[scheduler.status].label}
+                    </StatusBadge>
+                  </div>
+                </div>
+              </div>
+              <div className="sm:text-right">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Próxima execução
+                </p>
+                <p className="mt-1 text-sm font-medium text-slate-900">
+                  {formatSchedulerDate(
+                    scheduler.nextRunAt,
+                    scheduler.timezone,
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
         ) : null}
       </section>

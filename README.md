@@ -327,8 +327,14 @@ manual `POST /pipeline/run` continua disponivel, e o Scheduler nunca chama o
 
 O endpoint e somente leitura: nao registra, edita ou remove cron e nao executa
 o pipeline. Quando o estado nao pode ser consultado, responde HTTP 503 com o
-codigo `SCHEDULER_STATUS_UNAVAILABLE`, sem detalhes do Redis ou stack. O
-dashboard sera integrado ao endpoint em uma task posterior.
+codigo `SCHEDULER_STATUS_UNAVAILABLE`, sem detalhes do Redis ou stack.
+
+O dashboard consome `GET /scheduler` pela camada HTTP centralizada. A Visao
+geral mostra status e proxima execucao em um resumo independente; Configuracoes
+exibe todos os campos publicos e permite apenas atualizar a consulta. Cron,
+enabled e timezone continuam configurados exclusivamente no ambiente do worker.
+HTTP 503 aparece como indisponibilidade, nunca como Scheduler desativado, e
+nenhum segredo ou detalhe interno e renderizado.
 
 ### Provider mock
 
@@ -406,6 +412,7 @@ Endpoints usados pelo dashboard:
 
 - `GET /health`
 - `GET /analytics`
+- `GET /scheduler`
 - `POST /pipeline/run`
 - `GET /pipeline/jobs/:id`
 - `POST /copy/generate`
