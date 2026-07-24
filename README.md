@@ -310,6 +310,26 @@ fecha workers, fila e conexao, mas preserva o agendamento registrado. O endpoint
 manual `POST /pipeline/run` continua disponivel, e o Scheduler nunca chama o
 `PipelineService` diretamente.
 
+`GET /scheduler` consulta somente o estado do agendamento conhecido e retorna:
+
+```json
+{
+  "enabled": true,
+  "status": "registered",
+  "jobId": "scheduled-pipeline-product",
+  "queue": "product-pipeline",
+  "jobName": "pipeline-product",
+  "cronExpression": "0 8 * * *",
+  "timezone": "America/Sao_Paulo",
+  "nextRunAt": "2026-07-25T11:00:00.000Z"
+}
+```
+
+O endpoint e somente leitura: nao registra, edita ou remove cron e nao executa
+o pipeline. Quando o estado nao pode ser consultado, responde HTTP 503 com o
+codigo `SCHEDULER_STATUS_UNAVAILABLE`, sem detalhes do Redis ou stack. O
+dashboard sera integrado ao endpoint em uma task posterior.
+
 ### Provider mock
 
 `MockWhatsAppProvider` valida destino e mensagem não vazios, gera `externalMessageId` fictício, retorna `status: "sent"`, registra chamadas em memória para testes e permite simular falhas.

@@ -30,7 +30,8 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Banco: Prisma Client e schema PostgreSQL em `packages/database`.
 - Filas: BullMQ/Redis em `packages/queue`.
 - Scheduler: contratos e adaptador BullMQ em `packages/queue`, compostos uma
-  unica vez no bootstrap do worker e desativados por padrao.
+  unica vez no bootstrap do worker e desativados por padrao. A API expoe apenas
+  a consulta segura `GET /scheduler`.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
@@ -113,6 +114,17 @@ sucesso, e qualquer falha interrompe o bootstrap com log estruturado seguro.
 O encerramento fecha workers, fila e conexao sem remover o agendamento. O fluxo
 manual por `POST /pipeline/run` permanece disponivel, e tanto o job manual quanto
 o recorrente reutilizam o mesmo processor `pipeline-product`.
+
+A API compoe uma instancia de `SchedulerStatusService` por aplicacao sobre a
+fila `product-pipeline` compartilhada. `GET /scheduler` retorna configuracao,
+estado, ID, fila, nome do job, cron, timezone e proxima execucao informada pelo
+BullMQ. A rota depende apenas da facade, nao cria filas por request e nao chama
+`register`, `remove` ou `PipelineService`.
+
+Se o estado nao puder ser consultado, a API retorna HTTP 503 com
+`SCHEDULER_STATUS_UNAVAILABLE` e mensagem publica segura. O fechamento da API
+encerra a fila e a conexao criadas pela aplicacao. O dashboard ainda nao consome
+esse endpoint e sera integrado em task posterior.
 
 Regras de seguranca do dashboard:
 

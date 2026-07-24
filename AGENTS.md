@@ -216,6 +216,8 @@ Saidas:
   `not-registered`.
 - Job recorrente com payload `{ filters }` e nome `pipeline-product` quando o
   registro for solicitado explicitamente.
+- `GET /scheduler` com estado publico seguro e HTTP 200.
+- HTTP 503 com `SCHEDULER_STATUS_UNAVAILABLE` quando a consulta falhar.
 
 Dependencias:
 
@@ -224,6 +226,7 @@ Dependencias:
   `packages/queue/src/index.ts`.
 - Configuracao validada por `loadConfig` em `packages/config`.
 - Composicao unica em `startWorker`, usando a conexao e a fila compartilhadas.
+- `SchedulerStatusService` e composicao da API em `apps/api`.
 
 Comportamento operacional:
 
@@ -236,12 +239,15 @@ Comportamento operacional:
   desconhecido.
 - O shutdown fecha workers, fila e conexao sem remover o agendamento.
 - O Scheduler nao chama `PipelineService`; apenas enfileira `pipeline-product`.
+- A API consulta somente o ID estavel e nao registra, edita ou remove cron.
+- A facade e criada uma vez por aplicacao e nao por request.
 - Testes usam doubles em memoria, sem Redis, cron ou HTTP reais.
 
 Proximos passos previstos:
 
 - Adicionar observabilidade operacional do estado do agendamento em task
   dedicada, sem duplicar o processamento de `pipeline-product`.
+- Integrar o dashboard ao endpoint somente de leitura em task posterior.
 
 ## Analytics
 
