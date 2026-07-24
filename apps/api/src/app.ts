@@ -11,6 +11,7 @@ import {
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import {
+  createBullMqPipelineScheduler,
   createProductPipelineQueue,
   createRedisConnection,
   JOB_NAMES,
@@ -22,12 +23,18 @@ import {
   createPrismaRepositories,
 } from './application-services';
 import type { AnalyticsService } from './analytics-service';
+import { SchedulerStatusService } from './scheduler-status-service';
 
 type BuildAppOptions = {
   logger?: boolean;
   hunterProvider?: HunterProvider;
   prisma?: DatabaseClient;
   analyticsService?: Pick<AnalyticsService, 'getSnapshot'>;
+  schedulerEnabled?: boolean;
+  schedulerStatusServiceFactory?: () => Pick<
+    SchedulerStatusService,
+    'getStatus'
+  >;
   pipelineQueue?: {
     add: (
       name: string,
@@ -76,6 +83,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     }
     return pipelineQueue as NonNullable<typeof pipelineQueue>;
   };
+  let pipelineScheduler:
+    | ReturnType<typeof createBullMqPipelineScheduler>
+    | undefined;
+  const schedulerReader = {
+    getState: (jobId: string) => {
+      pipelineScheduler ??= createBullMqPipelineScheduler(
+        getPipelineQueue() as ReturnType<typeof createProductPipelineQueue>,
+      );
+      return pipelineScheduler.getState(jobId);
+    },
+  };
+  const schedulerStatusService = options.schedulerStatusServiceFactory
+    ? options.schedulerStatusServiceFactory()
+    : new SchedulerStatusService(
+        schedulerReader,
+        options.schedulerEnabled ?? false,
+      );
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -100,6 +124,24 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return reply.status(500).send({
         error: 'ANALYTICS_FETCH_FAILED',
         message: 'Falha ao consultar analytics',
+      });
+    }
+  });
+
+  app.get('/scheduler', async (request, reply) => {
+    try {
+      return await schedulerStatusService.getStatus();
+    } catch (error) {
+      request.log.error(
+        {
+          event: 'scheduler.status.route.failed',
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        },
+        'Scheduler status route failed',
+      );
+      return reply.status(503).send({
+        error: 'SCHEDULER_STATUS_UNAVAILABLE',
+        message: 'Estado do Scheduler indisponivel',
       });
     }
   });
