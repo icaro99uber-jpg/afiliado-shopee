@@ -41,3 +41,51 @@ describe('envSchema WhatsApp provider', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('envSchema Scheduler', () => {
+  it('mantem o scheduler desativado por padrao', () => {
+    const config = envSchema.parse(baseEnv);
+
+    expect(config.SCHEDULER_ENABLED).toBe(false);
+    expect(config.SCHEDULER_CRON).toBeUndefined();
+    expect(config.SCHEDULER_TIMEZONE).toBeUndefined();
+  });
+
+  it.each([undefined, 'cron-invalido', '60 8 * * *'])(
+    'exige cron valido quando habilitado: %s',
+    (cronExpression) => {
+      const result = envSchema.safeParse({
+        ...baseEnv,
+        SCHEDULER_ENABLED: 'true',
+        SCHEDULER_CRON: cronExpression,
+        SCHEDULER_TIMEZONE: 'America/Sao_Paulo',
+      });
+
+      expect(result.success).toBe(false);
+    },
+  );
+
+  it('rejeita timezone invalido quando habilitado', () => {
+    const result = envSchema.safeParse({
+      ...baseEnv,
+      SCHEDULER_ENABLED: 'true',
+      SCHEDULER_CRON: '0 8 * * *',
+      SCHEDULER_TIMEZONE: 'Timezone/Inexistente',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('aceita cron e timezone validos quando habilitado', () => {
+    const config = envSchema.parse({
+      ...baseEnv,
+      SCHEDULER_ENABLED: 'true',
+      SCHEDULER_CRON: '0 8 * * *',
+      SCHEDULER_TIMEZONE: 'America/Sao_Paulo',
+    });
+
+    expect(config.SCHEDULER_ENABLED).toBe(true);
+    expect(config.SCHEDULER_CRON).toBe('0 8 * * *');
+    expect(config.SCHEDULER_TIMEZONE).toBe('America/Sao_Paulo');
+  });
+});

@@ -283,6 +283,25 @@ Destinos inativos permanecem cadastrados, mas não recebem dispatch no pipeline.
 - `product-pipeline` / job `pipeline-product`: orquestra Hunter, Score, Copy e criação dos dispatches.
 - `whatsapp-dispatch` / job `whatsapp-dispatch`: payload `{ "dispatchId": "..." }`, com `attempts: 3`, backoff exponencial, `removeOnComplete` e `removeOnFail` limitados.
 
+### Scheduler preparado
+
+`SchedulerConfig` e `PipelineScheduler` definem o contrato para agendamentos do
+pipeline sem depender de BullMQ. O adaptador `BullMqPipelineScheduler` usa a
+fila `product-pipeline`, um ID estavel e a API de Job Schedulers para registrar,
+consultar ou remover um job recorrente `pipeline-product`. Os filtros opcionais
+sao preservados no payload.
+
+```env
+SCHEDULER_ENABLED=false
+SCHEDULER_CRON=0 8 * * *
+SCHEDULER_TIMEZONE=America/Sao_Paulo
+```
+
+O Scheduler permanece desativado por padrao. Cron e timezone so sao exigidos
+quando `SCHEDULER_ENABLED=true`. Nesta etapa o worker nao inicia o adaptador e
+nenhum agendamento e criado automaticamente; o pipeline continua manual. A
+proxima task conectara essa arquitetura ao bootstrap do worker.
+
 ### Provider mock
 
 `MockWhatsAppProvider` valida destino e mensagem não vazios, gera `externalMessageId` fictício, retorna `status: "sent"`, registra chamadas em memória para testes e permite simular falhas.

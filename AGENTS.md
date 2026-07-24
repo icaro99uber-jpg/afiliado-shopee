@@ -196,6 +196,46 @@ Proximos passos previstos:
 - Melhorar rastreabilidade entre produto, copy, destino e envio.
 - Separar integracoes reais em providers sem alterar o contrato publico do pipeline.
 
+## Scheduler
+
+Responsabilidade:
+
+- Preparar o registro e a remocao de execucoes recorrentes do pipeline.
+- Enfileirar somente jobs `pipeline-product` na fila `product-pipeline`.
+- Expor estado seguro do agendamento sem executar `PipelineService`.
+
+Entradas:
+
+- `SchedulerConfig` com `enabled`, `cronExpression`, `timezone`, `filters`
+  opcionais e `jobId` estavel.
+- Fila compativel com as operacoes de Job Scheduler do BullMQ.
+
+Saidas:
+
+- `PipelineSchedulerState` com status `disabled`, `registered` ou
+  `not-registered`.
+- Job recorrente com payload `{ filters }` e nome `pipeline-product` quando o
+  registro for solicitado explicitamente.
+
+Dependencias:
+
+- Contratos em `packages/queue/src/scheduler.ts`.
+- `BullMqPipelineScheduler` e fila `product-pipeline` em
+  `packages/queue/src/index.ts`.
+- Configuracao validada por `loadConfig` em `packages/config`.
+
+Restricoes atuais:
+
+- `SCHEDULER_ENABLED` e `false` por padrao.
+- O worker nao instancia nem inicia o Scheduler nesta etapa.
+- Nao ha cron ativo, Redis real em testes ou chamada direta a
+  `PipelineService`.
+
+Proximos passos previstos:
+
+- Conectar o Scheduler ao bootstrap do worker em task dedicada, mantendo uma
+  unica implementacao do processamento em `pipeline-product`.
+
 ## Analytics
 
 Responsabilidade:
