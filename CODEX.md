@@ -29,6 +29,8 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Dashboard: Next.js App Router em `apps/dashboard`.
 - Banco: Prisma Client e schema PostgreSQL em `packages/database`.
 - Filas: BullMQ/Redis em `packages/queue`.
+- Scheduler: contratos e adaptador BullMQ em `packages/queue`, desativados e
+  ainda sem conexao com o bootstrap do worker.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
@@ -88,6 +90,25 @@ do restante da pagina. Apos executar o pipeline, o usuario pode fazer uma unica
 nova consulta pelo botao `Atualizar metricas`, sem polling permanente ou estado
 global entre paginas.
 
+## Scheduler
+
+O modulo de Scheduler prepara o agendamento recorrente do pipeline sem executar
+`PipelineService` diretamente. `SchedulerConfig` e `PipelineScheduler` formam o
+contrato independente de BullMQ. `BullMqPipelineScheduler` usa a API de Job
+Schedulers da fila `product-pipeline` para registrar apenas jobs
+`pipeline-product` com ID estavel, consultar o estado e remover o agendamento.
+
+Configuracao opcional:
+
+- `SCHEDULER_ENABLED=false` por padrao;
+- `SCHEDULER_CRON`, exigido e validado somente quando habilitado;
+- `SCHEDULER_TIMEZONE`, exigido como timezone IANA somente quando habilitado.
+
+Nesta etapa nenhum cron e registrado automaticamente. O bootstrap do worker nao
+instancia nem chama o adaptador, portanto o pipeline continua manual. A proxima
+task podera conectar o Scheduler ao bootstrap usando `loadConfig`, sem duplicar
+a logica de processamento existente.
+
 Regras de seguranca do dashboard:
 
 - Nao colocar `EVOLUTION_API_KEY` ou qualquer segredo em `NEXT_PUBLIC_*`.
@@ -105,6 +126,9 @@ Fluxo operacional atual:
 6. O pipeline enfileira jobs `whatsapp-dispatch`.
 7. O bootstrap do worker cria uma unica instancia do provider configurado e a injeta no `SenderService`.
 8. `WHATSAPP_PROVIDER=mock` permanece como padrao; `evolution` exige configuracao completa e explicita.
+
+O fluxo acima continua sendo iniciado manualmente; a arquitetura do Scheduler
+nao altera esse comportamento.
 
 Regra de dependencia:
 
