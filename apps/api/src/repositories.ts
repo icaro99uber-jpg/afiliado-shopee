@@ -64,6 +64,14 @@ export type WhatsAppDestinationData = {
   name: string;
   destination: string;
   active: boolean;
+  type?: 'INDIVIDUAL' | 'GROUP';
+  available?: boolean;
+  fingerprint?: string | null;
+  sourceInstanceName?: string | null;
+  memberCount?: number | null;
+  ownerIsParticipant?: boolean | null;
+  discoveredAt?: Date | null;
+  lastSyncedAt?: Date | null;
 };
 
 export type WhatsAppDestinationUpdate = Partial<WhatsAppDestinationData>;
@@ -72,6 +80,38 @@ export type WhatsAppDestinationRecord = WhatsAppDestinationData & {
   id: string;
   createdAt?: Date;
   updatedAt?: Date;
+};
+
+export type WhatsAppGroupRecord = WhatsAppDestinationRecord & {
+  type: 'GROUP';
+  available: boolean;
+  fingerprint: string;
+  sourceInstanceName: string;
+  discoveredAt: Date;
+  lastSyncedAt: Date;
+};
+
+export type WhatsAppGroupCreateData = Omit<
+  WhatsAppGroupRecord,
+  'id' | 'createdAt' | 'updatedAt'
+>;
+
+export type WhatsAppGroupUpdate = Partial<
+  Pick<
+    WhatsAppGroupRecord,
+    | 'name'
+    | 'active'
+    | 'available'
+    | 'fingerprint'
+    | 'memberCount'
+    | 'ownerIsParticipant'
+    | 'lastSyncedAt'
+  >
+>;
+
+export type WhatsAppGroupFilters = {
+  active?: boolean;
+  available?: boolean;
 };
 
 export type WhatsAppDispatchStatus = 'PENDING' | 'SENT' | 'FAILED';
@@ -105,7 +145,15 @@ export type WhatsAppDispatchDetails = WhatsAppDispatchRecord & {
     GeneratedCopyRecord,
     'titulo' | 'mensagem' | 'cta' | 'hashtags'
   >;
-  destination: Pick<WhatsAppDestinationRecord, 'destination'>;
+  destination: Pick<
+    WhatsAppDestinationRecord,
+    | 'destination'
+    | 'type'
+    | 'active'
+    | 'available'
+    | 'fingerprint'
+    | 'sourceInstanceName'
+  >;
   product?: Pick<ProductLeadRecord, 'comissao'> | null;
 };
 
@@ -142,6 +190,24 @@ export interface WhatsAppDestinationRepository {
     id: string,
     data: WhatsAppDestinationUpdate,
   ): Promise<WhatsAppDestinationRecord | null>;
+}
+
+export interface WhatsAppGroupDirectoryRepository {
+  findById(id: string): Promise<WhatsAppGroupRecord | null>;
+  findByExternalGroupId(
+    sourceInstanceName: string,
+    externalGroupId: string,
+  ): Promise<WhatsAppGroupRecord | null>;
+  listByInstance(sourceInstanceName: string): Promise<WhatsAppGroupRecord[]>;
+  list(
+    sourceInstanceName: string,
+    filters?: WhatsAppGroupFilters,
+  ): Promise<WhatsAppGroupRecord[]>;
+  create(data: WhatsAppGroupCreateData): Promise<WhatsAppGroupRecord>;
+  update(
+    id: string,
+    data: WhatsAppGroupUpdate,
+  ): Promise<WhatsAppGroupRecord | null>;
 }
 
 export interface WhatsAppDispatchRepository {

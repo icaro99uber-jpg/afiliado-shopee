@@ -17,6 +17,7 @@ import {
   PrismaProductRepository,
   PrismaWhatsAppDestinationRepository,
   PrismaWhatsAppDispatchRepository,
+  PrismaWhatsAppGroupDirectoryRepository,
 } from './prisma-repositories';
 import type {
   AnalyticsRepository,
@@ -24,7 +25,9 @@ import type {
   ProductRepository,
   WhatsAppDestinationRepository,
   WhatsAppDispatchRepository,
+  WhatsAppGroupDirectoryRepository,
 } from './repositories';
+import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
 
 type DispatchQueue = {
   add: (
@@ -40,6 +43,7 @@ export type ApplicationRepositories = {
   generatedCopies: GeneratedCopyRepository;
   whatsappDestinations: WhatsAppDestinationRepository;
   whatsappDispatches: WhatsAppDispatchRepository;
+  whatsappGroups: WhatsAppGroupDirectoryRepository;
 };
 
 export type ApplicationServices = {
@@ -56,6 +60,7 @@ export const createSenderService = ({
   whatsAppProvider,
   logger,
   messageBuilder,
+  groupSendPolicy,
 }: {
   repositories: Pick<ApplicationRepositories, 'whatsappDispatches'>;
   whatsAppProvider: WhatsAppProvider;
@@ -63,12 +68,14 @@ export const createSenderService = ({
   messageBuilder?: ConstructorParameters<
     typeof SenderService
   >[0]['messageBuilder'];
+  groupSendPolicy?: WhatsAppGroupSendPolicy;
 }) =>
   new SenderService({
     dispatches: repositories.whatsappDispatches,
     provider: whatsAppProvider,
     logger,
     messageBuilder,
+    groupSendPolicy,
   });
 
 export const createPrismaRepositories = (
@@ -79,6 +86,7 @@ export const createPrismaRepositories = (
   generatedCopies: new PrismaGeneratedCopyRepository(prisma),
   whatsappDestinations: new PrismaWhatsAppDestinationRepository(prisma),
   whatsappDispatches: new PrismaWhatsAppDispatchRepository(prisma),
+  whatsappGroups: new PrismaWhatsAppGroupDirectoryRepository(prisma),
 });
 
 export const createApplicationServices = ({

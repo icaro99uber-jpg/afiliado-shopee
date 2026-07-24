@@ -8,25 +8,25 @@ datasource db {
 }
 
 model ProductLead {
-  copies            GeneratedCopy[]
+  copies             GeneratedCopy[]
   whatsappDispatches WhatsAppDispatch[]
-  id                String   @id @default(cuid())
-  providerProductId String   @unique
-  nome              String
-  categoria         String
-  preco             Float
-  desconto          Float
-  nota              Float
-  vendidos          Int
-  comissao          Float
-  loja              String
-  urlImagem         String
-  url               String?
-  title             String
-  score             Int?
-  scoreUpdatedAt    DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String             @id @default(cuid())
+  providerProductId  String             @unique
+  nome               String
+  categoria          String
+  preco              Float
+  desconto           Float
+  nota               Float
+  vendidos           Int
+  comissao           Float
+  loja               String
+  urlImagem          String
+  url                String?
+  title              String
+  score              Int?
+  scoreUpdatedAt     DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 }
 
 model GeneratedCopy {
@@ -44,30 +44,41 @@ model GeneratedCopy {
 }
 
 model WhatsAppDestination {
-  id         String             @id @default(cuid())
-  name       String
-  destination String
-  active     Boolean            @default(true)
-  dispatches WhatsAppDispatch[]
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+  id                 String                  @id @default(cuid())
+  name               String
+  destination        String
+  type               WhatsAppDestinationType @default(INDIVIDUAL)
+  active             Boolean                 @default(true)
+  available          Boolean                 @default(true)
+  fingerprint        String?
+  sourceInstanceName String?
+  memberCount        Int?
+  ownerIsParticipant Boolean?
+  discoveredAt       DateTime?
+  lastSyncedAt       DateTime?
+  dispatches         WhatsAppDispatch[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@unique([destination, sourceInstanceName])
+  @@index([type, active, available])
 }
 
 model WhatsAppDispatch {
-  id                String              @id @default(cuid())
+  id                String                 @id @default(cuid())
   productId         String
-  product           ProductLead         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product           ProductLead            @relation(fields: [productId], references: [id], onDelete: Cascade)
   generatedCopyId   String
-  generatedCopy     GeneratedCopy       @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
+  generatedCopy     GeneratedCopy          @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
   destinationId     String
-  destination       WhatsAppDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  destination       WhatsAppDestination    @relation(fields: [destinationId], references: [id], onDelete: Cascade)
   externalMessageId String?
   status            WhatsAppDispatchStatus @default(PENDING)
-  attemptCount      Int                 @default(0)
+  attemptCount      Int                    @default(0)
   errorMessage      String?
   sentAt            DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
   @@unique([generatedCopyId, destinationId])
   @@index([productId])
@@ -79,4 +90,9 @@ enum WhatsAppDispatchStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum WhatsAppDestinationType {
+  INDIVIDUAL
+  GROUP
 }

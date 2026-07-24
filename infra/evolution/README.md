@@ -141,6 +141,44 @@ saudaveis/open. O `.env` raiz continuou selecionando mock, instancia de exemplo
 e allowlist vazia, portanto o teste ficou bloqueado antes de criar registros ou
 enviar mensagem. Resultado sanitizado: zero mensagens reais.
 
+## Consulta read-only de grupos
+
+A tag oficial 2.3.6 define a listagem em
+[`group.router.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/src/api/routes/group.router.ts),
+com validacao em
+[`group.schema.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/src/validate/group.schema.ts):
+
+```text
+GET /group/fetchAllGroups/:instanceName?getParticipants=false
+apikey: <chave local ignorada>
+```
+
+A query `getParticipants` e obrigatoria e aceita somente `true` ou `false`. O
+servico oficial usa `groupFetchAllParticipating()` e retorna array com `id`,
+`subject`, `size` e metadados do grupo; o campo `participants` so e anexado com
+`true`. Este projeto fixa `false`, descarta todos os campos alem de identificador
+interno, nome e contagem e nunca chama rotas de participantes, convite, criacao,
+edicao, saida ou envio. A rota nao possui guard explicito de conexao, portanto
+qualquer falha por instancia desconectada e tratada como indisponibilidade
+sanitizada, sem resposta bruta.
+
+A validacao local read-only confirmou HTTP 200 na versao 2.3.6, uma contagem de
+grupo positiva, IDs no formato esperado, `size` numerico e zero campos
+`participants`. Nenhum nome ou identificador foi impresso ou persistido durante
+essa inspecao.
+
+O diretorio da aplicacao pode ser validado em dry-run com:
+
+```powershell
+corepack pnpm whatsapp:group-test
+```
+
+O comando apenas consulta Evolution/instancia/diretorio e le banco/Redis. Nao
+cria produto, copy, dispatch ou job, nao inicia worker, nao ativa grupo e nao
+envia. O caminho futuro `-- --confirm-one-real-group-message` existe apenas para
+uma task separada: nao deve ser executado, exige master switch, safe mode,
+limite 1, Scheduler desligado e exatamente um grupo ativo/disponivel.
+
 ## Proximo passo manual e controlado
 
 Uma task futura e separada deve revisar a instancia ficticia, o ambiente, a

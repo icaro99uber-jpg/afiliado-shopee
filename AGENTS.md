@@ -7,8 +7,8 @@ Este documento descreve os agentes e componentes de orquestracao atuais do proje
 ## Camadas de aplicacao e persistencia
 
 - Servicos de aplicacao: `HunterService`, `ScoreService`, `CopyService`, `SenderService`, `PipelineService` e `AnalyticsService`.
-- Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository`, `WhatsAppDispatchRepository` e `AnalyticsRepository`.
-- Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository`, `PrismaWhatsAppDispatchRepository` e `PrismaAnalyticsRepository`.
+- Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository`, `WhatsAppGroupDirectoryRepository`, `WhatsAppDispatchRepository` e `AnalyticsRepository`.
+- Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository`, `PrismaWhatsAppGroupDirectoryRepository`, `PrismaWhatsAppDispatchRepository` e `PrismaAnalyticsRepository`.
 - Composicao: `createApplicationServices` e `createPrismaRepositories` em `apps/api/src/application-services.ts`.
 
 Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
@@ -228,6 +228,70 @@ Estado sanitizado da preparacao da Task 13.5: Evolution 2.3.6 saudavel,
 instancia open e infraestrutura principal disponivel. O `.env` raiz ainda
 selecionava mock, instancia de exemplo e allowlist vazia; logo nenhuma mensagem
 real foi enviada e nenhum registro E2E foi criado pela execucao local.
+
+## Diretorio de grupos WhatsApp
+
+Responsabilidade:
+
+- Descobrir somente os grupos dos quais a instancia conectada participa.
+- Persistir identificador externo apenas no banco e expor fingerprint SHA-256.
+- Criar novos grupos inativos, atualizar metadados seguros e desativar grupos
+  que ficaram indisponiveis.
+- Administrar autorizacao explicita sem criar uma acao de envio.
+
+Dependencias:
+
+- `EvolutionApiGroupDirectoryProvider` e contrato
+  `WhatsAppGroupDirectoryProvider` em `packages/providers`.
+- `GroupDirectoryService`, `WhatsAppGroupDirectoryRepository` e adaptador Prisma
+  em `apps/api`.
+- Modelo compartilhado `WhatsAppDestination` com tipo `GROUP` e migracao
+  `20260724190000_whatsapp_group_directory`.
+- Secao Grupos da pagina WhatsApp do dashboard.
+
+Contrato Evolution 2.3.6:
+
+- Somente `GET /group/fetchAllGroups/:instanceName?getParticipants=false`, com
+  header `apikey`, timeout e sem body.
+- `getParticipants=false` e obrigatorio. O provider mapeia apenas `id`,
+  `subject` e `size`; qualquer campo `participants` recebido e descartado.
+- A rota oficial nao tem guard explicito de conexao. Timeout, rede, HTTP
+  400/401/403/404/5xx e resposta malformada viram erros locais sanitizados.
+- Nenhum endpoint de participante, convite, nome, descricao, configuracao,
+  criacao, saida ou envio e usado pelo diretorio.
+
+Autorizacao e anti-mass-send:
+
+- Novo grupo sempre nasce `active=false`; grupo ausente fica
+  `available=false` e `active=false` sem ser apagado.
+- Ativacao pela API exige `confirm: "AUTORIZAR_GRUPO"`; o dashboard nao altera
+  o master switch.
+- `WHATSAPP_GROUP_SEND_ENABLED=false` e
+  `WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN=1` sao os defaults.
+- `PipelineService` recebe somente destinos `INDIVIDUAL`; Scheduler nao cria
+  fanout, loop ou broadcast de grupos.
+- O Sender exige instancia atual, disponibilidade, autorizacao, identidade
+  exata, safe mode e master switch imediatamente antes do provider.
+- Telefones continuam usando a allowlist anterior e nunca sao tratados como
+  grupos.
+
+Teste controlado:
+
+- `corepack pnpm whatsapp:group-test` valida Evolution, instancia, banco, Redis,
+  diretorio e autorizacao em dry-run sem escrita, fila, worker ou envio.
+- A unica flag futura e `--confirm-one-real-group-message`; ela foi implementada
+  para testes mockados, permanece bloqueada em CI e nao foi executada.
+- O caminho futuro exige exatamente um grupo ativo/disponivel, texto e IDs
+  fixos, um job com uma tentativa, sem backoff/retry/remocao, worker isolado e
+  bloqueio permanente depois de execucao anterior.
+- Saidas e logs usam somente contagens, nome permitido e fingerprint; nunca JID,
+  participantes, telefone, convite, key, token ou sessao.
+
+Persistencia:
+
+- A migracao nova aplica sobre o banco existente. A validacao de banco limpo
+  permanece impedida pela migracao historica de dispatch, que referencia
+  tabelas anteriores nao criadas por ela; nenhuma migracao antiga foi alterada.
 
 Infraestrutura local da Evolution API:
 

@@ -36,6 +36,9 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2, `EvolutionSendGuard` e factory segura em
   `packages/providers`, conectados uma unica vez ao bootstrap do worker.
+- Diretorio de grupos: provider read-only 2.3.6 e fingerprints criptograficos
+  em `packages/providers`, servico/repositorio/API em `apps/api` e UI na pagina
+  WhatsApp do dashboard.
 - Teste Evolution isolado: CLI em
   `apps/worker/src/evolution-single-message-test.ts`, separado do bootstrap,
   filas, banco, Scheduler e pipeline.
@@ -231,6 +234,59 @@ saudaveis/open, e o banco/Redis principais ficaram disponiveis. O `.env` raiz
 continuou em `mock`, com instancia de exemplo e allowlist vazia, bloqueando o
 dry-run antes de qualquer escrita. Nenhuma mensagem real foi enviada.
 
+## Diretorio WhatsApp de grupos
+
+O contrato externo fixado para Evolution API 2.3.6 e somente leitura:
+`GET /group/fetchAllGroups/:instanceName?getParticipants=false`, header
+`apikey`, sem body. A query obrigatoria impede o retorno de participantes. A
+implementacao oficial monta `id`, `subject`, `size` e outros metadados, mas
+`EvolutionApiGroupDirectoryProvider` conserva somente identificador interno,
+nome e contagem opcional. Resposta bruta, participantes, descricao, convite,
+owner, foto, tokens e sessao nunca atravessam o provider.
+
+`normalizeWhatsAppGroupId` remove apenas espacos externos, exige o formato de
+grupo `@g.us` confirmado na tag e nunca chama `normalizeEvolutionDestination`.
+`fingerprintWhatsAppGroupId` usa SHA-256 truncado com prefixo `grp_`; APIs,
+dashboard e logs nao mostram o identificador externo.
+
+`GroupDirectoryService` sincroniza por instancia. Novos registros do tipo
+`GROUP` nascem disponiveis e inativos. Metadados seguros sao atualizados sem
+alterar uma autorizacao existente; ausencias sao preservadas, marcadas
+indisponiveis e desativadas. O relatorio contem apenas `discovered`, `created`,
+`updated`, `unavailable` e `active`.
+
+Rotas: `POST /whatsapp/groups/sync`, `GET /whatsapp/groups`,
+`GET /whatsapp/groups/:id` e `PATCH /whatsapp/groups/:id`. O PATCH aceita apenas
+`active`; ativacao exige `AUTORIZAR_GRUPO`, desativacao e direta e grupos
+indisponiveis nao podem ser ativados. Nao existe rota de envio.
+
+O pipeline foi isolado por tipo no adaptador: `listActive()` retorna somente
+`INDIVIDUAL`, mesmo que varios grupos estejam ativos. O Scheduler nao ganhou
+nenhum job ou fanout. Antes do HTTP, `WhatsAppGroupSendPolicy` exige grupo da
+instancia atual, disponivel, ativo, identidade exata, safe mode e master switch.
+O provider aplica ainda `EvolutionGroupSendGuard`, com limite por processo. As
+protecoes de telefone e a allowlist anterior permanecem separadas.
+
+Configuracao segura:
+
+```env
+WHATSAPP_GROUP_SEND_ENABLED=false
+WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN=1
+```
+
+`corepack pnpm whatsapp:group-test` e dry-run sem escrita, fila, worker ou
+envio. O unico caminho futuro confirmado aceita somente
+`--confirm-one-real-group-message`, e bloqueado em CI e exige um unico grupo
+ativo/disponivel, master switch, safe mode, limite 1 e Scheduler desligado. Ele
+usa texto e IDs fixos, uma tentativa, sem backoff/retry/remocao e bloqueia
+qualquer repeticao depois de dispatch/job anterior. Esse caminho foi validado
+apenas por mocks e nao deve ser executado nesta task.
+
+A nova migracao `20260724190000_whatsapp_group_directory` foi aplicada ao banco
+existente. Um banco limpo nao pode ser validado enquanto a migracao historica
+`20260724000000_whatsapp_dispatch` depender de tabelas preexistentes que ela nao
+cria; a migracao antiga foi preservada sem alteracao.
+
 ## Infraestrutura local da Evolution API
 
 `infra/evolution` contem um compose independente do compose principal. Ele fixa
@@ -307,6 +363,8 @@ Arquivos principais na raiz:
   em arquivos versionados.
 - Manter o comando de teste Evolution isolado e dry-run por padrao; qualquer
   mudanca no caminho confirmado exige revisao de seguranca dedicada.
+- Nunca misturar autorizacao de telefone com autorizacao de grupo. Grupos nao
+  entram no pipeline/Scheduler e so podem ser descobertos pela rota read-only.
 - Nunca acessar variaveis de ambiente dentro de providers nem registrar credenciais em logs ou erros.
 - Registrar eventos relevantes com logs estruturados nos servicos e workers.
 - Evitar acoplamento direto entre endpoints e detalhes de infraestrutura quando ja houver servico dedicado.

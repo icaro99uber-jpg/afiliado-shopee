@@ -15,6 +15,7 @@
     "evolution:restart": "docker compose --env-file infra/evolution/.env.local -f infra/evolution/docker-compose.yml restart",
     "evolution:test-message": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker evolution:test-message",
     "whatsapp:e2e-test": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker whatsapp:e2e-test",
+    "whatsapp:group-test": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker whatsapp:group-test",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",

@@ -7,6 +7,21 @@ export {
   type ProviderLogger,
 } from './evolution-api-whatsapp-provider';
 export {
+  EvolutionApiGroupDirectoryProvider,
+  type EvolutionApiGroupDirectoryProviderOptions,
+} from './evolution-api-group-directory-provider';
+export {
+  EvolutionGroupSendGuard,
+  type EvolutionGroupSendGuardOptions,
+} from './evolution-group-send-guard';
+export {
+  fingerprintWhatsAppGroupId,
+  isWhatsAppGroupId,
+  normalizeWhatsAppGroupId,
+  type WhatsAppGroupDirectoryProvider,
+  type WhatsAppGroupSummary,
+} from './whatsapp-group-directory';
+export {
   EvolutionSendGuard,
   maskEvolutionDestination,
   normalizeEvolutionDestination,
@@ -34,7 +49,11 @@ export interface EvolutionProvider {
   sendMessage(input: { to: string; message: string }): Promise<{ id: string }>;
 }
 
-export type WhatsAppSendInput = { destination: string; message: string };
+export type WhatsAppSendInput = {
+  destination: string;
+  message: string;
+  destinationType?: 'INDIVIDUAL' | 'GROUP';
+};
 
 export type WhatsAppSendResult = {
   externalMessageId: string;

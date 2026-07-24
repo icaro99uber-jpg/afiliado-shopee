@@ -17,10 +17,7 @@ export type AnalyticsSnapshot = {
   totalActiveDestinations: number;
 };
 
-export type SchedulerStatusValue =
-  | 'disabled'
-  | 'registered'
-  | 'not-registered';
+export type SchedulerStatusValue = 'disabled' | 'registered' | 'not-registered';
 
 export type SchedulerStatus = {
   enabled: boolean;
@@ -84,6 +81,32 @@ export type WhatsAppDestinationInput = {
   active?: boolean;
 };
 
+export type WhatsAppGroup = {
+  id: string;
+  name: string;
+  fingerprint: string;
+  memberCount: number | null;
+  ownerIsParticipant: boolean | null;
+  active: boolean;
+  available: boolean;
+  discoveredAt: string;
+  lastSyncedAt: string;
+  updatedAt: string | null;
+};
+
+export type WhatsAppGroupFilters = {
+  active?: boolean;
+  available?: boolean;
+};
+
+export type WhatsAppGroupSyncReport = {
+  discovered: number;
+  created: number;
+  updated: number;
+  unavailable: number;
+  active: number;
+};
+
 export type WhatsAppDispatchStatus = 'PENDING' | 'SENT' | 'FAILED';
 
 export type DashboardProduct = Product & {
@@ -116,4 +139,3 @@ export type DispatchFilters = {
   destinationId?: string;
   productId?: string;
 };
-

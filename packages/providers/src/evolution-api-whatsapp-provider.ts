@@ -9,6 +9,8 @@ import {
   maskEvolutionDestination,
   type EvolutionSendGuard,
 } from './evolution-send-guard';
+import type { EvolutionGroupSendGuard } from './evolution-group-send-guard';
+import { fingerprintWhatsAppGroupId } from './whatsapp-group-directory';
 
 export type HttpClient = (
   input: string | URL | Request,
@@ -28,6 +30,7 @@ export type EvolutionApiWhatsAppProviderOptions = {
   logger?: ProviderLogger;
   timeoutMs?: number;
   sendGuard?: EvolutionSendGuard;
+  groupSendGuard?: EvolutionGroupSendGuard;
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -121,6 +124,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
   private readonly logger?: ProviderLogger;
   private readonly timeoutMs: number;
   private readonly sendGuard?: EvolutionSendGuard;
+  private readonly groupSendGuard?: EvolutionGroupSendGuard;
 
   constructor(options: EvolutionApiWhatsAppProviderOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
@@ -147,6 +151,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
     this.logger = options.logger;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.sendGuard = options.sendGuard;
+    this.groupSendGuard = options.groupSendGuard;
   }
 
   async sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
@@ -160,14 +165,27 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
       'Mensagem WhatsApp e obrigatoria',
       'WHATSAPP_MESSAGE_REQUIRED',
     );
-    const destinationMasked = maskEvolutionDestination(destination);
+    const isGroup = input.destinationType === 'GROUP';
+    const destinationPublic = isGroup
+      ? fingerprintWhatsAppGroupId(destination)
+      : maskEvolutionDestination(destination);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const url = `${this.baseUrl}/message/sendText/${encodeURIComponent(this.instanceName)}`;
     let responseStatus: number | undefined;
 
     try {
-      this.sendGuard?.authorizeRequest(destination);
+      if (isGroup) {
+        if (!this.groupSendGuard) {
+          throw new AppError(
+            'Envio para grupos nao foi configurado',
+            'WHATSAPP_GROUP_SEND_NOT_CONFIGURED',
+          );
+        }
+        this.groupSendGuard.authorizeRequest(destination);
+      } else {
+        this.sendGuard?.authorizeRequest(destination);
+      }
       const response = await this.httpClient(url, {
         method: 'POST',
         headers: {
@@ -209,7 +227,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
         {
           event: 'evolution.message.sent',
           instanceName: this.instanceName,
-          destination: destinationMasked,
+          destination: destinationPublic,
         },
         'Evolution API message sent',
       );
@@ -230,7 +248,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
         {
           event: 'evolution.message.failed',
           instanceName: this.instanceName,
-          destination: destinationMasked,
+          destination: destinationPublic,
           code: mappedError.code,
           ...(responseStatus === undefined ? {} : { status: responseStatus }),
         },

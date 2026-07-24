@@ -15,6 +15,7 @@ import {
   createPrismaRepositories,
   createSenderService,
 } from '../../api/src/application-services';
+import type { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 
 export type WhatsAppDispatchWorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -34,6 +35,7 @@ export type WhatsAppDispatchProcessorOptions = {
   // Mantido apenas para compatibilidade com os callers existentes. O consumer
   // isolado nao instancia nem usa Hunter, Score, Copy ou Pipeline.
   hunterProvider?: HunterProvider;
+  groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
 type CreateWhatsAppDispatchWorkerOptions = {
@@ -42,6 +44,7 @@ type CreateWhatsAppDispatchWorkerOptions = {
   logger?: WhatsAppDispatchWorkerLogger;
   whatsAppProvider: WhatsAppProvider;
   messageBuilder?: WhatsAppDispatchProcessorOptions['messageBuilder'];
+  groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
 const consoleLogger: WhatsAppDispatchWorkerLogger = {
@@ -61,6 +64,7 @@ export const processWhatsAppDispatchJob = async (
     whatsAppProvider: options.whatsAppProvider,
     logger: options.logger,
     messageBuilder: options.messageBuilder,
+    groupSendPolicy: options.groupSendPolicy,
   });
   return sender.sendDispatch(job.data.dispatchId);
 };
@@ -78,6 +82,7 @@ export const createWhatsAppDispatchWorker = (
     logger: options.logger ?? consoleLogger,
     whatsAppProvider: options.whatsAppProvider,
     messageBuilder: options.messageBuilder,
+    groupSendPolicy: options.groupSendPolicy,
   };
   const worker = new Worker<WhatsAppDispatchJob>(
     QUEUE_NAMES.whatsappDispatch,

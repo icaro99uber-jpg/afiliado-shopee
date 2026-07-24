@@ -39,10 +39,7 @@ const isCronNumberInRange = (
   return number >= minimum && number <= maximum;
 };
 
-const isValidCronField = (
-  field: string,
-  range: readonly [number, number],
-) =>
+const isValidCronField = (field: string, range: readonly [number, number]) =>
   field.split(',').every((segment) => {
     const [base, step, extra] = segment.split('/');
     if (extra !== undefined || !base) return false;
@@ -65,9 +62,7 @@ const isValidCronExpression = (value: string) => {
   const fields = value.trim().split(/\s+/);
   return (
     fields.length === cronRanges.length &&
-    fields.every((field, index) =>
-      isValidCronField(field, cronRanges[index]),
-    )
+    fields.every((field, index) => isValidCronField(field, cronRanges[index]))
   );
 };
 
@@ -102,6 +97,8 @@ export const envSchema = z
     EVOLUTION_SAFE_MODE: booleanFromEnv.default(true),
     EVOLUTION_ALLOWED_DESTINATIONS: destinationListFromEnv,
     EVOLUTION_MAX_MESSAGES_PER_BOOT: positiveIntegerFromEnv.default(1),
+    WHATSAPP_GROUP_SEND_ENABLED: booleanFromEnv.default(false),
+    WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN: positiveIntegerFromEnv.default(1),
     SCHEDULER_ENABLED: booleanFromEnv.default(false),
     SCHEDULER_CRON: z.string().trim().optional(),
     SCHEDULER_TIMEZONE: z.string().trim().optional(),
@@ -132,10 +129,7 @@ export const envSchema = z
             'SCHEDULER_CRON deve ser uma expressao cron valida com cinco campos',
         });
       }
-      if (
-        !env.SCHEDULER_TIMEZONE ||
-        !isValidTimezone(env.SCHEDULER_TIMEZONE)
-      ) {
+      if (!env.SCHEDULER_TIMEZONE || !isValidTimezone(env.SCHEDULER_TIMEZONE)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['SCHEDULER_TIMEZONE'],

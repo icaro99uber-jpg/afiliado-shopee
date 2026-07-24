@@ -2,12 +2,14 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { WhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type { WhatsAppDispatchRepository } from './repositories';
+import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
 
 export type SenderServiceOptions = {
   dispatches: WhatsAppDispatchRepository;
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
   messageBuilder?: (copy: DispatchWithRelations['generatedCopy']) => string;
+  groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
 type DispatchWithRelations = {
@@ -21,7 +23,14 @@ type DispatchWithRelations = {
     cta: string;
     hashtags: string;
   };
-  destination: { destination: string };
+  destination: {
+    destination: string;
+    type?: 'INDIVIDUAL' | 'GROUP';
+    active?: boolean;
+    available?: boolean;
+    fingerprint?: string | null;
+    sourceInstanceName?: string | null;
+  };
   product?: { comissao?: number | null } | null;
   status?: string;
 };
@@ -50,10 +59,9 @@ export class SenderService {
       'WhatsApp dispatch started',
     );
 
-    const dispatch =
-      (await this.options.dispatches.findByIdForSending(
-        dispatchId,
-      )) as DispatchWithRelations | null;
+    const dispatch = (await this.options.dispatches.findByIdForSending(
+      dispatchId,
+    )) as DispatchWithRelations | null;
 
     if (!dispatch) {
       throw new AppError(
@@ -68,12 +76,29 @@ export class SenderService {
       ? this.options.messageBuilder(dispatch.generatedCopy)
       : buildWhatsAppPublicMessage(dispatch.generatedCopy);
 
+    if (dispatch.destination.type === 'GROUP') {
+      if (!this.options.groupSendPolicy) {
+        throw new AppError(
+          'Politica de envio para grupos nao configurada',
+          'WHATSAPP_GROUP_POLICY_REQUIRED',
+        );
+      }
+      this.options.groupSendPolicy.assertAuthorized(
+        dispatch.destination as Parameters<
+          WhatsAppGroupSendPolicy['assertAuthorized']
+        >[0],
+      );
+    }
+
     try {
       await this.options.dispatches.markAttemptPending(dispatch.id);
 
       const result = await this.options.provider.sendMessage({
         destination: dispatch.destination.destination,
         message,
+        ...(dispatch.destination.type === 'GROUP'
+          ? { destinationType: 'GROUP' as const }
+          : {}),
       });
 
       const updated = await this.options.dispatches.markSent(dispatch.id, {
