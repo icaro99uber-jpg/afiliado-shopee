@@ -246,7 +246,7 @@ Resposta esperada:
 }
 ```
 
-O worker registra o consumer do job `pipeline-product` e, ao receber o job, executa o `PipelineService` com os filtros recebidos. Os logs estruturados cobrem: job recebido, pipeline iniciado, pipeline concluído e pipeline falhou.
+O worker registra o consumer do job `pipeline-product` e, ao receber o job, executa o `PipelineService` completo com os filtros recebidos: Hunter, persistência, Score, persistência, seleção de produtos com score maior ou igual a 70, Copy e persistência em `GeneratedCopy`. Os logs estruturados cobrem: job recebido, pipeline iniciado, pipeline concluído e pipeline falhou.
 
 Consulte o status de um job:
 
@@ -263,8 +263,10 @@ Resposta esperada:
   "startedAt": "2026-01-01T10:00:00.000Z",
   "finishedAt": "2026-01-01T10:00:01.000Z",
   "result": {
-    "hunter": {},
-    "score": {},
+    "produtosEncontrados": 40,
+    "produtosPontuados": 40,
+    "produtosAprovados": 8,
+    "copiesGeradas": 8,
     "tempoExecucao": "20ms"
   },
   "error": null
@@ -277,7 +279,7 @@ Esta sprint não implementa cron, WhatsApp, OpenAI nem Analytics.
 
 ### Arquivos criados
 
-- `apps/api/src/pipeline-service.ts`: orquestra Hunter e Score como serviço reutilizável pelo worker.
+- `apps/api/src/pipeline-service.ts`: orquestra Hunter, Score e Copy como serviço reutilizável pelo worker.
 - `apps/api/test/pipeline-queue.test.ts`: cobre criação do job e consulta de status pela API.
 - `apps/worker/test/pipeline-product.test.ts`: cobre processamento e falha do consumer `pipeline-product`.
 
@@ -294,14 +296,20 @@ Esta sprint não implementa cron, WhatsApp, OpenAI nem Analytics.
 
 - Criação do job `pipeline-product` via `POST /pipeline/run`.
 - Processamento do job no worker com atualização de progresso.
+- Execução de Hunter, Score e Copy no worker.
+- Bloqueio de copy para produtos abaixo de score 70.
+- Persistência de `GeneratedCopy` para produtos aprovados.
+- Resultado do job contendo `copiesGeradas`.
 - Falha do processamento com log `Pipeline falhou`.
 - Consulta de status via `GET /pipeline/jobs/:id`.
+- Consulta de job inexistente retornando 404.
 
 ### Decisões
 
 - O endpoint de disparo retorna HTTP 202 para representar processamento assíncrono enfileirado.
 - O payload do job preserva apenas `filters?: ProductFilters`, sem WhatsApp, OpenAI, Analytics ou destino de envio.
 - O progresso é atualizado para 10 ao iniciar o processamento e 100 ao concluir.
+- A seleção para Copy usa score mínimo 70 e preserva o comportamento funcional completo da Sprint 5.
 - A consulta de status usa os metadados nativos do BullMQ (`getState`, `progress`, `processedOn`, `finishedOn`, `returnvalue` e `failedReason`).
 
 ### Débito técnico

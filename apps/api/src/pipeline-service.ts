@@ -2,20 +2,30 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type { HunterProvider } from '@shopee-auto-affiliate-ai/providers';
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
-import { HunterService, type HunterRunResult } from './hunter-service';
-import { ScoreService, type ScoreRunResult } from './score-service';
+import { CopyService } from './copy-service';
+import { HunterService } from './hunter-service';
+import { ScoreService } from './score-service';
 
 export type PipelineRunResult = {
-  hunter: HunterRunResult;
-  score: ScoreRunResult;
+  produtosEncontrados: number;
+  produtosPontuados: number;
+  produtosAprovados: number;
+  copiesGeradas: number;
   tempoExecucao: string;
 };
 
+export type PipelineApprovedProduct = {
+  id: string;
+  score: number | null;
+};
+
 export type PipelineServiceOptions = {
-  prisma: DatabaseClient;
+  prisma: Pick<DatabaseClient, 'productLead' | 'generatedCopy'>;
   hunterProvider: HunterProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
 };
+
+const MIN_APPROVED_SCORE = 70;
 
 export class PipelineService {
   constructor(private readonly options: PipelineServiceOptions) {}
@@ -37,9 +47,26 @@ export class PipelineService {
         prisma: this.options.prisma,
         logger: this.options.logger,
       }).run();
+
+      const produtosAprovados = await this.options.prisma.productLead.findMany({
+        where: { score: { gte: MIN_APPROVED_SCORE } },
+      });
+      const copyService = new CopyService({
+        prisma: this.options.prisma,
+        logger: this.options.logger,
+      });
+      let copiesGeradas = 0;
+
+      for (const produto of produtosAprovados) {
+        await copyService.generate(produto.id);
+        copiesGeradas += 1;
+      }
+
       const resultado = {
-        hunter,
-        score,
+        produtosEncontrados: hunter.encontrados,
+        produtosPontuados: score.produtosProcessados,
+        produtosAprovados: produtosAprovados.length,
+        copiesGeradas,
         tempoExecucao: `${Date.now() - inicio}ms`,
       };
 

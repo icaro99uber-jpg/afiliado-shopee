@@ -18,9 +18,7 @@
     "@shopee-auto-affiliate-ai/database": "workspace:*",
     "@shopee-auto-affiliate-ai/providers": "workspace:*",
     "@shopee-auto-affiliate-ai/shared": "workspace:*",
-    "@shopee-auto-affiliate-ai/queue": "workspace:*",
-    "bullmq": "^5.0.0",
-    "ioredis": "^5.4.0"
+    "@shopee-auto-affiliate-ai/queue": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.16.0",

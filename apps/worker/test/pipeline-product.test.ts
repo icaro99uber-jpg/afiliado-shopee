@@ -3,25 +3,57 @@ import {
   JOB_NAMES,
   type PipelineProductJob,
 } from '@shopee-auto-affiliate-ai/queue';
-import { MockShopeeProvider } from '@shopee-auto-affiliate-ai/providers';
 import { processPipelineProductJob } from '../src/index';
 
+const createProduct = (overrides: Record<string, unknown> = {}) => ({
+  id: 'product-1',
+  providerProductId: 'provider-1',
+  nome: 'Produto aprovado',
+  categoria: 'Casa',
+  preco: 100,
+  desconto: 100,
+  nota: 5,
+  vendidos: 10000,
+  comissao: 0.2,
+  loja: 'Shopee Oficial',
+  urlImagem: 'https://example.com/img.jpg',
+  title: 'Produto aprovado',
+  ...overrides,
+});
+
 const createPrismaMock = (fail = false) => {
-  const store = new Map<string, unknown>();
+  const store = new Map<string, ReturnType<typeof createProduct>>();
+  const generatedCopies: unknown[] = [];
+
   return {
     $disconnect: vi.fn(),
     productLead: {
       findUnique: vi.fn(
-        async ({ where }: { where: { providerProductId?: string } }) =>
-          where.providerProductId && store.has(where.providerProductId)
-            ? { id: where.providerProductId }
-            : null,
+        async ({
+          where,
+        }: {
+          where: { providerProductId?: string; id?: string };
+        }) => {
+          const products = Array.from(store.values());
+          return (
+            products.find(
+              (product) =>
+                (where.providerProductId &&
+                  product.providerProductId === where.providerProductId) ||
+                (where.id && product.id === where.id),
+            ) ?? null
+          );
+        },
       ),
       create: vi.fn(
-        async ({ data }: { data: { providerProductId: string } }) => {
+        async ({ data }: { data: ReturnType<typeof createProduct> }) => {
           if (fail) throw new Error('database unavailable');
-          store.set(data.providerProductId, data);
-          return data;
+          const product = createProduct({
+            ...data,
+            id: data.providerProductId,
+          });
+          store.set(product.providerProductId, product);
+          return product;
         },
       ),
       update: vi.fn(
@@ -30,21 +62,57 @@ const createPrismaMock = (fail = false) => {
           data,
         }: {
           where: { providerProductId?: string; id?: string };
-          data: unknown;
+          data: Record<string, unknown>;
         }) => {
-          store.set(where.providerProductId ?? where.id ?? 'unknown', data);
-          return data;
+          const product = Array.from(store.values()).find(
+            (item) =>
+              (where.providerProductId &&
+                item.providerProductId === where.providerProductId) ||
+              (where.id && item.id === where.id),
+          );
+          if (!product) return data;
+          Object.assign(product, data);
+          return product;
         },
       ),
-      findMany: vi.fn(async () =>
-        Array.from(store.values()).map((value) => ({
-          id: (value as { providerProductId: string }).providerProductId,
-          ...(value as object),
-        })),
+      findMany: vi.fn(
+        async (args?: { where?: { score?: { gte?: number } } }) => {
+          const products = Array.from(store.values());
+          const gte = args?.where?.score?.gte;
+          return gte === undefined
+            ? products
+            : products.filter((product) => (product.score as number) >= gte);
+        },
       ),
+    },
+    generatedCopy: {
+      create: vi.fn(async ({ data }: { data: unknown }) => {
+        generatedCopies.push(data);
+        return { id: `copy-${generatedCopies.length}`, ...(data as object) };
+      }),
     },
   };
 };
+
+const createHunterProvider = () => ({
+  buscarProdutos: vi.fn(async () => [
+    createProduct({
+      id: 'approved',
+      providerProductId: 'approved',
+      nome: 'Produto aprovado',
+    }),
+    createProduct({
+      id: 'rejected',
+      providerProductId: 'rejected',
+      nome: 'Produto reprovado',
+      desconto: 0,
+      nota: 1,
+      vendidos: 0,
+      comissao: 0,
+      loja: 'Loja Parceira',
+    }),
+  ]),
+});
 
 const createJob = (data: PipelineProductJob) => ({
   id: 'job-1',
@@ -56,17 +124,27 @@ const createJob = (data: PipelineProductJob) => ({
 const logger = { info: vi.fn(), error: vi.fn() };
 
 describe('pipeline-product worker', () => {
-  it('processa o pipeline e atualiza progresso', async () => {
+  it('executa Hunter, Score e Copy, gerando copy apenas para score >= 70', async () => {
     const job = createJob({ filters: { categoria: 'Casa' } });
+    const prisma = createPrismaMock();
     const result = await processPipelineProductJob(job as never, {
-      prisma: createPrismaMock() as never,
-      hunterProvider: new MockShopeeProvider(),
+      prisma: prisma as never,
+      hunterProvider: createHunterProvider(),
       logger,
     });
 
     expect(result).toMatchObject({
-      hunter: { encontrados: 5, novos: 5 },
-      score: { produtosProcessados: 5 },
+      produtosEncontrados: 2,
+      produtosPontuados: 2,
+      produtosAprovados: 1,
+      copiesGeradas: 1,
+    });
+    expect(prisma.generatedCopy.create).toHaveBeenCalledTimes(1);
+    expect(prisma.generatedCopy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ productId: 'approved' }),
+    });
+    expect(prisma.generatedCopy.create).not.toHaveBeenCalledWith({
+      data: expect.objectContaining({ productId: 'rejected' }),
     });
     expect(job.updateProgress).toHaveBeenNthCalledWith(1, 10);
     expect(job.updateProgress).toHaveBeenNthCalledWith(2, 100);
@@ -78,7 +156,7 @@ describe('pipeline-product worker', () => {
     await expect(
       processPipelineProductJob(job as never, {
         prisma: createPrismaMock(true) as never,
-        hunterProvider: new MockShopeeProvider(),
+        hunterProvider: createHunterProvider(),
         logger,
       }),
     ).rejects.toThrow('database unavailable');

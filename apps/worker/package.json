@@ -15,7 +15,6 @@
     "@shopee-auto-affiliate-ai/config": "workspace:*",
     "@shopee-auto-affiliate-ai/queue": "workspace:*",
     "bullmq": "^5.0.0",
-    "@shopee-auto-affiliate-ai/api": "workspace:*",
     "@shopee-auto-affiliate-ai/database": "workspace:*",
     "@shopee-auto-affiliate-ai/providers": "workspace:*"
   },

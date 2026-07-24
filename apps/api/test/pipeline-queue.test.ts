@@ -4,16 +4,20 @@ import { buildApp } from '../src/app';
 
 const createPrismaMock = () => ({ $disconnect: vi.fn() });
 
-const createQueueMock = () => ({
+const createQueueMock = (jobFound = true) => ({
   add: vi.fn(async () => ({ id: 'job-1' })),
-  getJob: vi.fn(async () => ({
-    progress: 100,
-    processedOn: Date.UTC(2026, 0, 1, 10, 0, 0),
-    finishedOn: Date.UTC(2026, 0, 1, 10, 0, 1),
-    returnvalue: { ok: true },
-    failedReason: undefined,
-    getState: vi.fn(async () => 'completed'),
-  })),
+  getJob: vi.fn(async () =>
+    jobFound
+      ? {
+          progress: 100,
+          processedOn: Date.UTC(2026, 0, 1, 10, 0, 0),
+          finishedOn: Date.UTC(2026, 0, 1, 10, 0, 1),
+          returnvalue: { copiesGeradas: 1 },
+          failedReason: undefined,
+          getState: vi.fn(async () => 'completed'),
+        }
+      : null,
+  ),
   close: vi.fn(async () => undefined),
 });
 
@@ -42,7 +46,7 @@ describe('Pipeline BullMQ API', () => {
     await app.close();
   });
 
-  it('consulta status do job', async () => {
+  it('consulta status do job com relatório completo no result', async () => {
     const pipelineQueue = createQueueMock();
     const app = await buildApp({
       logger: false,
@@ -61,10 +65,31 @@ describe('Pipeline BullMQ API', () => {
       progress: 100,
       startedAt: '2026-01-01T10:00:00.000Z',
       finishedAt: '2026-01-01T10:00:01.000Z',
-      result: { ok: true },
+      result: { copiesGeradas: 1 },
       error: null,
     });
     expect(pipelineQueue.getJob).toHaveBeenCalledWith('job-1');
+    await app.close();
+  });
+
+  it('retorna 404 quando o job não existe', async () => {
+    const pipelineQueue = createQueueMock(false);
+    const app = await buildApp({
+      logger: false,
+      prisma: createPrismaMock() as never,
+      pipelineQueue,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pipeline/jobs/missing',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({
+      error: 'JOB_NOT_FOUND',
+      message: 'Job não encontrado',
+    });
     await app.close();
   });
 });
