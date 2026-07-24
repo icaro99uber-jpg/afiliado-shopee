@@ -5,6 +5,7 @@ import {
   type DatabaseClient,
 } from '@shopee-auto-affiliate-ai/database';
 import {
+  maskEvolutionDestination,
   MockShopeeProvider,
   type HunterProvider,
 } from '@shopee-auto-affiliate-ai/providers';
@@ -370,7 +371,13 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return reply
         .status(404)
         .send({ error: 'DISPATCH_NOT_FOUND', message: 'Envio não encontrado' });
-    return dispatch;
+    return {
+      ...dispatch,
+      destination: {
+        ...dispatch.destination,
+        destination: maskEvolutionDestination(dispatch.destination.destination),
+      },
+    };
   });
 
   app.addHook('onClose', async () => {

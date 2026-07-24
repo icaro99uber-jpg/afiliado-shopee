@@ -153,6 +153,12 @@ export class PrismaWhatsAppDestinationRepository
     private readonly prisma: Pick<DatabaseClient, 'whatsAppDestination'>,
   ) {}
 
+  async findById(id: string): Promise<WhatsAppDestinationRecord | null> {
+    return (await this.prisma.whatsAppDestination.findUnique({
+      where: { id },
+    })) as WhatsAppDestinationRecord | null;
+  }
+
   async listActive(): Promise<WhatsAppDestinationRecord[]> {
     return (await this.prisma.whatsAppDestination.findMany({
       where: { active: true },

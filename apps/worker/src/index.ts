@@ -25,6 +25,9 @@ import {
   createApplicationServices,
   createPrismaRepositories,
 } from '../../api/src/application-services';
+import { processWhatsAppDispatchJob } from './whatsapp-dispatch-worker';
+
+export { processWhatsAppDispatchJob } from './whatsapp-dispatch-worker';
 
 type WorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -104,21 +107,6 @@ export const processPipelineProductJob = async (
     );
     throw error;
   }
-};
-
-export const processWhatsAppDispatchJob = async (
-  job: Pick<Job<WhatsAppDispatchJob>, 'id' | 'name' | 'data'>,
-  options: WorkerProcessorOptions,
-) => {
-  if (job.name !== JOB_NAMES.whatsappDispatch) return { skipped: true };
-  const repositories = createPrismaRepositories(options.prisma);
-  const services = createApplicationServices({
-    repositories,
-    hunterProvider: options.hunterProvider,
-    whatsAppProvider: options.whatsAppProvider,
-    logger: options.logger,
-  });
-  return services.sender?.sendDispatch(job.data.dispatchId);
 };
 
 export const createPipelineProductWorker = (

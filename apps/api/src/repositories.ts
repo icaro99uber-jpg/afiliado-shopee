@@ -46,6 +46,7 @@ export type ProductLeadRecord = ProductLeadData & {
 };
 
 export type GeneratedCopyData = {
+  id?: string;
   productId: string;
   titulo: string;
   mensagem: string;
@@ -59,6 +60,7 @@ export type GeneratedCopyRecord = GeneratedCopyData & {
 };
 
 export type WhatsAppDestinationData = {
+  id?: string;
   name: string;
   destination: string;
   active: boolean;
@@ -75,6 +77,7 @@ export type WhatsAppDestinationRecord = WhatsAppDestinationData & {
 export type WhatsAppDispatchStatus = 'PENDING' | 'SENT' | 'FAILED';
 
 export type WhatsAppDispatchCreateData = {
+  id?: string;
   productId: string;
   generatedCopyId: string;
   destinationId: string;
@@ -131,6 +134,7 @@ export interface GeneratedCopyRepository {
 }
 
 export interface WhatsAppDestinationRepository {
+  findById(id: string): Promise<WhatsAppDestinationRecord | null>;
   listActive(): Promise<WhatsAppDestinationRecord[]>;
   create(data: WhatsAppDestinationData): Promise<WhatsAppDestinationRecord>;
   list(): Promise<WhatsAppDestinationRecord[]>;

@@ -469,6 +469,52 @@ saudaveis/conectadas, mas o arquivo local ignorado mantinha o provider `mock` e
 a allowlist vazia. O dry-run bloqueou antes do provider e nenhuma mensagem real
 foi enviada. Nenhuma credencial ou destino foi registrado neste repositorio.
 
+### Teste E2E controlado de dispatch
+
+O fluxo completo `WhatsAppDispatch -> BullMQ -> worker -> SenderService ->
+EvolutionApiWhatsAppProvider -> Evolution API -> WhatsApp` possui um comando
+isolado e em dry-run por padrao:
+
+```bash
+corepack pnpm whatsapp:e2e-test
+```
+
+O comando carrega automaticamente o `.env` da raiz sem sobrescrever variaveis
+de processo, valida Evolution API 2.3.6, instancia `afiliado-shopee-local`,
+PostgreSQL e Redis principais e mostra somente um resumo mascarado. O dry-run
+nao cria registros, jobs ou workers e nao chama o endpoint de envio.
+
+O unico caminho real exige exatamente:
+
+```bash
+corepack pnpm whatsapp:e2e-test -- --confirm-one-real-dispatch
+```
+
+Esse caminho e bloqueado em CI e exige provider `evolution`, safe mode ativo,
+uma unica entrada na allowlist, limite igual a 1 e Scheduler desativado. Ele
+tambem bloqueia se detectar workers ou pipeline ativos. O destino vem somente
+da allowlist; argumentos de destino, texto ou flags adicionais sao rejeitados.
+
+Os registros usam IDs e nomes tecnicos deterministas. O destino E2E e inativo
+para nao participar do pipeline normal. Qualquer dispatch E2E anterior em
+`SENT`, `FAILED`, `PENDING` ou estado inesperado bloqueia permanentemente uma
+nova tentativa. O job preservado usa `attempts: 1`, sem backoff e sem remocao
+automatica. Somente o consumer `whatsapp-dispatch` e iniciado; API publica,
+pipeline, Scheduler, Hunter, Score e Copy nao sao iniciados.
+
+A mensagem entregue ao provider e exatamente: "Teste E2E controlado do sistema
+Afiliado Shopee. Nenhuma ação é necessária." O endpoint existente
+`GET /whatsapp/dispatches/:id` e validado internamente por `app.inject` e agora
+mascara o destino na resposta de detalhe. Timeout, erro de rede, HTTP 5xx ou
+resultado ambiguo exigem investigacao manual e nunca autorizam retry ou nova
+execucao.
+
+Na preparacao local da Task 13.5, a stack e a instancia foram validadas como
+saudaveis/open, e PostgreSQL e Redis principais ficaram disponiveis. O `.env`
+raiz continuou com `mock`, instancia de exemplo e allowlist vazia; portanto o
+comando permaneceu bloqueado antes de qualquer escrita ou envio. Resultado
+sanitizado: zero mensagens reais e nenhum segredo versionado.
+
 ### Débito técnico
 
 - Adicionar autenticação/autorização antes de uso em produção.

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "evolution:test-message": "tsx src/evolution-single-message-test.ts",
+    "whatsapp:e2e-test": "tsx src/whatsapp-dispatch-e2e.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

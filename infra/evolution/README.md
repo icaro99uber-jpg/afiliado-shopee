@@ -105,6 +105,42 @@ o dry-run foi bloqueado porque a configuracao ignorada selecionava `mock` e
 mantinha a allowlist vazia. Nenhuma mensagem real foi enviada e nenhum segredo
 foi versionado.
 
+## Teste E2E controlado de dispatch
+
+O comando abaixo valida o fluxo real de dispatch em dry-run por padrao:
+
+```powershell
+corepack pnpm whatsapp:e2e-test
+```
+
+Ele exige a Evolution local em `http://localhost:8080`, versao 2.3.6 e instancia
+`afiliado-shopee-local` em estado `open`, alem do PostgreSQL e Redis do compose
+principal. O `.env` da raiz e carregado sem alterar o arquivo ou substituir
+variaveis de processo. O resumo mascara o unico destino permitido.
+
+O unico modo confirmado e:
+
+```powershell
+corepack pnpm whatsapp:e2e-test -- --confirm-one-real-dispatch
+```
+
+O comando cria no maximo um conjunto deterministico de registros E2E, um
+dispatch e um job `whatsapp-dispatch`. O job usa uma tentativa, sem backoff e
+sem remocao automatica; somente o consumer de dispatch e iniciado. Scheduler e
+pipeline permanecem desativados. A mensagem e fixa e nenhum destino ou texto
+pode ser recebido por argumento.
+
+Qualquer execucao anterior ou resultado ambiguo bloqueia nova tentativa. Nao
+repita o comando confirmado apos timeout, erro de rede, HTTP 5xx, `FAILED` ou
+duvida sobre o resultado. Consulte o dispatch tecnico pelo endpoint existente;
+o detalhe mascara o destino. API key, telefone, token, sessao e external ID
+completo nao devem aparecer em documentacao ou relatorios.
+
+Na preparacao da Task 13.5, esta stack e a instancia foram confirmadas como
+saudaveis/open. O `.env` raiz continuou selecionando mock, instancia de exemplo
+e allowlist vazia, portanto o teste ficou bloqueado antes de criar registros ou
+enviar mensagem. Resultado sanitizado: zero mensagens reais.
+
 ## Proximo passo manual e controlado
 
 Uma task futura e separada deve revisar a instancia ficticia, o ambiente, a
