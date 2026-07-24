@@ -8,6 +8,7 @@ datasource db {
 }
 
 model ProductLead {
+  copies            GeneratedCopy[]
   id                String   @id @default(cuid())
   providerProductId String   @unique
   nome              String
@@ -25,4 +26,18 @@ model ProductLead {
   scoreUpdatedAt    DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+
+model GeneratedCopy {
+  id        String      @id @default(cuid())
+  productId String
+  product   ProductLead @relation(fields: [productId], references: [id], onDelete: Cascade)
+  titulo    String
+  mensagem  String
+  cta       String
+  hashtags  String
+  createdAt DateTime    @default(now())
+
+  @@index([productId])
 }
