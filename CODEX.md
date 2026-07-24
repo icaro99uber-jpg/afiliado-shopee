@@ -20,7 +20,7 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 ## Arquitetura atual
 
 - Monorepo: gerenciado por `pnpm-workspace.yaml` e `turbo.json`.
-- API: Fastify em `apps/api`, expondo endpoints de health, Hunter, Score, Copy, Pipeline e WhatsApp.
+- API: Fastify em `apps/api`, expondo endpoints de health, Analytics, Hunter, Score, Copy, Pipeline e WhatsApp.
 - Camada de aplicacao: servicos em `apps/api/src/*-service.ts`, sem dependencia direta do Prisma Client.
 - Contratos de repositorio: interfaces pequenas em `apps/api/src/repositories.ts`.
 - Adaptadores Prisma: implementacoes concretas em `apps/api/src/prisma-repositories.ts`.
@@ -32,7 +32,7 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
 - Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
-- Analytics: contrato, adaptador Prisma e servico de snapshot em `apps/api`, ainda sem endpoint ou consumo pelo dashboard.
+- Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, ainda sem consumo pelo dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
@@ -61,7 +61,7 @@ Paginas disponiveis:
 Limitacoes por contrato atual:
 
 - Nao ha endpoint publico de listagem completa de produtos.
-- Nao ha endpoint agregado para metricas de produtos pontuados/aprovados.
+- O endpoint agregado `GET /analytics` existe, mas ainda nao e consumido pelo dashboard.
 - Nao ha endpoint de listagem de historico de copies.
 - Nao ha endpoint de reprocessamento manual de dispatches.
 
@@ -80,7 +80,9 @@ Metricas disponiveis na arquitetura:
 - total de dispatches pendentes, enviados e com falha;
 - total de destinos ativos.
 
-O modulo nao possui endpoint, cache ou integracao com o dashboard nesta etapa.
+O endpoint `GET /analytics` retorna o snapshot atual diretamente do servico, sem
+cache e sem calculos na rota. As metricas refletem apenas os dados persistidos no
+momento da consulta. A integracao com o dashboard fica para uma etapa futura.
 
 Regras de seguranca do dashboard:
 

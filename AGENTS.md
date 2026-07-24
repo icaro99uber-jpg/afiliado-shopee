@@ -210,6 +210,7 @@ Entradas:
 
 Saidas:
 
+- `GET /analytics` com HTTP 200 e um `AnalyticsSnapshot`.
 - Total de produtos e produtos aprovados com `score >= 70`.
 - Total de copies geradas.
 - Totais de dispatches `PENDING`, `SENT` e `FAILED`.
@@ -224,14 +225,13 @@ Dependencias:
 
 Restricoes atuais:
 
-- Nao possui endpoint publico.
-- Nao possui cache nem logica de dashboard.
+- O endpoint apenas delega a consulta ao `AnalyticsService`.
+- Nao possui cache nem integracao ou logica de dashboard.
 - Nao cria tabelas, migracoes ou novos dados.
 
 Proximos passos previstos:
 
-- Expor o snapshot somente em sprint futura que defina contrato de endpoint.
-- Integrar o dashboard apenas depois da existencia desse endpoint publico.
+- Integrar o dashboard ao endpoint em sprint futura dedicada.
 
 ## Dashboard operacional
 

@@ -307,8 +307,24 @@ Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca 
 - Adicionar autenticação/autorização antes de uso em produção.
 - Criar painel operacional para reprocessar dispatches com falha.
 - Validar o envio Evolution em ambiente controlado antes de habilitar produção.
-- Adicionar analytics em sprint separada.
+- Integrar o dashboard ao Analytics em sprint separada.
 - Fortalecer validação de status/filtros com schemas formais.
+
+## Analytics
+
+`GET /analytics` retorna um snapshot das metricas calculadas sobre os dados ja
+persistidos:
+
+- `totalProducts`
+- `totalApprovedProducts`
+- `totalGeneratedCopies`
+- `totalQueuedDispatches`
+- `totalSentDispatches`
+- `totalFailedDispatches`
+- `totalActiveDestinations`
+
+O endpoint nao usa cache e nao calcula metricas na rota. O dashboard ainda nao
+consome esse contrato; essa integracao fica para uma etapa futura.
 
 ## Dashboard operacional MVP
 
@@ -348,9 +364,8 @@ Limitacoes atuais:
 
 - Nao ha endpoint publico para listar todos os produtos; a tela de produtos
   mostra apenas produtos vinculados a dispatches existentes.
-- Nao ha endpoint agregado para produtos encontrados, pontuados, aprovados ou
-  copies geradas; esses indicadores aparecem como indisponiveis quando nao podem
-  ser calculados por endpoints existentes.
+- O endpoint agregado `GET /analytics` ainda nao e consumido pelo dashboard;
+  esses indicadores permanecem indisponiveis na interface atual.
 - Nao ha endpoint de historico de copies; o historico da tela e somente da
   sessao atual.
 - Nao ha endpoint de reprocessamento manual de dispatches; o dashboard nao
