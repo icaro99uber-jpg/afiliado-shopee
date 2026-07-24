@@ -13,9 +13,9 @@ O sistema tem como objetivo apoiar um fluxo de afiliados da Shopee:
 3. Calcular score matematico para priorizacao.
 4. Gerar copy promocional por templates locais.
 5. Criar dispatches para destinos ativos de WhatsApp.
-6. Processar os envios via fila usando provider mock.
+6. Processar os envios via fila usando o provider WhatsApp selecionado no worker.
 
-O estado atual nao executa scraping real, nao usa OpenAI real e nao envia mensagens reais por WhatsApp.
+O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mock`, nao envia mensagens reais por WhatsApp.
 
 ## Arquitetura atual
 
@@ -31,7 +31,7 @@ O estado atual nao executa scraping real, nao usa OpenAI real e nao envia mensag
 - Filas: BullMQ/Redis em `packages/queue`.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
-- Evolution API: provider HTTP v2 e factory segura em `packages/providers`, ainda sem conexao com o worker.
+- Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
@@ -43,7 +43,8 @@ Fluxo operacional atual:
 4. Produtos com `score >= 70` sao considerados aprovados.
 5. Para cada copy e destino ativo, o pipeline cria `WhatsAppDispatch` com status `PENDING`.
 6. O pipeline enfileira jobs `whatsapp-dispatch`.
-7. O worker usa `SenderService` e `MockWhatsAppProvider` para marcar dispatches como `SENT` ou `FAILED`.
+7. O bootstrap do worker cria uma unica instancia do provider configurado e a injeta no `SenderService`.
+8. `WHATSAPP_PROVIDER=mock` permanece como padrao; `evolution` exige configuracao completa e explicita.
 
 Regra de dependencia:
 
@@ -51,6 +52,7 @@ Regra de dependencia:
 - Servicos de aplicacao nao importam Prisma Client nem tipos internos do Prisma.
 - Operacoes `findUnique`, `findMany`, `create`, `update`, `select`, `include` e tratamento de codigos Prisma ficam nos adaptadores Prisma.
 - API e worker devem montar servicos por `createApplicationServices` ou factories equivalentes, sem espalhar novas instanciacoes manuais.
+- O worker deve selecionar o provider em `startWorker`, reutilizando a mesma instancia nos jobs de pipeline e dispatch.
 
 ## Estrutura de pastas
 

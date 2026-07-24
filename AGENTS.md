@@ -2,7 +2,7 @@
 
 ## Visao geral
 
-Este documento descreve os agentes e componentes de orquestracao atuais do projeto. O estado atual usa implementacoes locais e mocks para preservar contratos sem executar integracoes reais com Shopee, OpenAI, Evolution API ou WhatsApp.
+Este documento descreve os agentes e componentes de orquestracao atuais do projeto. O estado atual mantem implementacoes locais e mocks como padrao seguro; Evolution API requer selecao e configuracao explicitas.
 
 ## Camadas de aplicacao e persistencia
 
@@ -144,8 +144,9 @@ Dependencias:
 
 - `SenderService` em `apps/api/src/sender-service.ts`.
 - `MockWhatsAppProvider` em `packages/providers`.
-- `EvolutionApiWhatsAppProvider` em `packages/providers`, preparado mas ainda nao injetado no sender ou worker.
+- `EvolutionApiWhatsAppProvider` em `packages/providers`, injetado no sender pelo bootstrap quando selecionado.
 - Factory `createWhatsAppProvider`, com `mock` como selecao padrao segura.
+- Bootstrap `startWorker` em `apps/worker/src/index.ts`, ponto unico de selecao e injecao do provider.
 - `WhatsAppDispatchRepository`.
 - Fila `whatsapp-dispatch` em `packages/queue`.
 - Worker em `apps/worker`.
@@ -153,7 +154,7 @@ Dependencias:
 
 Proximos passos previstos:
 
-- Integrar a factory ao `SenderService` e ao worker em task futura, com ativacao explicita por ambiente.
+- Validar a integracao Evolution em ambiente controlado antes de qualquer ativacao em producao.
 - Adicionar autenticacao, autorizacao e controles operacionais antes de producao.
 - Criar fluxo de reprocessamento manual para falhas.
 

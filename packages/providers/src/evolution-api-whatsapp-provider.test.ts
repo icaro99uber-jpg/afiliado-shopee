@@ -205,6 +205,12 @@ describe('createWhatsAppProvider', () => {
     expect(createWhatsAppProvider({})).toBeInstanceOf(MockWhatsAppProvider);
   });
 
+  it('usa mock quando selecionado explicitamente', () => {
+    expect(
+      createWhatsAppProvider({ WHATSAPP_PROVIDER: 'mock' }),
+    ).toBeInstanceOf(MockWhatsAppProvider);
+  });
+
   it('cria o provider Evolution somente quando selecionado', () => {
     expect(
       createWhatsAppProvider({

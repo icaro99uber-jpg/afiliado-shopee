@@ -1,11 +1,12 @@
 import type { Job } from 'bullmq';
 import { Worker } from 'bullmq';
-import { loadConfig } from '@shopee-auto-affiliate-ai/config';
+import { loadConfig, type AppEnv } from '@shopee-auto-affiliate-ai/config';
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import {
+  createWhatsAppProvider,
   MockShopeeProvider,
-  MockWhatsAppProvider,
   type HunterProvider,
+  type WhatsAppProviderFactoryOptions,
   type WhatsAppProvider,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
@@ -29,7 +30,18 @@ type CreatePipelineProductWorkerOptions = {
   prisma?: ReturnType<typeof createPrismaClient>;
   hunterProvider?: HunterProvider;
   logger?: WorkerLogger;
-  whatsAppProvider?: WhatsAppProvider;
+  whatsAppProvider: WhatsAppProvider;
+};
+
+type WorkerFactory = typeof createPipelineProductWorker;
+
+type StartWorkerOptions = {
+  prisma?: ReturnType<typeof createPrismaClient>;
+  hunterProvider?: HunterProvider;
+  logger?: WorkerLogger;
+  providerFactory?: typeof createWhatsAppProvider;
+  providerFactoryOptions?: WhatsAppProviderFactoryOptions;
+  workerFactory?: WorkerFactory;
 };
 
 const consoleLogger: WorkerLogger = {
@@ -94,7 +106,7 @@ export const processWhatsAppDispatchJob = async (
 
 export const createPipelineProductWorker = (
   redisUrl: string,
-  options: CreatePipelineProductWorkerOptions = {},
+  options: CreatePipelineProductWorkerOptions,
 ) => {
   const connection = createRedisConnection(redisUrl);
   const prisma = options.prisma ?? createPrismaClient();
@@ -102,7 +114,7 @@ export const createPipelineProductWorker = (
     prisma,
     hunterProvider: options.hunterProvider ?? new MockShopeeProvider(),
     logger: options.logger ?? consoleLogger,
-    whatsAppProvider: options.whatsAppProvider ?? new MockWhatsAppProvider(),
+    whatsAppProvider: options.whatsAppProvider,
   };
 
   const worker = new Worker<PipelineProductJob>(
@@ -130,7 +142,49 @@ export const createPipelineProductWorker = (
   };
 };
 
+const safeBaseUrl = (baseUrl: string) => {
+  const url = new URL(baseUrl);
+  url.username = '';
+  url.password = '';
+  return url.toString().replace(/\/$/, '');
+};
+
+export const startWorker = (
+  config: AppEnv,
+  options: StartWorkerOptions = {},
+) => {
+  const logger = options.logger ?? consoleLogger;
+  const providerFactory = options.providerFactory ?? createWhatsAppProvider;
+  const whatsAppProvider = providerFactory(config, {
+    ...options.providerFactoryOptions,
+    logger,
+  });
+
+  logger.info(
+    {
+      event: 'worker.whatsapp-provider.selected',
+      provider: config.WHATSAPP_PROVIDER,
+      queue: QUEUE_NAMES.whatsappDispatch,
+      ...(config.WHATSAPP_PROVIDER === 'evolution'
+        ? {
+            instanceName: config.EVOLUTION_INSTANCE_NAME,
+            baseUrl: safeBaseUrl(config.EVOLUTION_API_URL as string),
+          }
+        : {}),
+    },
+    'WhatsApp provider selected',
+  );
+
+  const workerFactory = options.workerFactory ?? createPipelineProductWorker;
+  return workerFactory(config.REDIS_URL, {
+    prisma: options.prisma,
+    hunterProvider: options.hunterProvider,
+    logger,
+    whatsAppProvider,
+  });
+};
+
 if (process.env.NODE_ENV !== 'test') {
   const config = loadConfig();
-  createPipelineProductWorker(config.REDIS_URL);
+  startWorker(config);
 }
