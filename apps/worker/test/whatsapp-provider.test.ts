@@ -21,6 +21,8 @@ const baseEnv = {
   REDIS_URL: 'redis://localhost:6379',
 };
 
+const SAFE_TEST_DESTINATION = '0000000000000';
+
 const logger = { info: vi.fn(), error: vi.fn() };
 
 const createInfrastructure = () => ({
@@ -45,7 +47,10 @@ const createWorkerRuntime = () => ({
   close: vi.fn(async () => undefined),
 });
 
-const createDispatch = (status = 'PENDING') => ({
+const createDispatch = (
+  status = 'PENDING',
+  destination = 'mock-destination-01',
+) => ({
   id: 'dispatch-1',
   productId: 'product-1',
   generatedCopyId: 'copy-1',
@@ -58,11 +63,14 @@ const createDispatch = (status = 'PENDING') => ({
     cta: 'Compre agora',
     hashtags: '#Oferta',
   },
-  destination: { destination: 'mock-destination-01' },
+  destination: { destination },
 });
 
-const createPrismaMock = (initialStatus = 'PENDING') => {
-  let dispatch = createDispatch(initialStatus);
+const createPrismaMock = (
+  initialStatus = 'PENDING',
+  destination = 'mock-destination-01',
+) => {
+  let dispatch = createDispatch(initialStatus, destination);
   return {
     $disconnect: vi.fn(),
     productLead: {},
@@ -147,6 +155,25 @@ describe('WhatsApp provider worker bootstrap', () => {
       },
       'WhatsApp provider selected',
     );
+  });
+
+  it('inicia em mock com protecoes Evolution explicitas sem chamar HTTP real', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const config = loadConfig({
+      ...baseEnv,
+      WHATSAPP_PROVIDER: 'mock',
+      EVOLUTION_SAFE_MODE: 'true',
+      EVOLUTION_ALLOWED_DESTINATIONS: '',
+      EVOLUTION_MAX_MESSAGES_PER_BOOT: '1',
+    });
+    const { provider, workerFactory } = await bootstrapProvider(config);
+
+    await expect(
+      processDispatch(createPrismaMock(), provider),
+    ).resolves.toMatchObject({ status: 'SENT' });
+    expect(provider).toBeInstanceOf(MockWhatsAppProvider);
+    expect(workerFactory).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('seleciona mock somente por WHATSAPP_PROVIDER mesmo com dados Evolution', async () => {
@@ -263,16 +290,73 @@ describe('whatsapp-dispatch worker provider integration', () => {
       EVOLUTION_API_URL: 'http://localhost:8080',
       EVOLUTION_API_KEY: 'test-only-api-key',
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
+      EVOLUTION_ALLOWED_DESTINATIONS: SAFE_TEST_DESTINATION,
     });
     const { provider } = await bootstrapProvider(config, { httpClient });
 
     expect(provider).toBeInstanceOf(EvolutionApiWhatsAppProvider);
     await expect(
-      processDispatch(createPrismaMock(), provider),
+      processDispatch(
+        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
+        provider,
+      ),
     ).resolves.toMatchObject({
       status: 'SENT',
       externalMessageId: 'evolution-message-1',
     });
+    expect(httpClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('bloqueia Evolution com allowlist vazia sem chamar HTTP', async () => {
+    const httpClient = vi.fn();
+    const config = loadConfig({
+      ...baseEnv,
+      WHATSAPP_PROVIDER: 'evolution',
+      EVOLUTION_API_URL: 'http://localhost:8080',
+      EVOLUTION_API_KEY: 'test-only-api-key',
+      EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
+    });
+    const { provider } = await bootstrapProvider(config, { httpClient });
+
+    await expect(
+      processDispatch(
+        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
+        provider,
+      ),
+    ).rejects.toMatchObject({ code: 'EVOLUTION_SAFE_DESTINATION_BLOCKED' });
+    expect(httpClient).not.toHaveBeenCalled();
+  });
+
+  it('preserva o limite do guard entre jobs do mesmo bootstrap', async () => {
+    const httpClient = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ key: { id: 'evolution-message-1' } }), {
+          status: 200,
+        }),
+    );
+    const config = loadConfig({
+      ...baseEnv,
+      WHATSAPP_PROVIDER: 'evolution',
+      EVOLUTION_API_URL: 'http://localhost:8080',
+      EVOLUTION_API_KEY: 'test-only-api-key',
+      EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
+      EVOLUTION_ALLOWED_DESTINATIONS: SAFE_TEST_DESTINATION,
+      EVOLUTION_MAX_MESSAGES_PER_BOOT: '1',
+    });
+    const { provider } = await bootstrapProvider(config, { httpClient });
+
+    await expect(
+      processDispatch(
+        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
+        provider,
+      ),
+    ).resolves.toMatchObject({ status: 'SENT' });
+    await expect(
+      processDispatch(
+        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
+        provider,
+      ),
+    ).rejects.toMatchObject({ code: 'EVOLUTION_SAFE_LIMIT_REACHED' });
     expect(httpClient).toHaveBeenCalledTimes(1);
   });
 
@@ -288,11 +372,15 @@ describe('whatsapp-dispatch worker provider integration', () => {
       EVOLUTION_API_URL: 'http://localhost:8080',
       EVOLUTION_API_KEY: 'test-only-api-key',
       EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
+      EVOLUTION_ALLOWED_DESTINATIONS: SAFE_TEST_DESTINATION,
     });
     const { provider } = await bootstrapProvider(config, { httpClient });
 
     await expect(
-      processDispatch(createPrismaMock(), provider),
+      processDispatch(
+        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
+        provider,
+      ),
     ).rejects.toMatchObject({ code: 'EVOLUTION_SERVER_ERROR' });
   });
 

@@ -349,9 +349,25 @@ WHATSAPP_PROVIDER=mock
 EVOLUTION_API_URL=http://localhost:8080
 EVOLUTION_API_KEY=replace-with-your-api-key
 EVOLUTION_INSTANCE_NAME=affiliate-bot
+EVOLUTION_SAFE_MODE=true
+EVOLUTION_ALLOWED_DESTINATIONS=
+EVOLUTION_MAX_MESSAGES_PER_BOOT=1
 ```
 
-O worker usa `loadConfig` no bootstrap, cria o provider uma vez por meio de `createWhatsAppProvider` e injeta a mesma instância nos jobs. Para ativar Evolution futuramente, defina `WHATSAPP_PROVIDER=evolution` e as três variáveis `EVOLUTION_*` somente no `.env` local do ambiente controlado. Configuração incompleta impede a inicialização, e a existência isolada de URL ou chave não altera o modo mock.
+O worker usa `loadConfig` no bootstrap, cria o provider e o
+`EvolutionSendGuard` uma vez por meio de `createWhatsAppProvider` e injeta a
+mesma instancia nos jobs. O safe mode fica ativo por padrao, exige que o
+destino normalizado esteja na allowlist e limita os requests iniciados durante
+a vida do processo. A allowlist vazia bloqueia todos os envios Evolution e o
+limite padrao e 1. Requests que chegaram ao cliente HTTP contam mesmo quando
+terminam em timeout ou erro HTTP; bloqueios anteriores ao HTTP nao contam.
+
+O provider `mock` ignora essas configuracoes e continua sem HTTP. Desativar o
+safe mode exige `EVOLUTION_SAFE_MODE=false` explicito e preserva o comportamento
+anterior do provider Evolution; credenciais presentes nunca desativam a
+protecao automaticamente. Nenhuma mensagem real ou request externo foi
+executado na task que introduziu esse mecanismo. A proxima task devera criar um
+fluxo explicito, isolado e auditavel para um unico teste real.
 
 Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca versione um arquivo `.env`, credenciais reais ou números reais de WhatsApp.
 

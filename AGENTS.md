@@ -145,6 +145,8 @@ Dependencias:
 - `SenderService` em `apps/api/src/sender-service.ts`.
 - `MockWhatsAppProvider` em `packages/providers`.
 - `EvolutionApiWhatsAppProvider` em `packages/providers`, injetado no sender pelo bootstrap quando selecionado.
+- `EvolutionSendGuard` em `packages/providers`, criado uma vez para Evolution e
+  responsavel por allowlist exata e limite de requests por processo.
 - Factory `createWhatsAppProvider`, com `mock` como selecao padrao segura.
 - Bootstrap `startWorker` em `apps/worker/src/index.ts`, ponto unico de selecao e injecao do provider.
 - `WhatsAppDispatchRepository`.
@@ -154,9 +156,23 @@ Dependencias:
 
 Proximos passos previstos:
 
+- Criar em uma proxima task um fluxo explicito, isolado e auditavel para um
+  unico teste real com destino controlado.
 - Validar a integracao Evolution em ambiente controlado antes de qualquer ativacao em producao.
 - Adicionar autenticacao, autorizacao e controles operacionais antes de producao.
 - Criar fluxo de reprocessamento manual para falhas.
+
+Protecoes Evolution atuais:
+
+- Safe mode ativo por padrao, allowlist vazia bloqueando todos os destinos e
+  limite padrao de um request iniciado por processo.
+- Destinos comparados apos normalizacao de formatacao, sempre por igualdade
+  completa.
+- Timeout e erro HTTP contam porque o request foi iniciado; bloqueios antes do
+  HTTP nao contam.
+- Mock sem guard e sem alteracao de comportamento.
+- Esta protecao foi validada somente com clientes HTTP injetados e mocks;
+  nenhuma mensagem real foi enviada na task de implementacao.
 
 ## Pipeline
 
