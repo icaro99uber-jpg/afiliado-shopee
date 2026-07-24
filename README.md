@@ -70,7 +70,7 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 
 ## Desenvolvimento sem integrações reais
 
-Esta primeira versão não implementa scraping nem chamadas externas reais. Os pacotes expõem interfaces e mocks para que provedores reais de Shopee, OpenAI e Evolution API possam ser injetados posteriormente sem alterar os agentes.
+O modo padrão não implementa scraping nem chamadas externas reais. Os pacotes expõem interfaces e mocks, e o worker somente seleciona Evolution API quando `WHATSAPP_PROVIDER=evolution` é configurado explicitamente.
 
 ## Score Engine
 
@@ -221,9 +221,9 @@ Placeholders suportados pelo `TemplateEngine`: `{{nome}}`, `{{preco}}`, `{{desco
 
 - Criar migração Prisma formal quando o fluxo de migrações do projeto for definido.
 
-## WhatsApp Sender Mock
+## WhatsApp Sender
 
-O módulo de envio usa exclusivamente `MockWhatsAppProvider`. Ele não faz chamadas HTTP, não integra Evolution API real e não envia mensagens reais. O pipeline cria registros `WhatsAppDispatch` pendentes e enfileira jobs `whatsapp-dispatch`; o worker consome esses jobs e chama o `SenderService` com o provider mock injetado.
+O módulo de envio usa o provider selecionado no bootstrap do worker. `WHATSAPP_PROVIDER=mock` continua sendo o padrão seguro e não faz chamadas HTTP nem envia mensagens reais. O pipeline cria registros `WhatsAppDispatch` pendentes e enfileira jobs `whatsapp-dispatch`; o worker consome esses jobs e chama o `SenderService` com uma única instância do provider injetada.
 
 ### Arquitetura de envio
 
@@ -280,12 +280,14 @@ EVOLUTION_API_KEY=replace-with-your-api-key
 EVOLUTION_INSTANCE_NAME=affiliate-bot
 ```
 
-Esta task não conecta a factory ao `SenderService` ou ao worker e, portanto, não envia mensagens reais. Essa integração fica para a próxima task. Nunca versione um arquivo `.env`, credenciais reais ou números reais de WhatsApp.
+O worker usa `loadConfig` no bootstrap, cria o provider uma vez por meio de `createWhatsAppProvider` e injeta a mesma instância nos jobs. Para ativar Evolution futuramente, defina `WHATSAPP_PROVIDER=evolution` e as três variáveis `EVOLUTION_*` somente no `.env` local do ambiente controlado. Configuração incompleta impede a inicialização, e a existência isolada de URL ou chave não altera o modo mock.
+
+Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca versione um arquivo `.env`, credenciais reais ou números reais de WhatsApp.
 
 ### Débito técnico
 
 - Adicionar autenticação/autorização antes de uso em produção.
 - Criar painel operacional para reprocessar dispatches com falha.
-- Conectar a factory da Evolution API ao sender e ao worker apenas em task futura.
+- Validar o envio Evolution em ambiente controlado antes de habilitar produção.
 - Adicionar analytics em sprint separada.
 - Fortalecer validação de status/filtros com schemas formais.
