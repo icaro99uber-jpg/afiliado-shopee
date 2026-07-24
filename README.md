@@ -37,6 +37,24 @@ pnpm dev
 
 A API ficará disponível em `http://localhost:3333/health` e o dashboard em `http://localhost:3000`.
 
+Para executar cada parte separadamente:
+
+```bash
+pnpm --filter @shopee-auto-affiliate-ai/api dev
+pnpm --filter @shopee-auto-affiliate-ai/worker dev
+pnpm --filter @shopee-auto-affiliate-ai/dashboard dev
+```
+
+O dashboard usa `NEXT_PUBLIC_API_URL` para encontrar a API. Em desenvolvimento,
+use:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:3333
+```
+
+Nunca coloque `EVOLUTION_API_KEY` ou outros segredos em variaveis
+`NEXT_PUBLIC_*`.
+
 ## Hunter Agent
 
 O Hunter Agent pode ser executado manualmente pela API:
@@ -291,3 +309,57 @@ Testes usam mock ou cliente HTTP injetado e nunca usam credenciais reais. Nunca 
 - Validar o envio Evolution em ambiente controlado antes de habilitar produção.
 - Adicionar analytics em sprint separada.
 - Fortalecer validação de status/filtros com schemas formais.
+
+## Dashboard operacional MVP
+
+O dashboard em `apps/dashboard` foi expandido para uma interface operacional em
+Next.js App Router, TypeScript e Tailwind. Ele usa uma camada centralizada em
+`apps/dashboard/lib/api` com URL configuravel, timeout, tratamento de respostas
+nao JSON, HTTP 400/404/500 e mensagem amigavel quando a API esta indisponivel.
+
+Paginas disponiveis:
+
+- Visao geral: estado da API, ultimo job da sessao, atalhos e resumo de
+  dispatches/destinos.
+- Produtos: tabela desktop, cards mobile, busca, filtros, ordenacao e paginacao
+  local para produtos conhecidos via dispatches.
+- Pipeline: formulario com filtros reais, disparo de `POST /pipeline/run`,
+  consulta manual de jobId e polling moderado de `GET /pipeline/jobs/:id`.
+- Copies: geracao manual por `POST /copy/generate`, botao de copiar e historico
+  apenas durante a sessao da tela.
+- WhatsApp: criacao/listagem/edicao de destinos e listagem/filtro/detalhes de
+  dispatches.
+- Configuracoes: URL da API, estado de conexao, orientacoes de mock/evolution e
+  lembrete de credenciais fora do navegador.
+
+Endpoints usados pelo dashboard:
+
+- `GET /health`
+- `POST /pipeline/run`
+- `GET /pipeline/jobs/:id`
+- `POST /copy/generate`
+- `POST /whatsapp/destinations`
+- `GET /whatsapp/destinations`
+- `PATCH /whatsapp/destinations/:id`
+- `GET /whatsapp/dispatches`
+- `GET /whatsapp/dispatches/:id`
+
+Limitacoes atuais:
+
+- Nao ha endpoint publico para listar todos os produtos; a tela de produtos
+  mostra apenas produtos vinculados a dispatches existentes.
+- Nao ha endpoint agregado para produtos encontrados, pontuados, aprovados ou
+  copies geradas; esses indicadores aparecem como indisponiveis quando nao podem
+  ser calculados por endpoints existentes.
+- Nao ha endpoint de historico de copies; o historico da tela e somente da
+  sessao atual.
+- Nao ha endpoint de reprocessamento manual de dispatches; o dashboard nao
+  inventa essa acao.
+
+Seguranca:
+
+- O dashboard nao armazena credenciais no navegador.
+- O provider mock continua seguro por padrao.
+- Evolution API so envia mensagens quando configurada explicitamente no ambiente
+  do worker.
+- Chaves como `EVOLUTION_API_KEY` devem ficar somente no `.env` local do worker.

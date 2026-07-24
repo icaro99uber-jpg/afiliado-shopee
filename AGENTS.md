@@ -195,3 +195,39 @@ Proximos passos previstos:
 - Adicionar painel operacional para acompanhar jobs e dispatches.
 - Melhorar rastreabilidade entre produto, copy, destino e envio.
 - Separar integracoes reais em providers sem alterar o contrato publico do pipeline.
+
+## Dashboard operacional
+
+Responsabilidade:
+
+- Expor uma interface operacional pessoal para consultar a API existente.
+- Disparar pipeline, consultar jobs, gerar copies manuais e administrar destinos
+  WhatsApp sem alterar regras do backend.
+- Mostrar estados indisponiveis quando a API nao possui endpoint para o dado.
+
+Entradas:
+
+- `NEXT_PUBLIC_API_URL`, com padrao local `http://localhost:3333`.
+- Endpoints publicos de health, pipeline, copy e WhatsApp.
+- Produtos derivados apenas de dispatches quando presentes.
+
+Saidas:
+
+- Paginas de visao geral, produtos, pipeline, copies, WhatsApp e configuracoes.
+- Estados de loading, empty, erro, sucesso e retry manual.
+- Polling moderado de jobs ativos com cleanup ao desmontar a tela.
+
+Dependencias:
+
+- Next.js App Router em `apps/dashboard`.
+- TypeScript e Tailwind.
+- `lucide-react` para icones.
+- Camada centralizada em `apps/dashboard/lib/api`.
+- Testes Vitest/jsdom com fetch e funcoes da API mockados.
+
+Restricoes:
+
+- Nao acessar Prisma, Redis ou BullMQ diretamente pelo dashboard.
+- Nao expor `EVOLUTION_API_KEY` ou segredos no frontend.
+- Nao criar acoes sem endpoint existente, como envio manual real ou
+  reprocessamento manual de dispatch.

@@ -35,6 +35,42 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
 
+## Dashboard operacional
+
+O dashboard do MVP usa somente endpoints publicos existentes da API e nao acessa
+Prisma, Redis, BullMQ ou variaveis privadas diretamente. A URL da API no
+frontend e configurada por `NEXT_PUBLIC_API_URL`, com padrao local seguro
+`http://localhost:3333`.
+
+Paginas disponiveis:
+
+- `Visao geral`: health da API, ultimo job da sessao, atalhos e resumo de
+  dispatches/destinos.
+- `Produtos`: visualizacao derivada de produtos presentes em dispatches, com
+  busca, filtros, ordenacao e paginacao local.
+- `Pipeline`: dispara `POST /pipeline/run`, consulta `GET /pipeline/jobs/:id`
+  e faz polling moderado enquanto o job esta ativo.
+- `Copies`: gera copy manual por `POST /copy/generate` e mantem historico
+  apenas durante a sessao da tela.
+- `WhatsApp`: lista/cria/edita destinos e lista/filtra/abre detalhes de
+  dispatches existentes.
+- `Configuracoes`: mostra URL publica da API, estado de conexao, orientacoes de
+  mock/evolution e limites atuais.
+
+Limitacoes por contrato atual:
+
+- Nao ha endpoint publico de listagem completa de produtos.
+- Nao ha endpoint agregado para metricas de produtos pontuados/aprovados.
+- Nao ha endpoint de listagem de historico de copies.
+- Nao ha endpoint de reprocessamento manual de dispatches.
+
+Regras de seguranca do dashboard:
+
+- Nao colocar `EVOLUTION_API_KEY` ou qualquer segredo em `NEXT_PUBLIC_*`.
+- Credenciais da Evolution API ficam somente no `.env` local do worker.
+- O provider `mock` continua sendo o modo seguro por padrao.
+- O dashboard nao armazena credenciais no navegador.
+
 Fluxo operacional atual:
 
 1. `POST /pipeline/run` enfileira um job `pipeline-product`.

@@ -1,4 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-body { @apply bg-slate-950 text-slate-50; }
+
+body {
+  @apply bg-slate-100 text-slate-950 antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
