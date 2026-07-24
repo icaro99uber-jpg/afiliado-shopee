@@ -7,6 +7,21 @@ const booleanFromEnv = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const positiveIntegerFromEnv = z.preprocess(
+  (value) => (typeof value === 'string' ? Number(value) : value),
+  z.number().int().positive(),
+);
+
+const destinationListFromEnv = z
+  .string()
+  .default('')
+  .transform((value) =>
+    value
+      .split(',')
+      .map((destination) => destination.trim())
+      .filter(Boolean),
+  );
+
 const cronRanges = [
   [0, 59],
   [0, 23],
@@ -84,6 +99,9 @@ export const envSchema = z
       .optional(),
     EVOLUTION_API_KEY: z.string().trim().optional(),
     EVOLUTION_INSTANCE_NAME: z.string().trim().optional(),
+    EVOLUTION_SAFE_MODE: booleanFromEnv.default(true),
+    EVOLUTION_ALLOWED_DESTINATIONS: destinationListFromEnv,
+    EVOLUTION_MAX_MESSAGES_PER_BOOT: positiveIntegerFromEnv.default(1),
     SCHEDULER_ENABLED: booleanFromEnv.default(false),
     SCHEDULER_CRON: z.string().trim().optional(),
     SCHEDULER_TIMEZONE: z.string().trim().optional(),

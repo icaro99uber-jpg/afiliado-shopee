@@ -7,6 +7,12 @@ export {
   type ProviderLogger,
 } from './evolution-api-whatsapp-provider';
 export {
+  EvolutionSendGuard,
+  maskEvolutionDestination,
+  normalizeEvolutionDestination,
+  type EvolutionSendGuardOptions,
+} from './evolution-send-guard';
+export {
   createWhatsAppProvider,
   type WhatsAppProviderFactoryConfig,
   type WhatsAppProviderFactoryOptions,

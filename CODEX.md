@@ -34,7 +34,8 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
   a consulta segura `GET /scheduler`.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
-- Evolution API: provider HTTP v2 e factory segura em `packages/providers`, conectada ao bootstrap do worker.
+- Evolution API: provider HTTP v2, `EvolutionSendGuard` e factory segura em
+  `packages/providers`, conectados uma unica vez ao bootstrap do worker.
 - Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, consumido pela visao geral do dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
@@ -149,6 +150,25 @@ Fluxo operacional atual:
 6. O pipeline enfileira jobs `whatsapp-dispatch`.
 7. O bootstrap do worker cria uma unica instancia do provider configurado e a injeta no `SenderService`.
 8. `WHATSAPP_PROVIDER=mock` permanece como padrao; `evolution` exige configuracao completa e explicita.
+9. Em Evolution, o safe mode ativo por padrao valida uma allowlist normalizada
+   e reserva o limite por processo imediatamente antes do request HTTP.
+
+Seguranca do provider Evolution:
+
+- `EVOLUTION_SAFE_MODE=true` e o padrao.
+- `EVOLUTION_ALLOWED_DESTINATIONS` e uma lista separada por virgulas; vazia
+  bloqueia todos os envios reais.
+- `EVOLUTION_MAX_MESSAGES_PER_BOOT` aceita apenas inteiro positivo e vale 1 por
+  padrao.
+- A comparacao remove apenas formatacao comum, exige somente digitos e e exata;
+  correspondencias parciais nao sao aceitas.
+- Requests iniciados contam mesmo em timeout ou erro HTTP. Bloqueios por
+  destino ou limite acontecem antes do HTTP e nao incrementam o contador.
+- Safe mode desativado exige valor `false` explicito. Credenciais nao alteram
+  esse valor automaticamente.
+- O mock nao cria guard e nao e afetado por essas variaveis.
+- Logs podem registrar estado, limite, quantidade permitida, contador, codigo
+  e destino mascarado, nunca chaves, allowlist ou payload completo.
 
 O fluxo manual continua disponivel mesmo quando o Scheduler esta habilitado.
 
@@ -194,6 +214,8 @@ Arquivos principais na raiz:
 - Usar providers para isolar integracoes externas.
 - Preservar mocks enquanto uma integracao real nao estiver prevista na sprint.
 - Manter `WHATSAPP_PROVIDER=mock` como padrao; selecionar `evolution` exige URL, chave e nome da instancia validos.
+- Manter o safe mode Evolution ativo por padrao e nunca inserir destinos reais
+  em arquivos versionados.
 - Nunca acessar variaveis de ambiente dentro de providers nem registrar credenciais em logs ou erros.
 - Registrar eventos relevantes com logs estruturados nos servicos e workers.
 - Evitar acoplamento direto entre endpoints e detalhes de infraestrutura quando ja houver servico dedicado.

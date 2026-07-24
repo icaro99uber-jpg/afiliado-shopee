@@ -6,12 +6,16 @@ import {
   type ProviderLogger,
 } from './evolution-api-whatsapp-provider';
 import { MockWhatsAppProvider, type WhatsAppProvider } from './index';
+import { EvolutionSendGuard } from './evolution-send-guard';
 
 export type WhatsAppProviderFactoryConfig = {
   WHATSAPP_PROVIDER?: 'mock' | 'evolution';
   EVOLUTION_API_URL?: string;
   EVOLUTION_API_KEY?: string;
   EVOLUTION_INSTANCE_NAME?: string;
+  EVOLUTION_SAFE_MODE?: boolean;
+  EVOLUTION_ALLOWED_DESTINATIONS?: string | readonly string[];
+  EVOLUTION_MAX_MESSAGES_PER_BOOT?: number;
 };
 
 export type WhatsAppProviderFactoryOptions = {
@@ -41,6 +45,22 @@ export const createWhatsAppProvider = (
     return new MockWhatsAppProvider();
   }
 
+  const allowedDestinationConfig = config.EVOLUTION_ALLOWED_DESTINATIONS;
+  const allowedDestinations =
+    typeof allowedDestinationConfig === 'string' ||
+    allowedDestinationConfig === undefined
+      ? (allowedDestinationConfig ?? '')
+          .split(',')
+          .map((destination) => destination.trim())
+          .filter(Boolean)
+      : allowedDestinationConfig;
+  const sendGuard = new EvolutionSendGuard({
+    safeMode: config.EVOLUTION_SAFE_MODE ?? true,
+    allowedDestinations,
+    maxMessagesPerBoot: config.EVOLUTION_MAX_MESSAGES_PER_BOOT ?? 1,
+    logger: options.logger,
+  });
+
   return new EvolutionApiWhatsAppProvider({
     baseUrl: requireEvolutionConfig(
       config.EVOLUTION_API_URL,
@@ -55,5 +75,6 @@ export const createWhatsAppProvider = (
       'EVOLUTION_INSTANCE_NAME',
     ),
     ...options,
+    sendGuard,
   });
 };

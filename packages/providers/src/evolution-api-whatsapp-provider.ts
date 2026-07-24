@@ -5,6 +5,10 @@ import type {
   WhatsAppSendInput,
   WhatsAppSendResult,
 } from './index';
+import {
+  maskEvolutionDestination,
+  type EvolutionSendGuard,
+} from './evolution-send-guard';
 
 export type HttpClient = (
   input: string | URL | Request,
@@ -23,6 +27,7 @@ export type EvolutionApiWhatsAppProviderOptions = {
   httpClient?: HttpClient;
   logger?: ProviderLogger;
   timeoutMs?: number;
+  sendGuard?: EvolutionSendGuard;
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -51,11 +56,6 @@ const normalizeBaseUrl = (value: string) => {
 const requireValue = (value: string, message: string, code: string) => {
   if (value.trim().length === 0) throw new AppError(message, code);
   return value.trim();
-};
-
-const maskDestination = (destination: string) => {
-  const visible = destination.slice(-4);
-  return `${'*'.repeat(Math.max(4, destination.length - visible.length))}${visible}`;
 };
 
 const httpError = (status: number) => {
@@ -120,6 +120,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
   private readonly httpClient: HttpClient;
   private readonly logger?: ProviderLogger;
   private readonly timeoutMs: number;
+  private readonly sendGuard?: EvolutionSendGuard;
 
   constructor(options: EvolutionApiWhatsAppProviderOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
@@ -145,6 +146,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
     this.httpClient = options.httpClient ?? fetch;
     this.logger = options.logger;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.sendGuard = options.sendGuard;
   }
 
   async sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
@@ -158,13 +160,14 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
       'Mensagem WhatsApp e obrigatoria',
       'WHATSAPP_MESSAGE_REQUIRED',
     );
-    const destinationMasked = maskDestination(destination);
+    const destinationMasked = maskEvolutionDestination(destination);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const url = `${this.baseUrl}/message/sendText/${encodeURIComponent(this.instanceName)}`;
     let responseStatus: number | undefined;
 
     try {
+      this.sendGuard?.authorizeRequest(destination);
       const response = await this.httpClient(url, {
         method: 'POST',
         headers: {

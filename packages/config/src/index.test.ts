@@ -9,8 +9,34 @@ const baseEnv = {
 
 describe('envSchema WhatsApp provider', () => {
   it('usa mock por padrao sem exigir Evolution API', () => {
-    expect(envSchema.parse(baseEnv).WHATSAPP_PROVIDER).toBe('mock');
+    const config = envSchema.parse(baseEnv);
+
+    expect(config.WHATSAPP_PROVIDER).toBe('mock');
+    expect(config.EVOLUTION_SAFE_MODE).toBe(true);
+    expect(config.EVOLUTION_ALLOWED_DESTINATIONS).toEqual([]);
+    expect(config.EVOLUTION_MAX_MESSAGES_PER_BOOT).toBe(1);
   });
+
+  it('separa e limpa a allowlist sem expor valores', () => {
+    const config = envSchema.parse({
+      ...baseEnv,
+      EVOLUTION_ALLOWED_DESTINATIONS: ' 0000000000000,0000111111111 ',
+    });
+
+    expect(config.EVOLUTION_ALLOWED_DESTINATIONS).toHaveLength(2);
+  });
+
+  it.each(['0', '-1', '1.5', 'invalid'])(
+    'rejeita limite que nao seja inteiro positivo: %s',
+    (limit) => {
+      expect(
+        envSchema.safeParse({
+          ...baseEnv,
+          EVOLUTION_MAX_MESSAGES_PER_BOOT: limit,
+        }).success,
+      ).toBe(false);
+    },
+  );
 
   it('valida configuracao Evolution e remove a barra final da URL', () => {
     expect(
