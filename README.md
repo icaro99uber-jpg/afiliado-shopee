@@ -81,10 +81,56 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 ## Scripts
 
 - `pnpm dev`: inicia os apps em modo desenvolvimento via Turborepo.
+- `pnpm evolution:init`: cria a configuração local ignorada da Evolution API
+  com segredos aleatórios, sem exibi-los.
+- `pnpm evolution:up`: sobe Evolution API, PostgreSQL e Redis isolados.
+- `pnpm evolution:status`: mostra estado, saúde e porta da stack Evolution.
+- `pnpm evolution:logs`: mostra as últimas 200 linhas dos containers, sem
+  imprimir o ambiente.
+- `pnpm evolution:restart`: reinicia a stack Evolution sem apagar dados.
+- `pnpm evolution:down`: para a stack Evolution e preserva os volumes.
 - `pnpm build`: compila todos os pacotes e aplicações.
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
 - `pnpm test`: executa os testes mínimos.
+
+## Infraestrutura local da Evolution API
+
+A infraestrutura isolada fica em `infra/evolution` e usa três containers:
+
+- `shopee-evolution-api`, com a imagem pública fixada
+  `evoapicloud/evolution-api:v2.3.6`;
+- `shopee-evolution-postgres`, banco exclusivo sem porta publicada no host;
+- `shopee-evolution-redis`, cache exclusivo sem porta publicada no host.
+
+Para preparar e iniciar no Windows/PowerShell:
+
+```powershell
+pnpm evolution:init
+pnpm evolution:config
+pnpm evolution:pull
+pnpm evolution:up
+pnpm evolution:status
+```
+
+A API fica em `http://localhost:8080` e a rota pública `/` funciona como status
+oficial da versão 2.3.6. A configuração real fica somente em
+`infra/evolution/.env.local`, que está ignorado pelo Git e nunca deve ser enviado
+ao GitHub. PostgreSQL, Redis, volumes e rede usam nomes próprios e não colidem
+com o compose principal.
+
+A 2.3.6 foi escolhida por ser a última release pública estável da linha 2.3.x,
+anterior à ativação remota obrigatória da 2.4.0, e por incorporar a correção da
+migração Kafka publicada na 2.3.5. Sua licença é Apache 2.0 com condições
+adicionais de preservação da marca/copyright no frontend e aviso visível de uso
+da Evolution API; descumprir essas condições pode exigir licença comercial.
+Consulte o [guia operacional completo](infra/evolution/README.md).
+
+Esta stack apenas inicia a infraestrutura. Ela não cria instância, não gera QR
+Code, não conecta WhatsApp, não executa pipeline ou Scheduler e não envia
+mensagens. Um próximo passo deve revisar manualmente ambiente, instância
+fictícia, safe mode, allowlist e limite antes de decidir criar e conectar uma
+instância em uma task separada e controlada.
 
 ## Desenvolvimento sem integrações reais
 

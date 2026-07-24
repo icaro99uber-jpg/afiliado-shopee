@@ -1,0 +1,86 @@
+name: shopee-evolution-local
+
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.6
+    container_name: shopee-evolution-api
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    ports:
+      - '127.0.0.1:${EVOLUTION_HOST_PORT:-8080}:8080'
+    volumes:
+      - evolution_api_instances:/evolution/instances
+    networks:
+      - evolution_local_network
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  evolution-postgres:
+    image: postgres:16.4-alpine3.20
+    container_name: shopee-evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    networks:
+      - evolution_local_network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"'
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  evolution-redis:
+    image: redis:7.2.5-alpine3.20
+    container_name: shopee-evolution-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+    volumes:
+      - evolution_redis_data:/data
+    networks:
+      - evolution_local_network
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  evolution_api_instances:
+    name: shopee-evolution-api-instances
+  evolution_postgres_data:
+    name: shopee-evolution-postgres-data
+  evolution_redis_data:
+    name: shopee-evolution-redis-data
+
+networks:
+  evolution_local_network:
+    name: shopee-evolution-local-network
+    driver: bridge
