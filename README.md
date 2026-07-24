@@ -89,6 +89,8 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
   imprimir o ambiente.
 - `pnpm evolution:restart`: reinicia a stack Evolution sem apagar dados.
 - `pnpm evolution:down`: para a stack Evolution e preserva os volumes.
+- `pnpm whatsapp:group-test`: valida o diretorio de grupos em dry-run, sem
+  criar dispatch, job, worker ou mensagem.
 - `pnpm build`: compila todos os pacotes e aplicações.
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
@@ -302,7 +304,9 @@ A mensagem pública enviada é formada por título, mensagem, CTA e hashtags. Co
 
 ### Destinos
 
-`WhatsAppDestination` representa grupos ou números do provider:
+`WhatsAppDestination` representa destinos individuais do provider. Grupos sao
+descobertos somente pelo diretorio seguro descrito adiante e nunca podem ser
+cadastrados por este endpoint legado:
 
 ```json
 {
@@ -406,6 +410,8 @@ EVOLUTION_INSTANCE_NAME=affiliate-bot
 EVOLUTION_SAFE_MODE=true
 EVOLUTION_ALLOWED_DESTINATIONS=
 EVOLUTION_MAX_MESSAGES_PER_BOOT=1
+WHATSAPP_GROUP_SEND_ENABLED=false
+WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN=1
 ```
 
 O worker usa `loadConfig` no bootstrap, cria o provider e o
@@ -515,6 +521,85 @@ raiz continuou com `mock`, instancia de exemplo e allowlist vazia; portanto o
 comando permaneceu bloqueado antes de qualquer escrita ou envio. Resultado
 sanitizado: zero mensagens reais e nenhum segredo versionado.
 
+### Diretorio seguro de grupos
+
+O diretorio usa exclusivamente o contrato read-only confirmado na tag oficial
+2.3.6:
+
+```text
+GET /group/fetchAllGroups/:instanceName?getParticipants=false
+apikey: <segredo somente no servidor>
+```
+
+`getParticipants` e obrigatorio nessa versao. A resposta e um array com campos
+como `id`, `subject`, `size`, tempos e configuracoes do grupo; `participants` so
+e acrescentado quando a query recebe `true`, caminho que este projeto nunca
+usa. O provider mapeia apenas `id` para armazenamento interno, `subject` para
+nome e `size` para contagem opcional. Descricao, owner, foto, participantes,
+convites e resposta bruta sao descartados. A rota oficial nao aplica um guard
+explicito de conexao; timeout, rede, HTTP 400/401/403/404/5xx ou resposta
+malformada interrompem a sincronizacao com erro sanitizado.
+
+O identificador externo e validado como um JID de grupo opaco da 2.3.6. A
+normalizacao remove somente espacos externos e preserva `@g.us`; ela nunca usa a
+normalizacao de telefone. API, dashboard e logs recebem apenas um fingerprint
+SHA-256 no formato `grp_...`, nunca o identificador completo.
+
+`POST /whatsapp/groups/sync` cria grupos novos com `active=false`, atualiza
+somente nome/contagem/metadados seguros e preserva autorizacao enquanto o grupo
+continua disponivel. Um grupo ausente da consulta nao e apagado: fica
+`available=false` e `active=false`. Os endpoints publicos sao:
+
+- `POST /whatsapp/groups/sync`;
+- `GET /whatsapp/groups`, com filtros opcionais `active` e `available`;
+- `GET /whatsapp/groups/:id`;
+- `PATCH /whatsapp/groups/:id`, aceitando somente `active`. Ativacao exige
+  `confirm: "AUTORIZAR_GRUPO"`; desativacao e direta e grupo indisponivel nao
+  pode ser ativado.
+
+Nao existe endpoint de envio para grupos. O pipeline consulta somente destinos
+`INDIVIDUAL`, portanto grupos autorizados nao geram fanout automatico e o
+Scheduler continua enfileirando apenas `pipeline-product` sem grupos.
+
+O Sender distingue os dois tipos. Telefones continuam protegidos pela allowlist
+existente. Um grupo so pode chegar ao HTTP quando esta descoberto na instancia
+atual, disponivel, ativo, com identidade exata, safe mode ativo e o master switch
+`WHATSAPP_GROUP_SEND_ENABLED=true`. O padrao permanece `false`, e
+`WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN=1` limita o processo. O dashboard altera
+somente `active` no banco e nunca edita variaveis de ambiente.
+
+O comando abaixo e dry-run por padrao:
+
+```bash
+corepack pnpm whatsapp:group-test
+```
+
+Ele valida Evolution 2.3.6, instancia open, banco, Redis, diretorio remoto e
+autorizacoes persistidas sem escrever produto, copy, dispatch ou job, sem
+iniciar worker e sem enviar. A saida inclui somente contagem e, quando existe um
+unico grupo ativo/disponivel, nome e fingerprint. Master switch desligado e um
+estado valido de preparacao com `readyForRealSend=false`.
+
+Existe apenas para uma task futura o caminho exato abaixo, implementado e
+coberto exclusivamente por mocks nesta sprint:
+
+```bash
+corepack pnpm whatsapp:group-test -- --confirm-one-real-group-message
+```
+
+Nao o execute sem uma autorizacao futura separada. Ele e bloqueado em CI, exige
+exatamente um grupo ativo/disponivel, safe mode, master switch, limite 1 e
+Scheduler desligado. Usa mensagem fixa, IDs tecnicos, um dispatch/job com
+`attempts: 1`, sem backoff/retry/remocao, worker isolado e bloqueio permanente
+depois de qualquer execucao anterior. Nao aceita ID, nome ou mensagem por
+argumento.
+
+A migracao `20260724190000_whatsapp_group_directory` atualiza com sucesso o
+banco existente. A recriacao limpa continua bloqueada por uma limitacao anterior:
+a primeira migracao versionada cria dispatches antes das tabelas historicas
+`ProductLead` e `GeneratedCopy`. Nenhuma migracao anterior foi alterada ou
+re-baselineada nesta task.
+
 ### Débito técnico
 
 - Adicionar autenticação/autorização antes de uso em produção.
@@ -563,8 +648,9 @@ Paginas disponiveis:
   consulta manual de jobId e polling moderado de `GET /pipeline/jobs/:id`.
 - Copies: geracao manual por `POST /copy/generate`, botao de copiar e historico
   apenas durante a sessao da tela.
-- WhatsApp: criacao/listagem/edicao de destinos e listagem/filtro/detalhes de
-  dispatches.
+- WhatsApp: criacao/listagem/edicao de destinos individuais, diretorio
+  responsivo de grupos com sincronizacao/autorizacao explicita e
+  listagem/filtro/detalhes de dispatches.
 - Configuracoes: URL da API, estado de conexao, orientacoes de mock/evolution e
   lembrete de credenciais fora do navegador.
 
@@ -581,6 +667,10 @@ Endpoints usados pelo dashboard:
 - `PATCH /whatsapp/destinations/:id`
 - `GET /whatsapp/dispatches`
 - `GET /whatsapp/dispatches/:id`
+- `POST /whatsapp/groups/sync`
+- `GET /whatsapp/groups`
+- `GET /whatsapp/groups/:id`
+- `PATCH /whatsapp/groups/:id`
 
 Limitacoes atuais:
 

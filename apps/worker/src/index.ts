@@ -26,6 +26,7 @@ import {
   createPrismaRepositories,
 } from '../../api/src/application-services';
 import { processWhatsAppDispatchJob } from './whatsapp-dispatch-worker';
+import { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 
 export { processWhatsAppDispatchJob } from './whatsapp-dispatch-worker';
 
@@ -40,11 +41,13 @@ type CreatePipelineProductWorkerOptions = {
   hunterProvider?: HunterProvider;
   logger?: WorkerLogger;
   whatsAppProvider: WhatsAppProvider;
+  groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
 type WorkerProcessorOptions = Required<
-  Omit<CreatePipelineProductWorkerOptions, 'connection'>
->;
+  Omit<CreatePipelineProductWorkerOptions, 'connection' | 'groupSendPolicy'>
+> &
+  Pick<CreatePipelineProductWorkerOptions, 'groupSendPolicy'>;
 
 type WorkerFactory = typeof createPipelineProductWorker;
 
@@ -121,6 +124,7 @@ export const createPipelineProductWorker = (
     hunterProvider: options.hunterProvider ?? new MockShopeeProvider(),
     logger: options.logger ?? consoleLogger,
     whatsAppProvider: options.whatsAppProvider,
+    groupSendPolicy: options.groupSendPolicy,
   };
 
   const worker = new Worker<PipelineProductJob>(
@@ -206,6 +210,11 @@ export const startWorker = async (
     ...options.providerFactoryOptions,
     logger,
   });
+  const groupSendPolicy = new WhatsAppGroupSendPolicy({
+    enabled: config.WHATSAPP_GROUP_SEND_ENABLED,
+    safeMode: config.EVOLUTION_SAFE_MODE,
+    instanceName: config.EVOLUTION_INSTANCE_NAME,
+  });
 
   logger.info(
     {
@@ -289,6 +298,7 @@ export const startWorker = async (
       hunterProvider: options.hunterProvider,
       logger,
       whatsAppProvider,
+      groupSendPolicy,
     });
   } catch (error) {
     await infrastructure.close().catch(() => undefined);

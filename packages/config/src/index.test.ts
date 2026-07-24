@@ -15,6 +15,8 @@ describe('envSchema WhatsApp provider', () => {
     expect(config.EVOLUTION_SAFE_MODE).toBe(true);
     expect(config.EVOLUTION_ALLOWED_DESTINATIONS).toEqual([]);
     expect(config.EVOLUTION_MAX_MESSAGES_PER_BOOT).toBe(1);
+    expect(config.WHATSAPP_GROUP_SEND_ENABLED).toBe(false);
+    expect(config.WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN).toBe(1);
   });
 
   it('separa e limpa a allowlist sem expor valores', () => {
@@ -33,6 +35,18 @@ describe('envSchema WhatsApp provider', () => {
         envSchema.safeParse({
           ...baseEnv,
           EVOLUTION_MAX_MESSAGES_PER_BOOT: limit,
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it.each(['0', '-1', '1.5', 'invalid'])(
+    'rejeita limite de grupos que nao seja inteiro positivo: %s',
+    (limit) => {
+      expect(
+        envSchema.safeParse({
+          ...baseEnv,
+          WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN: limit,
         }).success,
       ).toBe(false);
     },

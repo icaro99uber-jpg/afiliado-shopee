@@ -17,6 +17,11 @@ import type {
   WhatsAppDispatchRecord,
   WhatsAppDispatchRepository,
   WhatsAppDispatchStatus,
+  WhatsAppGroupCreateData,
+  WhatsAppGroupDirectoryRepository,
+  WhatsAppGroupFilters,
+  WhatsAppGroupRecord,
+  WhatsAppGroupUpdate,
 } from './repositories';
 import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 
@@ -71,7 +76,7 @@ export class PrismaAnalyticsRepository implements AnalyticsRepository {
 
   totalActiveDestinations(): Promise<number> {
     return this.prisma.whatsAppDestination.count({
-      where: { active: true },
+      where: { active: true, type: 'INDIVIDUAL' },
     });
   }
 }
@@ -146,22 +151,21 @@ export class PrismaGeneratedCopyRepository implements GeneratedCopyRepository {
   }
 }
 
-export class PrismaWhatsAppDestinationRepository
-  implements WhatsAppDestinationRepository
-{
+export class PrismaWhatsAppDestinationRepository implements WhatsAppDestinationRepository {
   constructor(
     private readonly prisma: Pick<DatabaseClient, 'whatsAppDestination'>,
   ) {}
 
   async findById(id: string): Promise<WhatsAppDestinationRecord | null> {
-    return (await this.prisma.whatsAppDestination.findUnique({
-      where: { id },
+    return (await this.prisma.whatsAppDestination.findFirst({
+      where: { id, type: 'INDIVIDUAL' },
     })) as WhatsAppDestinationRecord | null;
   }
 
   async listActive(): Promise<WhatsAppDestinationRecord[]> {
     return (await this.prisma.whatsAppDestination.findMany({
-      where: { active: true },
+      // Groups are authorized separately and never participate in Pipeline.
+      where: { active: true, type: 'INDIVIDUAL' },
     })) as WhatsAppDestinationRecord[];
   }
 
@@ -169,12 +173,13 @@ export class PrismaWhatsAppDestinationRepository
     data: WhatsAppDestinationData,
   ): Promise<WhatsAppDestinationRecord> {
     return (await this.prisma.whatsAppDestination.create({
-      data,
+      data: { ...data, type: 'INDIVIDUAL', available: true },
     })) as WhatsAppDestinationRecord;
   }
 
   async list(): Promise<WhatsAppDestinationRecord[]> {
     return (await this.prisma.whatsAppDestination.findMany({
+      where: { type: 'INDIVIDUAL' },
       orderBy: { createdAt: 'desc' },
     })) as WhatsAppDestinationRecord[];
   }
@@ -184,6 +189,11 @@ export class PrismaWhatsAppDestinationRepository
     data: WhatsAppDestinationUpdate,
   ): Promise<WhatsAppDestinationRecord | null> {
     try {
+      const existing = await this.prisma.whatsAppDestination.findFirst({
+        where: { id, type: 'INDIVIDUAL' },
+        select: { id: true },
+      });
+      if (!existing) return null;
       return (await this.prisma.whatsAppDestination.update({
         where: { id },
         data,
@@ -194,9 +204,74 @@ export class PrismaWhatsAppDestinationRepository
   }
 }
 
-export class PrismaWhatsAppDispatchRepository
-  implements WhatsAppDispatchRepository
-{
+export class PrismaWhatsAppGroupDirectoryRepository implements WhatsAppGroupDirectoryRepository {
+  constructor(
+    private readonly prisma: Pick<DatabaseClient, 'whatsAppDestination'>,
+  ) {}
+
+  async findById(id: string): Promise<WhatsAppGroupRecord | null> {
+    return (await this.prisma.whatsAppDestination.findFirst({
+      where: { id, type: 'GROUP' },
+    })) as WhatsAppGroupRecord | null;
+  }
+
+  async findByExternalGroupId(
+    sourceInstanceName: string,
+    externalGroupId: string,
+  ): Promise<WhatsAppGroupRecord | null> {
+    return (await this.prisma.whatsAppDestination.findFirst({
+      where: {
+        type: 'GROUP',
+        sourceInstanceName,
+        destination: externalGroupId,
+      },
+    })) as WhatsAppGroupRecord | null;
+  }
+
+  async listByInstance(
+    sourceInstanceName: string,
+  ): Promise<WhatsAppGroupRecord[]> {
+    return (await this.prisma.whatsAppDestination.findMany({
+      where: { type: 'GROUP', sourceInstanceName },
+      orderBy: { name: 'asc' },
+    })) as WhatsAppGroupRecord[];
+  }
+
+  async list(
+    sourceInstanceName: string,
+    filters: WhatsAppGroupFilters = {},
+  ): Promise<WhatsAppGroupRecord[]> {
+    return (await this.prisma.whatsAppDestination.findMany({
+      where: {
+        type: 'GROUP',
+        sourceInstanceName,
+        active: filters.active,
+        available: filters.available,
+      },
+      orderBy: { name: 'asc' },
+    })) as WhatsAppGroupRecord[];
+  }
+
+  async create(data: WhatsAppGroupCreateData): Promise<WhatsAppGroupRecord> {
+    return (await this.prisma.whatsAppDestination.create({
+      data,
+    })) as WhatsAppGroupRecord;
+  }
+
+  async update(
+    id: string,
+    data: WhatsAppGroupUpdate,
+  ): Promise<WhatsAppGroupRecord | null> {
+    const existing = await this.findById(id);
+    if (!existing) return null;
+    return (await this.prisma.whatsAppDestination.update({
+      where: { id },
+      data,
+    })) as WhatsAppGroupRecord;
+  }
+}
+
+export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchRepository {
   constructor(
     private readonly prisma: Pick<DatabaseClient, 'whatsAppDispatch'>,
   ) {}
