@@ -1,1 +1,19 @@
-{"name":"@shopee-auto-affiliate-ai/queue","version":"0.1.0","private":true,"type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json","lint":"eslint src --ext .ts","typecheck":"tsc -p tsconfig.json --noEmit","test":"vitest run --passWithNoTests"},"dependencies":{"bullmq":"^5.0.0","ioredis":"^5.4.0"}}
+{
+  "name": "@shopee-auto-affiliate-ai/queue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.4.0",
+    "@shopee-auto-affiliate-ai/shared": "workspace:*"
+  }
+}
