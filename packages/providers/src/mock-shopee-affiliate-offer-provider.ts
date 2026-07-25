@@ -16,15 +16,18 @@ const mockOffers: ShopeeProductOffer[] = Array.from(
       providerProductId: `mock-affiliate-${String(number).padStart(3, '0')}`,
       productName: `Produto ficticio afiliado ${number}`,
       ...(index % 4 === 0 ? {} : { shopId: `mock-shop-${(index % 5) + 1}` }),
-      shopName: `Loja ficticia ${(index % 5) + 1}`,
+      shopName:
+        index === 0
+          ? 'Loja oficial ficticia'
+          : `Loja ficticia ${(index % 5) + 1}`,
       categoryIds: [categories[index % categories.length]],
       price,
       priceMin: price,
       priceMax: index % 6 === 0 ? (Number(price) + 20).toFixed(2) : price,
-      discountRate: 5 + (index % 8) * 5,
-      rating: Number((4 + (index % 10) / 10).toFixed(1)),
-      sales: 50 + index * 125,
-      commissionRate: 3 + (index % 8),
+      discountRate: index === 0 ? 50 : 5 + (index % 8) * 5,
+      rating: index === 0 ? 4.9 : Number((4 + (index % 10) / 10).toFixed(1)),
+      sales: index === 0 ? 10000 : 50 + index * 125,
+      commissionRate: index === 0 ? 20 : 3 + (index % 8),
       ...(index % 3 === 0
         ? { commissionAmount: (Number(price) * 0.05).toFixed(2) }
         : {}),

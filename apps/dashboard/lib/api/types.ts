@@ -227,6 +227,82 @@ export type ManualCouponInput = {
   terms?: string;
 };
 
+export type CommercialPipelineInput = {
+  source?: 'MOCK' | 'MANUAL';
+  categoryId?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minDiscountRate?: number;
+  minRating?: number;
+  minSales?: number;
+  minCommissionRate?: number;
+  minimumScore?: number;
+  campaign?: string;
+  limitCandidates?: number;
+};
+
+export type CommercialSelectedProduct = {
+  id: string;
+  name: string;
+  price: string;
+  score: number;
+  affiliateLinkPresent: boolean;
+};
+
+export type CommercialSelectedGroup = {
+  id: string;
+  name: string;
+  fingerprint: string;
+};
+
+export type CommercialPipelineDryRunResult = {
+  runId: string;
+  mode: 'dry-run';
+  status: 'ready';
+  provider: 'mock' | 'manual';
+  candidateCount: number;
+  eligibleCount: number;
+  rejectedCount: number;
+  rejectionSummary: Record<string, number>;
+  selectedProduct: CommercialSelectedProduct;
+  selectedGroup: CommercialSelectedGroup;
+  selectionReasons: string[];
+  copyPreview: string;
+  plannedSubIds: string[];
+  dispatchWillBeCreated: false;
+  jobWillBeCreated: false;
+  messageWillBeSent: false;
+};
+
+export type CommercialPipelineRun = {
+  id: string;
+  mode: 'dry-run' | 'confirmed';
+  status: 'started' | 'completed' | 'blocked' | 'failed';
+  selectedProduct: CommercialSelectedProduct | null;
+  selectedGroup: CommercialSelectedGroup | null;
+  candidateCount: number;
+  eligibleCount: number;
+  rejectedCount: number;
+  rejectionSummary: Record<string, number>;
+  selectionReasons: string[];
+  copyPreview: string | null;
+  plannedSubIds: string[];
+  failureCode: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  dispatchWasCreated: false;
+  jobWasCreated: false;
+  messageWasSent: false;
+};
+
+export type CommercialPipelineRunPage = {
+  items: CommercialPipelineRun[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
 export type WhatsAppDispatch = {
   id: string;
   productId: string;

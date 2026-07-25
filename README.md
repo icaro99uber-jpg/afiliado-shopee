@@ -754,3 +754,36 @@ Seguranca:
 - Evolution API so envia mensagens quando configurada explicitamente no ambiente
   do worker.
 - Chaves como `EVOLUTION_API_KEY` devem ficar somente no `.env` local do worker.
+
+## Pipeline comercial em dry-run
+
+A Task 16.1 adiciona um fluxo comercial independente do pipeline legado. Ele
+seleciona ofertas `MOCK` ou `MANUAL` elegiveis, reutiliza a formula existente do
+Score Engine, aplica ranking deterministico, bloqueia produtos ja enviados ao
+grupo, exige exatamente um grupo autorizado/disponivel e gera uma copy final
+sem cupom e sem comissao publica.
+
+```bash
+corepack pnpm commercial:dry-run
+corepack pnpm commercial:dry-run -- --source=mock --minimum-score=70 --campaign=teste-local
+```
+
+O comando acessa somente PostgreSQL e, no provider mock, sincroniza o catalogo
+ficticio local. Ele nao inicia API, worker ou Scheduler, nao acessa Redis, nao
+chama Evolution/Shopee e nao cria `WhatsAppDispatch` ou job. Provider official,
+flags de envio/confirmacao e ambientes com Scheduler ou group send ativos sao
+bloqueados.
+
+API:
+
+- `POST /commercial-pipeline/dry-run` prepara e registra o preview;
+- `GET /commercial-pipeline/runs` lista o historico sanitizado;
+- `GET /commercial-pipeline/runs/:id` detalha uma execucao.
+
+O dashboard possui a pagina `Pipeline comercial`, com filtros, produto e grupo
+selecionados, motivos, rejeicoes, preview copiavel, `plannedSubIds` e historico.
+Nao existe botao de envio ou confirmacao real. A migration
+`20260725210000_commercial_pipeline_dry_run` cria o historico sem guardar JID,
+telefone, segredos ou payloads externos. Consulte
+[docs/shopee-affiliate.md](docs/shopee-affiliate.md). A Task 16.2 devera tratar
+qualquer confirmacao real em uma revisao separada.

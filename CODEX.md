@@ -516,3 +516,30 @@ Testes:
 Definition of Done:
 - <criterio>
 ```
+
+## Pipeline comercial dry-run
+
+`CommercialPipelineService` e uma camada de aplicacao separada do
+`PipelineService` legado. Ele recebe repositorios, calculador de score, gerador
+de copy, logger e relogio por injecao. Prisma permanece nos adaptadores; Fastify
+apenas valida e delega; BullMQ, Redis, Evolution, Sender e worker nao fazem
+parte da composicao.
+
+O catalogo e limitado a `MOCK` ou `MANUAL`, score minimo 70 e 20 candidatos por
+padrao, com teto 100. Elegibilidade exige oferta ativa, dados comerciais
+validos e `affiliateLink` HTTP/HTTPS. O ranking reutiliza
+`ScoreService.calculate` e desempata por comissao, vendas, desconto, avaliacao
+e ID do provider. Nao existe IA ou aleatoriedade.
+
+Um unico grupo da instancia atual deve estar ativo, disponivel e possuir
+fingerprint valido. O historico de dispatch `SENT` e de execucoes futuras
+`CONFIRMED` impede repeticao; dry-runs anteriores nao contam como entrega. A
+copy usa somente dados persistidos, sem cupom, comissao ou IDs tecnicos, e
+preserva o link. Tracking retorna Sub_ids planejados separadamente.
+
+`CommercialPipelineRun` registra somente modo `DRY_RUN` nesta task, com estado,
+contagens, rejeicoes, snapshots sanitizados, copy e horario. As rotas
+`POST /commercial-pipeline/dry-run`, `GET /commercial-pipeline/runs` e
+`GET /commercial-pipeline/runs/:id` nao criam dispatch ou job. O CLI
+`corepack pnpm commercial:dry-run` tambem bloqueia official, Scheduler e group
+send. Qualquer modo confirmado fica reservado para a Task 16.2.

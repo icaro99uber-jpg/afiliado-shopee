@@ -82,6 +82,18 @@ export type ShopeeOfferFilters = {
   limit: number;
 };
 
+export type CommercialOfferCandidateFilters = {
+  source: Extract<ShopeeAffiliateOfferSource, 'MOCK' | 'MANUAL'>;
+  categoryId?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minDiscountRate?: number;
+  minRating?: number;
+  minSales?: number;
+  minCommissionRate?: number;
+  limit: number;
+};
+
 export interface ShopeeOfferRepository {
   findBySourceAndProviderProductId(
     source: ShopeeAffiliateOfferSource,
@@ -96,6 +108,80 @@ export interface ShopeeOfferRepository {
   listOffers(
     filters: ShopeeOfferFilters,
   ): Promise<{ items: ShopeeOfferRecord[]; total: number }>;
+  listCommercialCandidates(
+    filters: CommercialOfferCandidateFilters,
+  ): Promise<ShopeeOfferRecord[]>;
+}
+
+export type CommercialPipelineRunMode = 'DRY_RUN' | 'CONFIRMED';
+export type CommercialPipelineRunStatus =
+  'STARTED' | 'COMPLETED' | 'BLOCKED' | 'FAILED';
+
+export type CommercialPipelineRejectionCode =
+  | 'MISSING_AFFILIATE_LINK'
+  | 'INVALID_AFFILIATE_LINK'
+  | 'OFFER_EXPIRED'
+  | 'OFFER_UNAVAILABLE'
+  | 'OFFER_NOT_STARTED'
+  | 'INVALID_PRODUCT_NAME'
+  | 'INVALID_PRICE'
+  | 'INVALID_IMAGE'
+  | 'INVALID_SHOP'
+  | 'INVALID_RATING'
+  | 'INVALID_SALES'
+  | 'INVALID_COMMISSION_RATE'
+  | 'SCORE_BELOW_MINIMUM'
+  | 'ALREADY_SENT_TO_GROUP';
+
+export type CommercialPipelineRunData = {
+  mode: CommercialPipelineRunMode;
+  status: CommercialPipelineRunStatus;
+  productId?: string | null;
+  groupDestinationId?: string | null;
+  productName?: string | null;
+  productPrice?: string | null;
+  groupName?: string | null;
+  groupFingerprint?: string | null;
+  score?: number | null;
+  candidateCount: number;
+  eligibleCount: number;
+  rejectedCount: number;
+  rejectionSummary: Record<string, number>;
+  selectionReasons: string[];
+  copyPreview?: string | null;
+  plannedSubIds: string[];
+  failureCode?: string | null;
+  createdAt?: Date;
+  completedAt?: Date | null;
+};
+
+export type CommercialPipelineRunRecord = CommercialPipelineRunData & {
+  id: string;
+  createdAt: Date;
+};
+
+export type CommercialPipelineRunFilters = {
+  status?: CommercialPipelineRunStatus;
+  mode?: CommercialPipelineRunMode;
+  productId?: string;
+  page: number;
+  limit: number;
+};
+
+export interface CommercialPipelineRunRepository {
+  create(data: CommercialPipelineRunData): Promise<CommercialPipelineRunRecord>;
+  update(
+    id: string,
+    data: Partial<CommercialPipelineRunData>,
+  ): Promise<CommercialPipelineRunRecord>;
+  list(
+    filters: CommercialPipelineRunFilters,
+  ): Promise<{ items: CommercialPipelineRunRecord[]; total: number }>;
+  findById(id: string): Promise<CommercialPipelineRunRecord | null>;
+}
+
+export interface CommercialDeliveryHistoryRepository {
+  wasProductSentToGroup(productId: string, groupId: string): Promise<boolean>;
 }
 
 export type CouponSource = 'MANUAL' | 'OFFICIAL';

@@ -8,40 +8,41 @@ datasource db {
 }
 
 model ProductLead {
-  copies               GeneratedCopy[]
-  whatsappDispatches   WhatsAppDispatch[]
-  coupons              Coupon[]
-  id                   String             @id @default(cuid())
-  source               ShopeeOfferSource  @default(MOCK)
-  providerProductId    String
-  nome                 String
-  categoria            String
-  preco                Decimal            @db.Decimal(14, 4)
-  precoMin             Decimal?           @db.Decimal(14, 4)
-  precoMax             Decimal?           @db.Decimal(14, 4)
-  desconto             Float
-  nota                 Float
-  vendidos             Int
-  comissao             Float
-  commissionAmount     Decimal?           @db.Decimal(14, 4)
-  sellerCommissionRate Float?
-  shopeeCommissionRate Float?
-  loja                 String
-  shopId               String?
-  categoryIds          String[]           @default([])
-  urlImagem            String
-  productLink          String?            @map("url")
-  affiliateLink        String?
-  offerStartsAt        DateTime?
-  offerEndsAt          DateTime?
-  fetchedAt            DateTime           @default(now())
-  lastSeenAt           DateTime           @default(now())
-  unavailableAt        DateTime?
-  title                String
-  score                Int?
-  scoreUpdatedAt       DateTime?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  copies                 GeneratedCopy[]
+  whatsappDispatches     WhatsAppDispatch[]
+  coupons                Coupon[]
+  commercialPipelineRuns CommercialPipelineRun[]
+  id                     String                  @id @default(cuid())
+  source                 ShopeeOfferSource       @default(MOCK)
+  providerProductId      String
+  nome                   String
+  categoria              String
+  preco                  Decimal                 @db.Decimal(14, 4)
+  precoMin               Decimal?                @db.Decimal(14, 4)
+  precoMax               Decimal?                @db.Decimal(14, 4)
+  desconto               Float
+  nota                   Float
+  vendidos               Int
+  comissao               Float
+  commissionAmount       Decimal?                @db.Decimal(14, 4)
+  sellerCommissionRate   Float?
+  shopeeCommissionRate   Float?
+  loja                   String
+  shopId                 String?
+  categoryIds            String[]                @default([])
+  urlImagem              String
+  productLink            String?                 @map("url")
+  affiliateLink          String?
+  offerStartsAt          DateTime?
+  offerEndsAt            DateTime?
+  fetchedAt              DateTime                @default(now())
+  lastSeenAt             DateTime                @default(now())
+  unavailableAt          DateTime?
+  title                  String
+  score                  Int?
+  scoreUpdatedAt         DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   @@unique([source, providerProductId])
   @@index([source, lastSeenAt])
@@ -63,21 +64,22 @@ model GeneratedCopy {
 }
 
 model WhatsAppDestination {
-  id                 String                  @id @default(cuid())
-  name               String
-  destination        String
-  type               WhatsAppDestinationType @default(INDIVIDUAL)
-  active             Boolean                 @default(true)
-  available          Boolean                 @default(true)
-  fingerprint        String?
-  sourceInstanceName String?
-  memberCount        Int?
-  ownerIsParticipant Boolean?
-  discoveredAt       DateTime?
-  lastSyncedAt       DateTime?
-  dispatches         WhatsAppDispatch[]
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
+  id                     String                  @id @default(cuid())
+  name                   String
+  destination            String
+  type                   WhatsAppDestinationType @default(INDIVIDUAL)
+  active                 Boolean                 @default(true)
+  available              Boolean                 @default(true)
+  fingerprint            String?
+  sourceInstanceName     String?
+  memberCount            Int?
+  ownerIsParticipant     Boolean?
+  discoveredAt           DateTime?
+  lastSyncedAt           DateTime?
+  dispatches             WhatsAppDispatch[]
+  commercialPipelineRuns CommercialPipelineRun[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   @@unique([destination, sourceInstanceName])
   @@index([type, active, available])
@@ -130,6 +132,36 @@ model Coupon {
   @@index([productId])
 }
 
+model CommercialPipelineRun {
+  id                 String                      @id @default(cuid())
+  mode               CommercialPipelineRunMode
+  status             CommercialPipelineRunStatus
+  productId          String?
+  product            ProductLead?                @relation(fields: [productId], references: [id], onDelete: SetNull)
+  groupDestinationId String?
+  groupDestination   WhatsAppDestination?        @relation(fields: [groupDestinationId], references: [id], onDelete: SetNull)
+  productName        String?
+  productPrice       Decimal?                    @db.Decimal(14, 4)
+  groupName          String?
+  groupFingerprint   String?
+  score              Int?
+  candidateCount     Int                         @default(0)
+  eligibleCount      Int                         @default(0)
+  rejectedCount      Int                         @default(0)
+  rejectionSummary   Json
+  selectionReasons   Json
+  copyPreview        String?
+  plannedSubIds      Json
+  failureCode        String?
+  createdAt          DateTime                    @default(now())
+  completedAt        DateTime?
+
+  @@index([createdAt])
+  @@index([status, mode])
+  @@index([productId])
+  @@index([groupDestinationId])
+}
+
 enum WhatsAppDispatchStatus {
   PENDING
   SENT
@@ -155,4 +187,16 @@ enum CouponSource {
 enum CouponDiscountType {
   PERCENTAGE
   FIXED_AMOUNT
+}
+
+enum CommercialPipelineRunMode {
+  DRY_RUN
+  CONFIRMED
+}
+
+enum CommercialPipelineRunStatus {
+  STARTED
+  COMPLETED
+  BLOCKED
+  FAILED
 }

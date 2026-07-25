@@ -1,6 +1,12 @@
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   AnalyticsRepository,
+  CommercialDeliveryHistoryRepository,
+  CommercialOfferCandidateFilters,
+  CommercialPipelineRunData,
+  CommercialPipelineRunFilters,
+  CommercialPipelineRunRecord,
+  CommercialPipelineRunRepository,
   CouponData,
   CouponRecord,
   CouponRepository,
@@ -369,6 +375,159 @@ export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
       ),
       total,
     };
+  }
+
+  async listCommercialCandidates(filters: CommercialOfferCandidateFilters) {
+    const records = await this.prisma.productLead.findMany({
+      where: {
+        source: filters.source,
+        categoryIds: filters.categoryId
+          ? { has: filters.categoryId }
+          : undefined,
+        preco: {
+          gte: filters.minPrice,
+          lte: filters.maxPrice,
+        },
+        desconto:
+          filters.minDiscountRate === undefined
+            ? undefined
+            : { gte: filters.minDiscountRate },
+        nota:
+          filters.minRating === undefined
+            ? undefined
+            : { gte: filters.minRating },
+        vendidos:
+          filters.minSales === undefined
+            ? undefined
+            : { gte: filters.minSales },
+        comissao:
+          filters.minCommissionRate === undefined
+            ? undefined
+            : { gte: filters.minCommissionRate },
+      },
+      orderBy: { providerProductId: 'asc' },
+      take: filters.limit,
+    });
+    return records.map((record) =>
+      mapShopeeOffer(record as unknown as Record<string, unknown>),
+    );
+  }
+}
+
+const mapCommercialPipelineRun = (
+  record: Record<string, unknown>,
+): CommercialPipelineRunRecord => ({
+  ...(record as unknown as CommercialPipelineRunRecord),
+  productPrice:
+    decimalString(record.productPrice as PrismaDecimalLike | null) ?? null,
+  rejectionSummary: record.rejectionSummary as Record<string, number>,
+  selectionReasons: record.selectionReasons as string[],
+  plannedSubIds: record.plannedSubIds as string[],
+});
+
+const toPrismaCommercialPipelineRun = (
+  data: Partial<CommercialPipelineRunData>,
+) => ({
+  ...data,
+  ...(data.productPrice === undefined
+    ? {}
+    : { productPrice: data.productPrice }),
+});
+
+export class PrismaCommercialPipelineRunRepository implements CommercialPipelineRunRepository {
+  constructor(
+    private readonly prisma: Pick<DatabaseClient, 'commercialPipelineRun'>,
+  ) {}
+
+  async create(
+    data: CommercialPipelineRunData,
+  ): Promise<CommercialPipelineRunRecord> {
+    const record = await this.prisma.commercialPipelineRun.create({
+      data: toPrismaCommercialPipelineRun(data) as never,
+    });
+    return mapCommercialPipelineRun(
+      record as unknown as Record<string, unknown>,
+    );
+  }
+
+  async update(
+    id: string,
+    data: Partial<CommercialPipelineRunData>,
+  ): Promise<CommercialPipelineRunRecord> {
+    const record = await this.prisma.commercialPipelineRun.update({
+      where: { id },
+      data: toPrismaCommercialPipelineRun(data) as never,
+    });
+    return mapCommercialPipelineRun(
+      record as unknown as Record<string, unknown>,
+    );
+  }
+
+  async list(filters: CommercialPipelineRunFilters) {
+    const where = {
+      status: filters.status,
+      mode: filters.mode,
+      productId: filters.productId,
+    };
+    const [records, total] = await Promise.all([
+      this.prisma.commercialPipelineRun.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.commercialPipelineRun.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapCommercialPipelineRun(record as unknown as Record<string, unknown>),
+      ),
+      total,
+    };
+  }
+
+  async findById(id: string): Promise<CommercialPipelineRunRecord | null> {
+    const record = await this.prisma.commercialPipelineRun.findUnique({
+      where: { id },
+    });
+    return record
+      ? mapCommercialPipelineRun(record as unknown as Record<string, unknown>)
+      : null;
+  }
+}
+
+export class PrismaCommercialDeliveryHistoryRepository implements CommercialDeliveryHistoryRepository {
+  constructor(
+    private readonly prisma: Pick<
+      DatabaseClient,
+      'whatsAppDispatch' | 'commercialPipelineRun'
+    >,
+  ) {}
+
+  async wasProductSentToGroup(
+    productId: string,
+    groupId: string,
+  ): Promise<boolean> {
+    const [sentDispatch, confirmedRun] = await Promise.all([
+      this.prisma.whatsAppDispatch.findFirst({
+        where: {
+          productId,
+          destinationId: groupId,
+          status: 'SENT',
+        },
+        select: { id: true },
+      }),
+      this.prisma.commercialPipelineRun.findFirst({
+        where: {
+          productId,
+          groupDestinationId: groupId,
+          mode: 'CONFIRMED',
+          status: 'COMPLETED',
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(sentDispatch || confirmedRun);
   }
 }
 

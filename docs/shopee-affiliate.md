@@ -168,3 +168,81 @@ Depois da liberação de credenciais e documentação da conta:
 4. validar paginação, unidades, rate limits e erros documentados;
 5. executar uma única sincronização real controlada, sem pipeline ou envio;
 6. avaliar cupons somente se existir endpoint oficial documentado.
+
+## Pipeline comercial dry-run — Task 16.1
+
+`CommercialPipelineService` prepara uma unica oportunidade comercial sem chamar
+o pipeline legado. O fluxo consulta o catalogo persistido, aplica filtros de
+origem `MOCK` ou `MANUAL`, valida elegibilidade, reutiliza exclusivamente
+`ScoreService.calculate`, ordena os candidatos e escolhe exatamente um grupo
+ativo/disponivel da instancia atual. O servico depende somente de contratos e
+nao importa Prisma, Fastify, BullMQ, Evolution ou WhatsApp.
+
+Valores padrao: origem `MOCK`, score minimo 70 e no maximo 20 candidatos. O
+limite absoluto e 100. Produto sem link afiliado, expirado, indisponivel,
+invalido ou abaixo do score minimo recebe motivo estruturado. Links devem ser
+HTTP/HTTPS e nunca sao modificados.
+
+O ranking e deterministico, nesta ordem:
+
+1. maior score;
+2. maior taxa de comissao;
+3. maior numero de vendas;
+4. maior desconto;
+5. maior avaliacao;
+6. `providerProductId` em ordem lexicografica.
+
+Depois do ranking, `CommercialDeliveryHistoryRepository` descarta produtos que
+ja tenham `WhatsAppDispatch` `SENT` para o grupo ou execucao futura `CONFIRMED`
+concluida. Registros `DRY_RUN` nunca contam como envio e o historico nao e
+apagado.
+
+A selecao de destino aceita somente um registro `GROUP`, `active=true`,
+`available=true`, da instancia atual e com fingerprint valido. Zero grupos
+retorna `NO_AUTHORIZED_GROUP`; mais de um retorna
+`MULTIPLE_AUTHORIZED_GROUPS`. O identificador externo nunca aparece no resultado
+ou no historico.
+
+A copy comercial usa somente nome, preco formatado em pt-BR, desconto opcional,
+loja, CTA e o `affiliateLink` persistido. Ela nao usa cupom, comissao, score,
+IDs tecnicos, alegacoes nao verificadas ou urgencia falsa. O limite padrao e
+`COMMERCIAL_COPY_MAX_LENGTH=1000`.
+
+Metadados de tracking reutilizam `buildShopeeAffiliateTrackingMetadata` e
+`toPlannedShopeeSubIds`. Canal, fingerprint, campanha e data sao retornados em
+`plannedSubIds`; nenhum parametro e concatenado ao link.
+
+Cada tentativa valida cria um `CommercialPipelineRun` `DRY_RUN`. Estados
+concluidos, bloqueados e falhos guardam apenas produto/grupo sanitizados, score,
+contagens, resumo de rejeicoes, copy, Sub_ids planejados e codigo publico. Nao
+sao armazenados JID, telefone, credencial, payload Evolution ou participantes.
+
+Rotas:
+
+- `POST /commercial-pipeline/dry-run`;
+- `GET /commercial-pipeline/runs`;
+- `GET /commercial-pipeline/runs/:id`.
+
+Comando local:
+
+```powershell
+corepack pnpm commercial:dry-run
+corepack pnpm commercial:dry-run -- --source=mock --minimum-score=70 --campaign=teste-local
+```
+
+O CLI carrega o `.env` ignorado, acessa somente PostgreSQL, sincroniza dados
+ficticios quando o provider e mock e bloqueia provider official, Scheduler ou
+envio para grupos ativos. Flags de envio, confirmacao, grupo, mensagem, destino
+ou cupom sao rejeitadas.
+
+O resultado fixa `dispatchWillBeCreated=false`, `jobWillBeCreated=false` e
+`messageWillBeSent=false`. Nao ha endpoint confirmado e nenhuma acao desta task
+chama Shopee real, Evolution, Redis, worker ou fila.
+
+## Task 16.2
+
+Uma task futura separada podera desenhar confirmacao comercial, autenticacao,
+autorizacao, idempotencia e controles operacionais. Ela devera revisar
+explicitamente o historico, o grupo, o produto, o link e as protecoes de envio
+antes de criar qualquer dispatch ou job. O dry-run desta task nao concede
+autorizacao para envio.

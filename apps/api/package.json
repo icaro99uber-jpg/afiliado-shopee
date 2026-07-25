@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:runtime": "vitest run test/runtime-esm.test.ts",
-    "shopee:import": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-import.ts"
+    "shopee:import": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-import.ts",
+    "commercial:dry-run": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

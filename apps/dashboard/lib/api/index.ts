@@ -1,5 +1,6 @@
 export * from './analytics';
 export * from './client';
+export * from './commercial-pipeline';
 export * from './copy';
 export * from './coupons';
 export * from './health';

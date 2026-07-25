@@ -111,6 +111,7 @@ export const envSchema = z
     SHOPEE_AFFILIATE_API_URL: optionalUrlFromEnv,
     SHOPEE_AFFILIATE_SUB_ID_PREFIX: z.string().trim().default('whatsapp'),
     SHOPEE_AFFILIATE_SYNC_LIMIT: positiveIntegerFromEnv.default(20),
+    COMMERCIAL_COPY_MAX_LENGTH: positiveIntegerFromEnv.default(1000),
     WHATSAPP_PROVIDER: z.enum(['mock', 'evolution']).default('mock'),
     EVOLUTION_API_URL: z
       .string()
