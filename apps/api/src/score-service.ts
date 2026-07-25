@@ -11,6 +11,9 @@ export type ScorableProduct = {
   vendidos: number;
   comissao: number;
   loja: string;
+  preco?: number;
+  offerEndsAt?: Date | null;
+  unavailableAt?: Date | null;
 };
 
 export type ScoreRunResult = {
@@ -34,7 +37,8 @@ const SCORE_WEIGHTS = {
   lojaOficial: 0.1,
 } as const;
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
 
 const normalizeCommissionPercent = (comissao: number) => {
   const percentual = comissao <= 1 ? comissao * 100 : comissao;
@@ -48,6 +52,12 @@ export class ScoreService {
   constructor(private readonly options: ScoreServiceOptions) {}
 
   calculate(product: ScorableProduct): number {
+    if (
+      product.unavailableAt ||
+      (product.offerEndsAt && product.offerEndsAt <= new Date())
+    ) {
+      return 0;
+    }
     const componentes = {
       comissao: normalizeCommissionPercent(product.comissao),
       avaliacoes: (clamp(product.nota, 0, 5) / 5) * 100,
@@ -68,7 +78,10 @@ export class ScoreService {
 
   async run(): Promise<ScoreRunResult> {
     const inicio = Date.now();
-    this.options.logger.info({ event: 'score.run.started' }, 'Score execution started');
+    this.options.logger.info(
+      { event: 'score.run.started' },
+      'Score execution started',
+    );
 
     try {
       const produtos = await this.options.products.listForScoring();
@@ -85,7 +98,12 @@ export class ScoreService {
       const menorScore = produtosProcessados > 0 ? Math.min(...scores) : 0;
       const mediaScore =
         produtosProcessados > 0
-          ? Number((scores.reduce((total, score) => total + score, 0) / produtosProcessados).toFixed(2))
+          ? Number(
+              (
+                scores.reduce((total, score) => total + score, 0) /
+                produtosProcessados
+              ).toFixed(2),
+            )
           : 0;
       const resultado = {
         produtosProcessados,
@@ -95,10 +113,16 @@ export class ScoreService {
         tempoExecucao: `${Date.now() - inicio}ms`,
       };
 
-      this.options.logger.info({ event: 'score.run.completed', ...resultado }, 'Score execution completed');
+      this.options.logger.info(
+        { event: 'score.run.completed', ...resultado },
+        'Score execution completed',
+      );
       return resultado;
     } catch (error) {
-      this.options.logger.error({ event: 'score.run.failed', error }, 'Score execution failed');
+      this.options.logger.error(
+        { event: 'score.run.failed', error },
+        'Score execution failed',
+      );
       throw new AppError('Falha ao executar Score Engine', 'SCORE_RUN_FAILED');
     }
   }

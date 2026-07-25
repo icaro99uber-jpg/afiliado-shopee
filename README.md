@@ -99,6 +99,8 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 - `pnpm evolution:down`: para a stack Evolution e preserva os volumes.
 - `pnpm whatsapp:group-test`: valida o diretorio de grupos em dry-run, sem
   criar dispatch, job, worker ou mensagem.
+- `pnpm shopee:import -- --file caminho.json`: valida importacao manual em
+  dry-run; somente `--confirm-import` permite persistir.
 - `pnpm build`: compila todos os pacotes e aplicações.
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
@@ -168,6 +170,37 @@ instância em uma task separada e controlada.
 ## Desenvolvimento sem integrações reais
 
 O modo padrão não implementa scraping nem chamadas externas reais. Os pacotes expõem interfaces e mocks, e o worker somente seleciona Evolution API quando `WHATSAPP_PROVIDER=evolution` é configurado explicitamente.
+
+## Fundação Shopee Affiliate
+
+A Task 15.1 adiciona um contrato independente de HTTP/Prisma para ofertas, os
+providers `mock`, `manual` e `official`, sincronização limitada, importação
+manual com preview, catálogo público, domínio local de cupons e preview de copy
+sem envio. O provider mock continua sendo o padrão e usa somente dados
+fictícios com URLs `example.invalid`.
+
+O provider oficial não implementa assinatura, headers ou HTTP. Ele permanece
+bloqueado até a conta receber credenciais e documentação. **Autenticação e
+transporte real aguardam credenciais e documentação liberada para a conta.**
+Não há scraping, automação de navegador, consulta de endpoints privados/mobile
+ou geração especulativa de links.
+
+Rotas locais:
+
+- `POST /shopee/offers/sync`;
+- `GET /shopee/offers` e `GET /shopee/offers/:id`;
+- `POST /shopee/offers/import/validate` e `POST /shopee/offers/import`;
+- `POST /shopee/offers/:id/copy-preview`;
+- CRUD `/coupons` com confirmação manual.
+
+Produtos agora são lidos diretamente do catálogo da API no dashboard. A tela
+oferece filtros, sincronização, importação JSON validada e preview marcado
+`PREVIEW — NAO ENVIADO`; Cupons possui uma tela local separada. Nenhuma dessas
+ações cria dispatch, chama fila ou envia WhatsApp.
+
+Consulte [docs/shopee-affiliate.md](docs/shopee-affiliate.md) para os campos
+públicos observados em `productOfferV2`, formato JSON/CSV, configuração, score,
+Sub_ids, cupons, limitações e plano da Task 15.2.
 
 ## Score Engine
 

@@ -10,8 +10,54 @@ Este documento descreve os agentes e componentes de orquestracao atuais do proje
 - Contratos de repositorio: `ProductRepository`, `GeneratedCopyRepository`, `WhatsAppDestinationRepository`, `WhatsAppGroupDirectoryRepository`, `WhatsAppDispatchRepository` e `AnalyticsRepository`.
 - Adaptadores Prisma: `PrismaProductRepository`, `PrismaGeneratedCopyRepository`, `PrismaWhatsAppDestinationRepository`, `PrismaWhatsAppGroupDirectoryRepository`, `PrismaWhatsAppDispatchRepository` e `PrismaAnalyticsRepository`.
 - Composicao: `createApplicationServices` e `createPrismaRepositories` em `apps/api/src/application-services.ts`.
+- Ofertas Shopee: `ShopeeOfferSyncService`, `ShopeeOfferRepository`,
+  `PrismaShopeeOfferRepository`, `CouponService` e `CopyPreviewService`.
 
 Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
+
+## Shopee Affiliate Offers
+
+Responsabilidade:
+
+- Listar ofertas por contrato independente de banco e transporte.
+- Sincronizar um lote limitado, validar, deduplicar por origem + ID, criar ou
+  atualizar `ProductLead` e ignorar expirados.
+- Validar/importar registros manuais sem consultar páginas de produto.
+- Expor catálogo e preview de copy sem gerar copy persistida, dispatch ou job.
+
+Providers:
+
+- `MockShopeeAffiliateOfferProvider`: determinístico, `example.invalid`, sem
+  internet, com filtros/paginação e campos opcionais ausentes.
+- `ManualShopeeAffiliateOfferProvider`: exige dados completos, URLs HTTP/HTTPS
+  e `affiliateLink` informado pelo usuário; preserva origem `MANUAL`.
+- `OfficialShopeeAffiliateOfferProvider`: aceita signer/transport injetáveis,
+  mas não chama nenhum deles. Sem configuração retorna
+  `SHOPEE_API_NOT_CONFIGURED`; autenticação e transporte aguardam a Task 15.2.
+
+Persistência:
+
+- `ProductLead` usa origem `MOCK`, `MANUAL` ou `OFFICIAL` e unique composta com
+  `providerProductId`.
+- Preços e valores monetários novos usam `Decimal`; o domínio usa strings
+  decimais. Atualizações preservam IDs, copies e dispatches.
+- `lastSeenAt` é atualizado; produtos não são apagados automaticamente.
+
+Segurança operacional:
+
+- O sync não recebe dependências de Copy, BullMQ, Pipeline, Scheduler ou
+  WhatsApp.
+- Importação CLI é dry-run por padrão e grava somente com `--confirm-import`.
+- `official` nunca inventa assinatura, headers, URL GraphQL ou rate limit.
+- Sub_ids são metadados separados; links manuais nunca são alterados.
+- Scraping, browser automation e endpoints privados/mobile são proibidos.
+
+## Coupons
+
+`CouponService` mantém CRUD local confirmado para cupons manuais. Cupom
+inativo, vencido, ainda não iniciado ou abaixo da compra mínima é inelegível.
+Sem valor de compra, não existe cálculo de preço final. Não há coleta oficial e
+cupons não entram automaticamente em copy.
 
 ## Runtime ESM dos componentes
 

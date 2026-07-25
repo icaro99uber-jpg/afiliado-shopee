@@ -9,17 +9,37 @@ const createPrismaMock = () => {
   return {
     $disconnect: vi.fn(),
     productLead: {
-      findUnique: vi.fn(async ({ where }: { where: { providerProductId: string } }) =>
-        store.has(where.providerProductId) ? { id: where.providerProductId } : null,
+      findUnique: vi.fn(
+        async ({
+          where,
+        }: {
+          where: { source_providerProductId: { providerProductId: string } };
+        }) => {
+          const providerProductId =
+            where.source_providerProductId.providerProductId;
+          return store.has(providerProductId)
+            ? { id: providerProductId }
+            : null;
+        },
       ),
-      create: vi.fn(async ({ data }: { data: { providerProductId: string } }) => {
-        store.set(data.providerProductId, data);
-        return data;
-      }),
-      update: vi.fn(async ({ where, data }: { where: { providerProductId: string }; data: unknown }) => {
-        store.set(where.providerProductId, data);
-        return data;
-      }),
+      create: vi.fn(
+        async ({ data }: { data: { providerProductId: string } }) => {
+          store.set(data.providerProductId, data);
+          return data;
+        },
+      ),
+      update: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { source_providerProductId: { providerProductId: string } };
+          data: unknown;
+        }) => {
+          store.set(where.source_providerProductId.providerProductId, data);
+          return data;
+        },
+      ),
     },
   };
 };
@@ -30,7 +50,9 @@ describe('Hunter Agent', () => {
   it('retorna cerca de 40 produtos fictícios com categorias variadas', async () => {
     const produtos = await new MockShopeeProvider().buscarProdutos();
     expect(produtos).toHaveLength(40);
-    expect(new Set(produtos.map((produto) => produto.categoria)).size).toBeGreaterThan(3);
+    expect(
+      new Set(produtos.map((produto) => produto.categoria)).size,
+    ).toBeGreaterThan(3);
     expect(produtos[0]).toEqual(
       expect.objectContaining({
         id: expect.any(String),
@@ -58,13 +80,25 @@ describe('Hunter Agent', () => {
     const primeiraExecucao = await service.run({ categoria: 'Eletrônicos' });
     const segundaExecucao = await service.run({ categoria: 'Eletrônicos' });
 
-    expect(primeiraExecucao).toMatchObject({ encontrados: 5, novos: 5, atualizados: 0 });
-    expect(segundaExecucao).toMatchObject({ encontrados: 5, novos: 0, atualizados: 5 });
+    expect(primeiraExecucao).toMatchObject({
+      encontrados: 5,
+      novos: 5,
+      atualizados: 0,
+    });
+    expect(segundaExecucao).toMatchObject({
+      encontrados: 5,
+      novos: 0,
+      atualizados: 5,
+    });
   });
 
   it('expõe POST /hunter/run', async () => {
     const prisma = createPrismaMock();
-    const app = await buildApp({ logger: false, prisma: prisma as never, hunterProvider: new MockShopeeProvider() });
+    const app = await buildApp({
+      logger: false,
+      prisma: prisma as never,
+      hunterProvider: new MockShopeeProvider(),
+    });
 
     const response = await app.inject({
       method: 'POST',

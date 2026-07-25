@@ -2,8 +2,10 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   HunterProvider,
+  ShopeeAffiliateOfferProvider,
   WhatsAppProvider,
 } from '@shopee-auto-affiliate-ai/providers';
+import { MockShopeeAffiliateOfferProvider } from '@shopee-auto-affiliate-ai/providers';
 import type { WhatsAppDispatchJob } from '@shopee-auto-affiliate-ai/queue';
 import { HunterService } from './hunter-service';
 import { ScoreService } from './score-service';
@@ -11,18 +13,25 @@ import { CopyService } from './copy-service';
 import { SenderService } from './sender-service';
 import { PipelineService } from './pipeline-service';
 import { AnalyticsService } from './analytics-service';
+import { ShopeeOfferSyncService } from './shopee-offer-sync-service';
+import { CouponService } from './coupon-service';
+import { CopyPreviewService } from './copy-preview-service';
 import {
   PrismaAnalyticsRepository,
+  PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
   PrismaProductRepository,
+  PrismaShopeeOfferRepository,
   PrismaWhatsAppDestinationRepository,
   PrismaWhatsAppDispatchRepository,
   PrismaWhatsAppGroupDirectoryRepository,
 } from './prisma-repositories';
 import type {
   AnalyticsRepository,
+  CouponRepository,
   GeneratedCopyRepository,
   ProductRepository,
+  ShopeeOfferRepository,
   WhatsAppDestinationRepository,
   WhatsAppDispatchRepository,
   WhatsAppGroupDirectoryRepository,
@@ -44,6 +53,8 @@ export type ApplicationRepositories = {
   whatsappDestinations: WhatsAppDestinationRepository;
   whatsappDispatches: WhatsAppDispatchRepository;
   whatsappGroups: WhatsAppGroupDirectoryRepository;
+  shopeeOffers: ShopeeOfferRepository;
+  coupons: CouponRepository;
 };
 
 export type ApplicationServices = {
@@ -53,6 +64,9 @@ export type ApplicationServices = {
   copy: CopyService;
   sender?: SenderService;
   pipeline: PipelineService;
+  shopeeOfferSync: ShopeeOfferSyncService;
+  coupons: CouponService;
+  copyPreview: CopyPreviewService;
 };
 
 export const createSenderService = ({
@@ -87,6 +101,8 @@ export const createPrismaRepositories = (
   whatsappDestinations: new PrismaWhatsAppDestinationRepository(prisma),
   whatsappDispatches: new PrismaWhatsAppDispatchRepository(prisma),
   whatsappGroups: new PrismaWhatsAppGroupDirectoryRepository(prisma),
+  shopeeOffers: new PrismaShopeeOfferRepository(prisma),
+  coupons: new PrismaCouponRepository(prisma),
 });
 
 export const createApplicationServices = ({
@@ -95,12 +111,16 @@ export const createApplicationServices = ({
   whatsAppProvider,
   whatsappDispatchQueue,
   logger,
+  shopeeOfferProvider = new MockShopeeAffiliateOfferProvider(),
+  shopeeMaxOffersPerSync = 20,
 }: {
   repositories: ApplicationRepositories;
   hunterProvider: HunterProvider;
   whatsAppProvider?: WhatsAppProvider;
   whatsappDispatchQueue?: DispatchQueue;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+  shopeeOfferProvider?: ShopeeAffiliateOfferProvider;
+  shopeeMaxOffersPerSync?: number;
 }): ApplicationServices => {
   const analytics = new AnalyticsService(repositories.analytics);
   const hunter = new HunterService({
@@ -117,6 +137,12 @@ export const createApplicationServices = ({
   const sender = whatsAppProvider
     ? createSenderService({ repositories, whatsAppProvider, logger })
     : undefined;
+  const shopeeOfferSync = new ShopeeOfferSyncService({
+    provider: shopeeOfferProvider,
+    offers: repositories.shopeeOffers,
+    maxOffersPerSync: shopeeMaxOffersPerSync,
+    logger,
+  });
 
   return {
     analytics,
@@ -124,6 +150,9 @@ export const createApplicationServices = ({
     score,
     copy,
     sender,
+    shopeeOfferSync,
+    coupons: new CouponService(repositories.coupons),
+    copyPreview: new CopyPreviewService(repositories.shopeeOffers),
     pipeline: new PipelineService({
       provider: hunterProvider,
       products: repositories.products,

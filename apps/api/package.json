@@ -10,7 +10,8 @@
     "lint": "eslint src test --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:runtime": "vitest run test/runtime-esm.test.ts"
+    "test:runtime": "vitest run test/runtime-esm.test.ts",
+    "shopee:import": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-import.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

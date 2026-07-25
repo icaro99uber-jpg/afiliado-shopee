@@ -8,25 +8,44 @@ datasource db {
 }
 
 model ProductLead {
-  copies             GeneratedCopy[]
-  whatsappDispatches WhatsAppDispatch[]
-  id                 String             @id @default(cuid())
-  providerProductId  String             @unique
-  nome               String
-  categoria          String
-  preco              Float
-  desconto           Float
-  nota               Float
-  vendidos           Int
-  comissao           Float
-  loja               String
-  urlImagem          String
-  url                String?
-  title              String
-  score              Int?
-  scoreUpdatedAt     DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  copies               GeneratedCopy[]
+  whatsappDispatches   WhatsAppDispatch[]
+  coupons              Coupon[]
+  id                   String             @id @default(cuid())
+  source               ShopeeOfferSource  @default(MOCK)
+  providerProductId    String
+  nome                 String
+  categoria            String
+  preco                Decimal            @db.Decimal(14, 4)
+  precoMin             Decimal?           @db.Decimal(14, 4)
+  precoMax             Decimal?           @db.Decimal(14, 4)
+  desconto             Float
+  nota                 Float
+  vendidos             Int
+  comissao             Float
+  commissionAmount     Decimal?           @db.Decimal(14, 4)
+  sellerCommissionRate Float?
+  shopeeCommissionRate Float?
+  loja                 String
+  shopId               String?
+  categoryIds          String[]           @default([])
+  urlImagem            String
+  productLink          String?            @map("url")
+  affiliateLink        String?
+  offerStartsAt        DateTime?
+  offerEndsAt          DateTime?
+  fetchedAt            DateTime           @default(now())
+  lastSeenAt           DateTime           @default(now())
+  unavailableAt        DateTime?
+  title                String
+  score                Int?
+  scoreUpdatedAt       DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([source, providerProductId])
+  @@index([source, lastSeenAt])
+  @@index([offerEndsAt, unavailableAt])
 }
 
 model GeneratedCopy {
@@ -86,6 +105,31 @@ model WhatsAppDispatch {
   @@index([status])
 }
 
+model Coupon {
+  id              String             @id @default(cuid())
+  source          CouponSource
+  code            String
+  description     String
+  discountType    CouponDiscountType
+  discountValue   Decimal            @db.Decimal(14, 4)
+  minPurchase     Decimal?           @db.Decimal(14, 4)
+  maxDiscount     Decimal?           @db.Decimal(14, 4)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  active          Boolean            @default(true)
+  shopId          String?
+  productId       String?
+  product         ProductLead?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  terms           String?
+  lastValidatedAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([active, startsAt, endsAt])
+  @@index([shopId])
+  @@index([productId])
+}
+
 enum WhatsAppDispatchStatus {
   PENDING
   SENT
@@ -95,4 +139,20 @@ enum WhatsAppDispatchStatus {
 enum WhatsAppDestinationType {
   INDIVIDUAL
   GROUP
+}
+
+enum ShopeeOfferSource {
+  MOCK
+  MANUAL
+  OFFICIAL
+}
+
+enum CouponSource {
+  MANUAL
+  OFFICIAL
+}
+
+enum CouponDiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
 }

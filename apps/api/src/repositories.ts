@@ -1,4 +1,8 @@
 import type { Product } from '@shopee-auto-affiliate-ai/shared';
+import type {
+  ShopeeAffiliateOfferSource,
+  ShopeeProductOffer,
+} from '@shopee-auto-affiliate-ai/providers';
 
 export const APPROVED_PRODUCT_MIN_SCORE = 70;
 
@@ -39,11 +43,94 @@ export type ProductLeadData = {
 
 export type ProductLeadRecord = ProductLeadData & {
   id: string;
+  source?: ShopeeAffiliateOfferSource;
+  affiliateLink?: string | null;
+  shopId?: string | null;
+  categoryIds?: string[];
+  commissionAmount?: string | null;
+  sellerCommissionRate?: number | null;
+  shopeeCommissionRate?: number | null;
+  offerStartsAt?: Date | null;
+  offerEndsAt?: Date | null;
+  fetchedAt?: Date;
+  lastSeenAt?: Date;
+  unavailableAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
   score?: number | null;
   scoreUpdatedAt?: Date | null;
 };
+
+export type ShopeeOfferStatus = 'ACTIVE' | 'EXPIRED' | 'UNAVAILABLE';
+
+export type ShopeeOfferRecord = ShopeeProductOffer & {
+  id: string;
+  score: number | null;
+  scoreUpdatedAt: Date | null;
+  lastSeenAt: Date;
+  unavailableAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ShopeeOfferFilters = {
+  source?: ShopeeAffiliateOfferSource;
+  status?: ShopeeOfferStatus;
+  affiliateLink?: 'present' | 'missing';
+  keyword?: string;
+  page: number;
+  limit: number;
+};
+
+export interface ShopeeOfferRepository {
+  findBySourceAndProviderProductId(
+    source: ShopeeAffiliateOfferSource,
+    providerProductId: string,
+  ): Promise<Pick<ShopeeOfferRecord, 'id'> | null>;
+  createOffer(offer: ShopeeProductOffer): Promise<ShopeeOfferRecord>;
+  updateOffer(
+    id: string,
+    offer: ShopeeProductOffer,
+  ): Promise<ShopeeOfferRecord>;
+  findOfferById(id: string): Promise<ShopeeOfferRecord | null>;
+  listOffers(
+    filters: ShopeeOfferFilters,
+  ): Promise<{ items: ShopeeOfferRecord[]; total: number }>;
+}
+
+export type CouponSource = 'MANUAL' | 'OFFICIAL';
+export type CouponDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
+
+export type CouponData = {
+  source: CouponSource;
+  code: string;
+  description: string;
+  discountType: CouponDiscountType;
+  discountValue: string;
+  minPurchase?: string | null;
+  maxDiscount?: string | null;
+  startsAt?: Date | null;
+  endsAt?: Date | null;
+  active: boolean;
+  shopId?: string | null;
+  productId?: string | null;
+  terms?: string | null;
+  lastValidatedAt?: Date | null;
+};
+
+export type CouponRecord = CouponData & {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export interface CouponRepository {
+  create(data: CouponData): Promise<CouponRecord>;
+  list(): Promise<CouponRecord[]>;
+  findById(id: string): Promise<CouponRecord | null>;
+  update(id: string, data: Partial<CouponData>): Promise<CouponRecord | null>;
+  delete(id: string): Promise<boolean>;
+}
 
 export type GeneratedCopyData = {
   id?: string;

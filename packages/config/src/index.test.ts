@@ -82,6 +82,42 @@ describe('envSchema WhatsApp provider', () => {
   });
 });
 
+describe('envSchema Shopee Affiliate', () => {
+  it('usa mock e limite baixo por padrao', () => {
+    const config = envSchema.parse(baseEnv);
+    expect(config.SHOPEE_AFFILIATE_PROVIDER).toBe('mock');
+    expect(config.SHOPEE_AFFILIATE_API_ENABLED).toBe(false);
+    expect(config.SHOPEE_AFFILIATE_SUB_ID_PREFIX).toBe('whatsapp');
+    expect(config.SHOPEE_AFFILIATE_SYNC_LIMIT).toBe(20);
+  });
+
+  it('permite manual sem credenciais', () => {
+    expect(
+      envSchema.parse({ ...baseEnv, SHOPEE_AFFILIATE_PROVIDER: 'manual' })
+        .SHOPEE_AFFILIATE_PROVIDER,
+    ).toBe('manual');
+  });
+
+  it.each([
+    'SHOPEE_AFFILIATE_API_ENABLED',
+    'SHOPEE_AFFILIATE_API_URL',
+    'SHOPEE_AFFILIATE_APP_ID',
+    'SHOPEE_AFFILIATE_SECRET',
+  ] as const)('exige %s no modo official', (field) => {
+    const complete = {
+      ...baseEnv,
+      SHOPEE_AFFILIATE_PROVIDER: 'official',
+      SHOPEE_AFFILIATE_API_ENABLED: 'true',
+      SHOPEE_AFFILIATE_API_URL: 'https://example.invalid/open-api',
+      SHOPEE_AFFILIATE_APP_ID: 'placeholder-app-id',
+      SHOPEE_AFFILIATE_SECRET: 'placeholder-secret',
+    };
+    expect(
+      envSchema.safeParse({ ...complete, [field]: undefined }).success,
+    ).toBe(false);
+  });
+});
+
 describe('envSchema Scheduler', () => {
   it('mantem o scheduler desativado por padrao', () => {
     const config = envSchema.parse(baseEnv);

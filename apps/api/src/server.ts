@@ -1,5 +1,10 @@
 import { loadConfig } from '@shopee-auto-affiliate-ai/config';
-import { EvolutionApiGroupDirectoryProvider } from '@shopee-auto-affiliate-ai/providers';
+import {
+  EvolutionApiGroupDirectoryProvider,
+  ManualShopeeAffiliateOfferProvider,
+  MockShopeeAffiliateOfferProvider,
+  OfficialShopeeAffiliateOfferProvider,
+} from '@shopee-auto-affiliate-ai/providers';
 import { buildApp } from './app';
 
 const start = async () => {
@@ -12,11 +17,24 @@ const start = async () => {
           instanceName: config.EVOLUTION_INSTANCE_NAME as string,
         })
       : undefined;
+  const shopeeOfferProvider =
+    config.SHOPEE_AFFILIATE_PROVIDER === 'official'
+      ? new OfficialShopeeAffiliateOfferProvider({
+          apiEnabled: config.SHOPEE_AFFILIATE_API_ENABLED,
+          apiUrl: config.SHOPEE_AFFILIATE_API_URL,
+          appId: config.SHOPEE_AFFILIATE_APP_ID,
+          secret: config.SHOPEE_AFFILIATE_SECRET,
+        })
+      : config.SHOPEE_AFFILIATE_PROVIDER === 'manual'
+        ? new ManualShopeeAffiliateOfferProvider()
+        : new MockShopeeAffiliateOfferProvider();
   const app = await buildApp({
     redisUrl: config.REDIS_URL,
     schedulerEnabled: config.SCHEDULER_ENABLED,
     groupDirectoryProvider,
     groupInstanceName: config.EVOLUTION_INSTANCE_NAME,
+    shopeeOfferProvider,
+    shopeeMaxOffersPerSync: config.SHOPEE_AFFILIATE_SYNC_LIMIT,
   });
   await app.listen({ host: '0.0.0.0', port: config.PORT });
 };

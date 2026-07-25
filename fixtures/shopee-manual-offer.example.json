@@ -1,0 +1,17 @@
+[
+  {
+    "providerProductId": "manual-001",
+    "productName": "Produto de teste ficticio",
+    "shopName": "Loja de teste ficticia",
+    "categoryIds": ["categoria-ficticia"],
+    "price": "99.90",
+    "discountRate": 20,
+    "rating": 4.8,
+    "sales": 1000,
+    "commissionRate": 8,
+    "imageUrl": "https://example.invalid/image.jpg",
+    "productLink": "https://example.invalid/product/manual-001",
+    "affiliateLink": "https://example.invalid/affiliate/manual-001",
+    "offerEndsAt": "2099-12-31T23:59:59.000Z"
+  }
+]

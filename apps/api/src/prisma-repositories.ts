@@ -1,12 +1,18 @@
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   AnalyticsRepository,
+  CouponData,
+  CouponRecord,
+  CouponRepository,
   GeneratedCopyData,
   GeneratedCopyRecord,
   GeneratedCopyRepository,
   ProductLeadData,
   ProductLeadRecord,
   ProductRepository,
+  ShopeeOfferFilters,
+  ShopeeOfferRecord,
+  ShopeeOfferRepository,
   WhatsAppDestinationData,
   WhatsAppDestinationRecord,
   WhatsAppDestinationRepository,
@@ -23,6 +29,7 @@ import type {
   WhatsAppGroupRecord,
   WhatsAppGroupUpdate,
 } from './repositories';
+import type { ShopeeProductOffer } from '@shopee-auto-affiliate-ai/providers';
 import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 
 const isUniqueConstraintError = (error: unknown) =>
@@ -30,6 +37,114 @@ const isUniqueConstraintError = (error: unknown) =>
   error !== null &&
   'code' in error &&
   (error as { code?: string }).code === 'P2002';
+
+type PrismaDecimalLike = { toString(): string } | number | string;
+
+const decimalString = (value: PrismaDecimalLike | null | undefined) =>
+  value === null || value === undefined ? undefined : value.toString();
+
+const decimalNumber = (value: PrismaDecimalLike | null | undefined) =>
+  value === null || value === undefined ? 0 : Number(value.toString());
+
+const mapProductLead = (
+  record: Record<string, unknown>,
+): ProductLeadRecord => ({
+  ...(record as unknown as ProductLeadRecord),
+  preco: decimalNumber(record.preco as PrismaDecimalLike),
+  comissao: Number(record.comissao),
+  url: (record.productLink as string | null | undefined) ?? null,
+  commissionAmount:
+    decimalString(record.commissionAmount as PrismaDecimalLike | null) ?? null,
+});
+
+const toPrismaProductData = (data: ProductLeadData) => ({
+  source: 'MOCK' as const,
+  providerProductId: data.providerProductId,
+  nome: data.nome,
+  categoria: data.categoria,
+  preco: data.preco,
+  desconto: data.desconto,
+  nota: data.nota,
+  vendidos: data.vendidos,
+  comissao: data.comissao,
+  loja: data.loja,
+  urlImagem: data.urlImagem,
+  productLink: data.url,
+  title: data.title,
+  fetchedAt: new Date(),
+  lastSeenAt: new Date(),
+});
+
+const mapShopeeOffer = (
+  record: Record<string, unknown>,
+): ShopeeOfferRecord => ({
+  id: String(record.id),
+  source: record.source as ShopeeOfferRecord['source'],
+  providerProductId: String(record.providerProductId),
+  productName: String(record.nome),
+  shopId: (record.shopId as string | null) ?? undefined,
+  shopName: String(record.loja),
+  categoryIds: (record.categoryIds as string[]) ?? [],
+  price: decimalString(record.preco as PrismaDecimalLike) as string,
+  priceMin:
+    decimalString(record.precoMin as PrismaDecimalLike | null) ??
+    (decimalString(record.preco as PrismaDecimalLike) as string),
+  priceMax:
+    decimalString(record.precoMax as PrismaDecimalLike | null) ??
+    (decimalString(record.preco as PrismaDecimalLike) as string),
+  discountRate: Number(record.desconto),
+  rating: Number(record.nota),
+  sales: Number(record.vendidos),
+  commissionRate: Number(record.comissao),
+  commissionAmount: decimalString(
+    record.commissionAmount as PrismaDecimalLike | null,
+  ),
+  sellerCommissionRate:
+    (record.sellerCommissionRate as number | null) ?? undefined,
+  shopeeCommissionRate:
+    (record.shopeeCommissionRate as number | null) ?? undefined,
+  imageUrl: String(record.urlImagem),
+  productLink: String(record.productLink ?? ''),
+  affiliateLink: (record.affiliateLink as string | null) ?? undefined,
+  offerStartsAt: (record.offerStartsAt as Date | null) ?? undefined,
+  offerEndsAt: (record.offerEndsAt as Date | null) ?? undefined,
+  fetchedAt: record.fetchedAt as Date,
+  lastSeenAt: record.lastSeenAt as Date,
+  unavailableAt: (record.unavailableAt as Date | null) ?? undefined,
+  score: (record.score as number | null) ?? null,
+  scoreUpdatedAt: (record.scoreUpdatedAt as Date | null) ?? null,
+  createdAt: record.createdAt as Date,
+  updatedAt: record.updatedAt as Date,
+});
+
+const toPrismaShopeeOffer = (offer: ShopeeProductOffer) => ({
+  source: offer.source,
+  providerProductId: offer.providerProductId,
+  nome: offer.productName,
+  categoria: offer.categoryIds[0] ?? 'Sem categoria',
+  categoryIds: offer.categoryIds,
+  preco: offer.price,
+  precoMin: offer.priceMin,
+  precoMax: offer.priceMax,
+  desconto: offer.discountRate,
+  nota: offer.rating,
+  vendidos: offer.sales,
+  comissao: offer.commissionRate,
+  commissionAmount: offer.commissionAmount,
+  sellerCommissionRate: offer.sellerCommissionRate,
+  shopeeCommissionRate: offer.shopeeCommissionRate,
+  loja: offer.shopName,
+  shopId: offer.shopId,
+  urlImagem: offer.imageUrl,
+  productLink: offer.productLink,
+  affiliateLink: offer.affiliateLink,
+  offerStartsAt: offer.offerStartsAt,
+  offerEndsAt: offer.offerEndsAt,
+  fetchedAt: offer.fetchedAt,
+  lastSeenAt: new Date(),
+  unavailableAt: null,
+  title: offer.productName,
+});
 
 export class PrismaAnalyticsRepository implements AnalyticsRepository {
   constructor(
@@ -85,36 +200,53 @@ export class PrismaProductRepository implements ProductRepository {
   constructor(private readonly prisma: Pick<DatabaseClient, 'productLead'>) {}
 
   async findById(id: string): Promise<ProductLeadRecord | null> {
-    return (await this.prisma.productLead.findUnique({
+    const record = await this.prisma.productLead.findUnique({
       where: { id },
-    })) as ProductLeadRecord | null;
+    });
+    return record
+      ? mapProductLead(record as unknown as Record<string, unknown>)
+      : null;
   }
 
   async findByProviderProductId(providerProductId: string) {
     return this.prisma.productLead.findUnique({
-      where: { providerProductId },
+      where: {
+        source_providerProductId: { source: 'MOCK', providerProductId },
+      },
       select: { id: true },
     });
   }
 
   async create(data: ProductLeadData): Promise<ProductLeadRecord> {
-    return (await this.prisma.productLead.create({
-      data,
-    })) as ProductLeadRecord;
+    const record = await this.prisma.productLead.create({
+      data: toPrismaProductData(data),
+    });
+    return mapProductLead(record as unknown as Record<string, unknown>);
   }
 
   async updateByProviderProductId(
     providerProductId: string,
     data: ProductLeadData,
   ): Promise<ProductLeadRecord> {
-    return (await this.prisma.productLead.update({
-      where: { providerProductId },
-      data,
-    })) as ProductLeadRecord;
+    const record = await this.prisma.productLead.update({
+      where: {
+        source_providerProductId: { source: 'MOCK', providerProductId },
+      },
+      data: toPrismaProductData(data),
+    });
+    return mapProductLead(record as unknown as Record<string, unknown>);
   }
 
   async listForScoring(): Promise<ProductLeadRecord[]> {
-    return (await this.prisma.productLead.findMany()) as ProductLeadRecord[];
+    const records = await this.prisma.productLead.findMany({
+      where: {
+        unavailableAt: null,
+        OR: [{ offerEndsAt: null }, { offerEndsAt: { gt: new Date() } }],
+      },
+    });
+    return records.map((record) =>
+      mapProductLead(record as unknown as Record<string, unknown>),
+    );
   }
 
   async updateScore(
@@ -122,16 +254,175 @@ export class PrismaProductRepository implements ProductRepository {
     score: number,
     scoreUpdatedAt: Date,
   ): Promise<ProductLeadRecord> {
-    return (await this.prisma.productLead.update({
+    const record = await this.prisma.productLead.update({
       where: { id },
       data: { score, scoreUpdatedAt },
-    })) as ProductLeadRecord;
+    });
+    return mapProductLead(record as unknown as Record<string, unknown>);
   }
 
   async listApproved(minScore: number): Promise<ProductLeadRecord[]> {
-    return (await this.prisma.productLead.findMany({
+    const records = await this.prisma.productLead.findMany({
       where: { score: { gte: minScore } },
-    })) as ProductLeadRecord[];
+    });
+    return records.map((record) =>
+      mapProductLead(record as unknown as Record<string, unknown>),
+    );
+  }
+}
+
+export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
+  constructor(private readonly prisma: Pick<DatabaseClient, 'productLead'>) {}
+
+  async findBySourceAndProviderProductId(
+    source: ShopeeOfferRecord['source'],
+    providerProductId: string,
+  ) {
+    return this.prisma.productLead.findUnique({
+      where: { source_providerProductId: { source, providerProductId } },
+      select: { id: true },
+    });
+  }
+
+  async createOffer(offer: ShopeeProductOffer): Promise<ShopeeOfferRecord> {
+    const record = await this.prisma.productLead.create({
+      data: toPrismaShopeeOffer(offer),
+    });
+    return mapShopeeOffer(record as unknown as Record<string, unknown>);
+  }
+
+  async updateOffer(
+    id: string,
+    offer: ShopeeProductOffer,
+  ): Promise<ShopeeOfferRecord> {
+    const record = await this.prisma.productLead.update({
+      where: { id },
+      data: toPrismaShopeeOffer(offer),
+    });
+    return mapShopeeOffer(record as unknown as Record<string, unknown>);
+  }
+
+  async findOfferById(id: string): Promise<ShopeeOfferRecord | null> {
+    const record = await this.prisma.productLead.findUnique({ where: { id } });
+    return record
+      ? mapShopeeOffer(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async listOffers(filters: ShopeeOfferFilters) {
+    const now = new Date();
+    const statusWhere =
+      filters.status === 'UNAVAILABLE'
+        ? { unavailableAt: { not: null } }
+        : filters.status === 'EXPIRED'
+          ? { unavailableAt: null, offerEndsAt: { lte: now } }
+          : filters.status === 'ACTIVE'
+            ? {
+                unavailableAt: null,
+                OR: [{ offerEndsAt: null }, { offerEndsAt: { gt: now } }],
+              }
+            : {};
+    const where = {
+      source: filters.source,
+      affiliateLink:
+        filters.affiliateLink === 'present'
+          ? { not: null }
+          : filters.affiliateLink === 'missing'
+            ? null
+            : undefined,
+      AND: [
+        ...(filters.keyword
+          ? [
+              {
+                OR: [
+                  {
+                    nome: {
+                      contains: filters.keyword,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                  {
+                    loja: {
+                      contains: filters.keyword,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
+        statusWhere,
+      ],
+    };
+    const [records, total] = await Promise.all([
+      this.prisma.productLead.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.productLead.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapShopeeOffer(record as unknown as Record<string, unknown>),
+      ),
+      total,
+    };
+  }
+}
+
+const mapCoupon = (record: Record<string, unknown>): CouponRecord => ({
+  ...(record as unknown as CouponRecord),
+  discountValue: decimalString(
+    record.discountValue as PrismaDecimalLike,
+  ) as string,
+  minPurchase:
+    decimalString(record.minPurchase as PrismaDecimalLike | null) ?? null,
+  maxDiscount:
+    decimalString(record.maxDiscount as PrismaDecimalLike | null) ?? null,
+});
+
+export class PrismaCouponRepository implements CouponRepository {
+  constructor(private readonly prisma: Pick<DatabaseClient, 'coupon'>) {}
+
+  async create(data: CouponData): Promise<CouponRecord> {
+    const record = await this.prisma.coupon.create({ data });
+    return mapCoupon(record as unknown as Record<string, unknown>);
+  }
+
+  async list(): Promise<CouponRecord[]> {
+    const records = await this.prisma.coupon.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    return records.map((record) =>
+      mapCoupon(record as unknown as Record<string, unknown>),
+    );
+  }
+
+  async findById(id: string): Promise<CouponRecord | null> {
+    const record = await this.prisma.coupon.findUnique({ where: { id } });
+    return record
+      ? mapCoupon(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async update(
+    id: string,
+    data: Partial<CouponData>,
+  ): Promise<CouponRecord | null> {
+    const existing = await this.prisma.coupon.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) return null;
+    const record = await this.prisma.coupon.update({ where: { id }, data });
+    return mapCoupon(record as unknown as Record<string, unknown>);
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const result = await this.prisma.coupon.deleteMany({ where: { id } });
+    return result.count === 1;
   }
 }
 

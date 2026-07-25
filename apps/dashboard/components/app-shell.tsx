@@ -8,6 +8,7 @@ import {
   PackageSearch,
   PlayCircle,
   Settings,
+  TicketPercent,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -21,6 +22,7 @@ const navigation = [
   { href: '/produtos', label: 'Produtos', icon: PackageSearch },
   { href: '/pipeline', label: 'Pipeline', icon: PlayCircle },
   { href: '/copies', label: 'Copies', icon: Copy },
+  { href: '/cupons', label: 'Cupons', icon: TicketPercent },
   { href: '/whatsapp', label: 'WhatsApp', icon: ClipboardList },
   { href: '/configuracoes', label: 'Configuracoes', icon: Settings },
 ];
@@ -128,4 +130,3 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
