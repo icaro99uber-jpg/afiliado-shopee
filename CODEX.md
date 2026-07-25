@@ -34,6 +34,9 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
   a consulta segura `GET /scheduler`.
 - Agentes: contratos e implementacoes iniciais em `packages/agents`.
 - Providers: contratos e mocks para Shopee, OpenAI, Evolution API e WhatsApp em `packages/providers`.
+- Shopee Affiliate: contrato de ofertas independente de HTTP/Prisma, providers
+  mock/manual/official e metadados de Sub_ids em `packages/providers`; sync,
+  catálogo, importação, cupons e preview sem envio em `apps/api`.
 - Evolution API: provider HTTP v2, `EvolutionSendGuard` e factory segura em
   `packages/providers`, conectados uma unica vez ao bootstrap do worker.
 - Diretorio de grupos: provider read-only 2.3.6 e fingerprints criptograficos
@@ -60,8 +63,10 @@ Paginas disponiveis:
 
 - `Visao geral`: health da API, metricas reais de Analytics, ultimo job da
   sessao, resumo somente leitura do Scheduler, atalhos e resumo de dispatches.
-- `Produtos`: visualizacao derivada de produtos presentes em dispatches, com
-  busca, filtros, ordenacao e paginacao local.
+- `Produtos`: catálogo paginado de `GET /shopee/offers`, sincronização segura,
+  filtros, importação manual validada e preview de copy sem envio.
+- `Cupons`: CRUD local de cupons manuais com confirmação explícita, sem coleta
+  automática ou inclusão automática em copy.
 - `Pipeline`: dispara `POST /pipeline/run`, consulta `GET /pipeline/jobs/:id`
   e faz polling moderado enquanto o job esta ativo.
 - `Copies`: gera copy manual por `POST /copy/generate` e mantem historico
@@ -327,6 +332,29 @@ Regra de dependencia:
 - Operacoes `findUnique`, `findMany`, `create`, `update`, `select`, `include` e tratamento de codigos Prisma ficam nos adaptadores Prisma.
 - API e worker devem montar servicos por `createApplicationServices` ou factories equivalentes, sem espalhar novas instanciacoes manuais.
 - O worker deve selecionar o provider em `startWorker`, reutilizando a mesma instancia nos jobs de pipeline e dispatch.
+- `ShopeeOfferSyncService` depende somente de `ShopeeAffiliateOfferProvider` e
+  `ShopeeOfferRepository`; não recebe Copy, dispatch, fila, Scheduler ou sender.
+
+## Shopee Affiliate sem credenciais
+
+O padrão é `SHOPEE_AFFILIATE_PROVIDER=mock`. O provider manual aceita somente
+registros locais validados e preserva o link afiliado fornecido. O provider
+official é apenas uma boundary com signer/transport injetáveis e nunca faz HTTP
+nesta task. Configuração incompleta retorna `SHOPEE_API_NOT_CONFIGURED`.
+
+A chave lógica de `ProductLead` é `source + providerProductId`. Sincronizações
+atualizam o mesmo registro e preservam copies e dispatches. Dinheiro novo usa
+string decimal no domínio e `Decimal` no Prisma. Ofertas expiradas são ignoradas
+na sincronização e inelegíveis para score.
+
+O Explorer oficial público permite observar `productOfferV2`, mas não confirma
+transporte, assinatura, headers, rate limits, semântica real de paginação ou
+cupons para esta conta. **Autenticação e transporte real aguardam credenciais e
+documentação liberada para a conta.** Consulte `docs/shopee-affiliate.md`.
+
+É proibido implementar scraping, automação de navegador, endpoints privados ou
+mobile, assinatura especulativa, conversão automática de links ou chamada real
+à Shopee enquanto essa documentação não estiver disponível.
 
 ## Estrutura de pastas
 

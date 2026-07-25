@@ -7,6 +7,12 @@ import {
 import {
   maskEvolutionDestination,
   MockShopeeProvider,
+  MockShopeeAffiliateOfferProvider,
+  ManualShopeeAffiliateOfferProvider,
+  parseManualShopeeOffer,
+  type ShopeeAffiliateOfferProvider,
+  type ShopeeAffiliateOfferSource,
+  type ShopeeProductOfferListInput,
   type WhatsAppGroupDirectoryProvider,
   type HunterProvider,
 } from '@shopee-auto-affiliate-ai/providers';
@@ -30,6 +36,7 @@ import {
   GroupDirectoryService,
   type WhatsAppGroupPublic,
 } from './group-directory-service';
+import { ShopeeOfferSyncService } from './shopee-offer-sync-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -57,6 +64,8 @@ type BuildAppOptions = {
     GroupDirectoryService,
     'sync' | 'list' | 'find' | 'setActive'
   >;
+  shopeeOfferProvider?: ShopeeAffiliateOfferProvider;
+  shopeeMaxOffersPerSync?: number;
 };
 
 type PipelineJobLike = {
@@ -78,6 +87,31 @@ const parseNumberFilter = (value: unknown, field: string) => {
   }
   return value;
 };
+
+const parsePositiveInteger = (
+  value: unknown,
+  fallback: number,
+  maximum: number,
+) => {
+  if (value === undefined || value === '') return fallback;
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (
+    typeof parsed !== 'number' ||
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > maximum
+  ) {
+    throw new AppError('Paginacao invalida', 'INVALID_PAGINATION');
+  }
+  return parsed;
+};
+
+const offerStatus = (offer: { unavailableAt?: Date; offerEndsAt?: Date }) =>
+  offer.unavailableAt
+    ? ('UNAVAILABLE' as const)
+    : offer.offerEndsAt && offer.offerEndsAt <= new Date()
+      ? ('EXPIRED' as const)
+      : ('ACTIVE' as const);
 
 export const sanitizeDispatchDestination = (destination: {
   destination: string;
@@ -104,6 +138,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   const app = Fastify({ logger: options.logger ?? true });
   const prisma = options.prisma ?? createPrismaClient();
   const hunterProvider = options.hunterProvider ?? new MockShopeeProvider();
+  const shopeeOfferProvider =
+    options.shopeeOfferProvider ?? new MockShopeeAffiliateOfferProvider();
   const repositories = createPrismaRepositories(prisma);
   const groupDirectoryService =
     options.groupDirectoryService ??
@@ -146,6 +182,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     createApplicationServices({
       repositories,
       hunterProvider,
+      shopeeOfferProvider,
+      shopeeMaxOffersPerSync: options.shopeeMaxOffersPerSync ?? 20,
       logger: app.log,
     });
 
@@ -262,6 +300,289 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return reply.status(500).send({
         error: 'COPY_GENERATE_FAILED',
         message: 'Falha ao gerar copy',
+      });
+    }
+  });
+
+  app.post('/shopee/offers/sync', async (request, reply) => {
+    try {
+      const body = (request.body ?? {}) as Record<string, unknown>;
+      const input: ShopeeProductOfferListInput = {
+        keyword:
+          typeof body.keyword === 'string' ? body.keyword.trim() : undefined,
+        categoryId:
+          typeof body.categoryId === 'string'
+            ? body.categoryId.trim()
+            : undefined,
+        minPrice:
+          typeof body.minPrice === 'string' || typeof body.minPrice === 'number'
+            ? String(body.minPrice)
+            : undefined,
+        maxPrice:
+          typeof body.maxPrice === 'string' || typeof body.maxPrice === 'number'
+            ? String(body.maxPrice)
+            : undefined,
+        minCommissionRate: parseNumberFilter(
+          body.minCommissionRate,
+          'minCommissionRate',
+        ),
+        minDiscountRate: parseNumberFilter(
+          body.minDiscountRate,
+          'minDiscountRate',
+        ),
+        minRating: parseNumberFilter(body.minRating, 'minRating'),
+        limit: parsePositiveInteger(
+          body.limit,
+          options.shopeeMaxOffersPerSync ?? 20,
+          options.shopeeMaxOffersPerSync ?? 20,
+        ),
+      };
+      return await getApplicationServices().shopeeOfferSync.run(input);
+    } catch (error) {
+      const code =
+        error instanceof AppError ? error.code : 'SHOPEE_SYNC_FAILED';
+      const status =
+        code === 'SHOPEE_API_NOT_CONFIGURED' ||
+        code === 'SHOPEE_API_TRANSPORT_PENDING'
+          ? 503
+          : code === 'SHOPEE_MANUAL_INPUT_REQUIRED' ||
+              code === 'INVALID_PAGINATION' ||
+              code === 'INVALID_HUNTER_FILTER'
+            ? 400
+            : 500;
+      return reply.status(status).send({
+        error: code,
+        message:
+          error instanceof AppError
+            ? error.message
+            : 'Falha ao sincronizar ofertas da Shopee',
+      });
+    }
+  });
+
+  app.get('/shopee/offers', async (request, reply) => {
+    try {
+      const query = request.query as Record<string, unknown>;
+      const page = parsePositiveInteger(query.page, 1, 100000);
+      const limit = parsePositiveInteger(query.limit, 20, 100);
+      const source = ['MOCK', 'MANUAL', 'OFFICIAL'].includes(
+        String(query.source),
+      )
+        ? (query.source as ShopeeAffiliateOfferSource)
+        : undefined;
+      const status = ['ACTIVE', 'EXPIRED', 'UNAVAILABLE'].includes(
+        String(query.status),
+      )
+        ? (query.status as 'ACTIVE' | 'EXPIRED' | 'UNAVAILABLE')
+        : undefined;
+      const affiliateLink = ['present', 'missing'].includes(
+        String(query.affiliateLink),
+      )
+        ? (query.affiliateLink as 'present' | 'missing')
+        : undefined;
+      const result = await repositories.shopeeOffers.listOffers({
+        source,
+        status,
+        affiliateLink,
+        keyword:
+          typeof query.keyword === 'string'
+            ? query.keyword.trim() || undefined
+            : undefined,
+        page,
+        limit,
+      });
+      return {
+        provider: shopeeOfferProvider.source.toLocaleLowerCase(),
+        items: result.items.map((item) => ({
+          ...item,
+          status: offerStatus(item),
+        })),
+        page,
+        limit,
+        total: result.total,
+        totalPages: Math.max(1, Math.ceil(result.total / limit)),
+      };
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'INVALID_PAGINATION') {
+        return reply
+          .status(400)
+          .send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.get('/shopee/offers/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const offer = await repositories.shopeeOffers.findOfferById(id);
+    if (!offer) {
+      return reply.status(404).send({
+        error: 'OFFER_NOT_FOUND',
+        message: 'Oferta nao encontrada',
+      });
+    }
+    return { ...offer, status: offerStatus(offer) };
+  });
+
+  app.post('/shopee/offers/import/validate', async (request, reply) => {
+    const body = request.body as unknown;
+    const records = Array.isArray(body)
+      ? body
+      : body && typeof body === 'object' && 'records' in body
+        ? (body as { records: unknown }).records
+        : [body];
+    if (
+      !Array.isArray(records) ||
+      records.length === 0 ||
+      records.length > 100
+    ) {
+      return reply.status(400).send({
+        error: 'INVALID_MANUAL_SHOPEE_OFFER',
+        message: 'Envie entre 1 e 100 ofertas para validacao',
+      });
+    }
+    const valid: ReturnType<typeof parseManualShopeeOffer>[] = [];
+    const errors: { index: number; message: string }[] = [];
+    records.forEach((record, index) => {
+      try {
+        valid.push(parseManualShopeeOffer(record));
+      } catch (error) {
+        errors.push({
+          index,
+          message:
+            error instanceof AppError ? error.message : 'Registro invalido',
+        });
+      }
+    });
+    return {
+      valid: errors.length === 0,
+      count: valid.length,
+      errors,
+      preview: valid.map((offer) => ({
+        ...offer,
+        fetchedAt: offer.fetchedAt.toISOString(),
+        offerStartsAt: offer.offerStartsAt?.toISOString(),
+        offerEndsAt: offer.offerEndsAt?.toISOString(),
+      })),
+    };
+  });
+
+  app.post('/shopee/offers/import', async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      records?: unknown;
+      confirm?: unknown;
+    };
+    if (body.confirm !== 'CONFIRMAR_IMPORTACAO') {
+      return reply.status(400).send({
+        error: 'SHOPEE_IMPORT_CONFIRMATION_REQUIRED',
+        message: 'Confirmacao explicita obrigatoria',
+      });
+    }
+    if (!Array.isArray(body.records) || body.records.length < 1) {
+      return reply.status(400).send({
+        error: 'INVALID_MANUAL_SHOPEE_OFFER',
+        message: 'Informe ao menos uma oferta manual',
+      });
+    }
+    try {
+      const service = new ShopeeOfferSyncService({
+        provider: new ManualShopeeAffiliateOfferProvider(body.records),
+        offers: repositories.shopeeOffers,
+        maxOffersPerSync: options.shopeeMaxOffersPerSync ?? 20,
+        logger: app.log,
+      });
+      return await service.run({ limit: body.records.length });
+    } catch (error) {
+      return reply.status(400).send({
+        error:
+          error instanceof AppError
+            ? error.code
+            : 'INVALID_MANUAL_SHOPEE_OFFER',
+        message:
+          error instanceof AppError ? error.message : 'Oferta manual invalida',
+      });
+    }
+  });
+
+  app.post('/shopee/offers/:id/copy-preview', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      return await getApplicationServices().copyPreview.preview(id);
+    } catch (error) {
+      if (error instanceof AppError) {
+        const status = error.code === 'OFFER_NOT_FOUND' ? 404 : 409;
+        return reply
+          .status(status)
+          .send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.get('/coupons', async () => getApplicationServices().coupons.list());
+
+  app.get('/coupons/:id', async (request, reply) => {
+    try {
+      return await getApplicationServices().coupons.find(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      return reply.status(404).send({
+        error: 'COUPON_NOT_FOUND',
+        message:
+          error instanceof AppError ? error.message : 'Cupom nao encontrado',
+      });
+    }
+  });
+
+  app.post('/coupons', async (request, reply) => {
+    try {
+      const coupon = await getApplicationServices().coupons.create(
+        (request.body ?? {}) as Record<string, unknown>,
+      );
+      return reply.status(201).send(coupon);
+    } catch (error) {
+      return reply.status(400).send({
+        error: error instanceof AppError ? error.code : 'INVALID_COUPON',
+        message: error instanceof AppError ? error.message : 'Cupom invalido',
+      });
+    }
+  });
+
+  app.patch('/coupons/:id', async (request, reply) => {
+    try {
+      return await getApplicationServices().coupons.update(
+        (request.params as { id: string }).id,
+        (request.body ?? {}) as Record<string, unknown>,
+      );
+    } catch (error) {
+      const status =
+        error instanceof AppError && error.code === 'COUPON_NOT_FOUND'
+          ? 404
+          : 400;
+      return reply.status(status).send({
+        error: error instanceof AppError ? error.code : 'INVALID_COUPON',
+        message: error instanceof AppError ? error.message : 'Cupom invalido',
+      });
+    }
+  });
+
+  app.delete('/coupons/:id', async (request, reply) => {
+    try {
+      await getApplicationServices().coupons.delete(
+        (request.params as { id: string }).id,
+        (request.body ?? {}) && (request.body as { confirm?: unknown }).confirm,
+      );
+      return reply.status(204).send();
+    } catch (error) {
+      const status =
+        error instanceof AppError && error.code === 'COUPON_NOT_FOUND'
+          ? 404
+          : 400;
+      return reply.status(status).send({
+        error: error instanceof AppError ? error.code : 'COUPON_DELETE_FAILED',
+        message:
+          error instanceof AppError ? error.message : 'Falha ao excluir cupom',
       });
     }
   });

@@ -1,5 +1,10 @@
 import type { Product, ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 
+export * from './shopee-affiliate-offers';
+export * from './manual-shopee-affiliate-offer-provider';
+export * from './mock-shopee-affiliate-offer-provider';
+export * from './official-shopee-affiliate-offer-provider';
+
 export {
   EvolutionApiWhatsAppProvider,
   type EvolutionApiWhatsAppProviderOptions,

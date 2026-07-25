@@ -12,6 +12,22 @@ const positiveIntegerFromEnv = z.preprocess(
   z.number().int().positive(),
 );
 
+const optionalTrimmedString = z.preprocess(
+  (value) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z.string().trim().optional(),
+);
+
+const optionalUrlFromEnv = z.preprocess(
+  (value) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z
+    .string()
+    .url()
+    .transform((value) => value.replace(/\/+$/, ''))
+    .optional(),
+);
+
 const destinationListFromEnv = z
   .string()
   .default('')
@@ -86,6 +102,15 @@ export const envSchema = z
     OPENAI_API_KEY: z.string().optional(),
     SHOPEE_PARTNER_ID: z.string().optional(),
     SHOPEE_PARTNER_KEY: z.string().optional(),
+    SHOPEE_AFFILIATE_PROVIDER: z
+      .enum(['mock', 'manual', 'official'])
+      .default('mock'),
+    SHOPEE_AFFILIATE_API_ENABLED: booleanFromEnv.default(false),
+    SHOPEE_AFFILIATE_APP_ID: optionalTrimmedString,
+    SHOPEE_AFFILIATE_SECRET: optionalTrimmedString,
+    SHOPEE_AFFILIATE_API_URL: optionalUrlFromEnv,
+    SHOPEE_AFFILIATE_SUB_ID_PREFIX: z.string().trim().default('whatsapp'),
+    SHOPEE_AFFILIATE_SYNC_LIMIT: positiveIntegerFromEnv.default(20),
     WHATSAPP_PROVIDER: z.enum(['mock', 'evolution']).default('mock'),
     EVOLUTION_API_URL: z
       .string()
@@ -104,6 +129,30 @@ export const envSchema = z
     SCHEDULER_TIMEZONE: z.string().trim().optional(),
   })
   .superRefine((env, context) => {
+    if (env.SHOPEE_AFFILIATE_PROVIDER === 'official') {
+      if (!env.SHOPEE_AFFILIATE_API_ENABLED) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SHOPEE_AFFILIATE_API_ENABLED'],
+          message:
+            'SHOPEE_AFFILIATE_API_ENABLED deve ser true quando o provider e official',
+        });
+      }
+      for (const field of [
+        'SHOPEE_AFFILIATE_API_URL',
+        'SHOPEE_AFFILIATE_APP_ID',
+        'SHOPEE_AFFILIATE_SECRET',
+      ] as const) {
+        if (!env[field]) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message: `${field} e obrigatoria quando SHOPEE_AFFILIATE_PROVIDER=official`,
+          });
+        }
+      }
+    }
+
     if (env.WHATSAPP_PROVIDER === 'evolution') {
       for (const field of [
         'EVOLUTION_API_URL',
