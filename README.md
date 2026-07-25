@@ -21,8 +21,8 @@ Monorepo com pnpm workspaces e Turborepo para automatizar um pipeline afiliado m
 
 ## Requisitos
 
-- Node.js 20+
-- pnpm 9+
+- Node.js 20.6+; o runtime tambem e validado no Node.js 24.15.0.
+- pnpm 9.12.3 via Corepack; nao e necessario instalar pnpm globalmente.
 - Docker e Docker Compose
 
 ## Como executar
@@ -40,10 +40,15 @@ A API ficará disponível em `http://localhost:3333/health` e o dashboard em `ht
 Para executar cada parte separadamente:
 
 ```bash
-pnpm --filter @shopee-auto-affiliate-ai/api dev
+corepack pnpm --filter @shopee-auto-affiliate-ai/api dev
 pnpm --filter @shopee-auto-affiliate-ai/worker dev
 pnpm --filter @shopee-auto-affiliate-ai/dashboard dev
 ```
+
+Com o `.env` local ja configurado, a API inicia com esse unico comando depois
+de `git pull` e `corepack pnpm install --frozen-lockfile`; nao e necessario
+compilar os pacotes antes. O atalho `corepack pnpm dev:api` executa o mesmo
+fluxo.
 
 O dashboard usa `NEXT_PUBLIC_API_URL` para encontrar a API. Em desenvolvimento,
 use:
@@ -81,6 +86,9 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 ## Scripts
 
 - `pnpm dev`: inicia os apps em modo desenvolvimento via Turborepo.
+- `pnpm dev:api`: inicia somente a API com a resolucao ESM de desenvolvimento.
+- `pnpm test:runtime`: inicia a API em ambiente controlado, consulta `/health`
+  e encerra o processo filho.
 - `pnpm evolution:init`: cria a configuração local ignorada da Evolution API
   com segredos aleatórios, sem exibi-los.
 - `pnpm evolution:up`: sobe Evolution API, PostgreSQL e Redis isolados.
@@ -95,6 +103,29 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
 - `pnpm test`: executa os testes mínimos.
+
+## Runtime ESM dos workspaces
+
+Pacotes compilados continuam com contrato ESM por `type: "module"`, JavaScript
+em `dist/index.js` e tipos em `dist/index.d.ts`. Typecheck e build podem resolver
+as declaracoes de `dist`, mas arquivos `.d.ts` nunca sao entrypoints de runtime.
+
+Todo comando executado por `tsx` usa `tsconfig.runtime.json`, que mapeia os
+pacotes internos explicitamente para `packages/*/src/index.ts`. Isso evita que o
+loader aplique os `paths` de build da API e tente executar
+`packages/shared/dist/index.d.ts` como modulo vazio. O desenvolvimento carrega
+fontes TypeScript; a execucao compilada continua apontando para JavaScript em
+`dist`.
+
+O erro ficou evidente no Node.js 24.15.0, mas era uma ambiguidade anterior de
+resolucao, nao um cache corrompido. Limpar `dist`, reiniciar o terminal ou
+instalar pnpm globalmente nao faz parte da solucao.
+
+O smoke test `apps/api/test/runtime-esm.test.ts` inicia `src/server.ts` com o
+loader local do `tsx`, porta livre e ambiente mock controlado. Ele exige HTTP
+200 e `{ "status": "ok", "service": "api" }` em `/health`, confirma que o
+processo permanece ativo e o encerra sem Scheduler, Evolution, pipeline ou
+mensagens.
 
 ## Infraestrutura local da Evolution API
 
