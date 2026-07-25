@@ -567,3 +567,62 @@ Restricoes:
 - Nao criar campos ou acoes para editar, ativar ou desativar Scheduler.
 - Nao criar acoes sem endpoint existente, como envio manual real ou
   reprocessamento manual de dispatch.
+
+## Commercial Pipeline Dry Run
+
+Responsabilidade:
+
+- Preparar uma unica oportunidade comercial a partir do catalogo persistido.
+- Validar elegibilidade, calcular score pela formula existente e ordenar sem
+  aleatoriedade.
+- Exigir exatamente um grupo autorizado/disponivel da instancia atual.
+- Gerar copy final sem cupom e registrar somente um dry-run sanitizado.
+
+Dependencias:
+
+- `ShopeeOfferRepository` para candidatos `MOCK` ou `MANUAL`.
+- `WhatsAppGroupDirectoryRepository` para o unico grupo elegivel.
+- `ScoreService.calculate`; nao existe segunda formula.
+- `CommercialCopyService`, sem persistencia em `GeneratedCopy`.
+- `CommercialDeliveryHistoryRepository` para dispatches `SENT` e futuras runs
+  `CONFIRMED`.
+- `CommercialPipelineRunRepository` e adaptador Prisma.
+- Logger seguro e relogio injetavel.
+
+Elegibilidade e ranking:
+
+- Oferta indisponivel, expirada, ainda nao iniciada, sem link afiliado HTTP/HTTPS
+  ou com dados comerciais invalidos e rejeitada com codigo estruturado.
+- O score minimo padrao e 70; o limite e 20, com teto 100 candidatos.
+- Ordem: score, comissao, vendas, desconto, avaliacao e `providerProductId`.
+- Produto ja entregue ao grupo recebe `ALREADY_SENT_TO_GROUP`; dry-run anterior
+  nao e entrega.
+
+Grupo e resultado:
+
+- Somente `GROUP`, ativo, disponivel, da instancia atual e com fingerprint
+  valido.
+- Zero grupo bloqueia com `NO_AUTHORIZED_GROUP`; mais de um bloqueia com
+  `MULTIPLE_AUTHORIZED_GROUPS`.
+- O resultado contem ID interno, nome e fingerprint; nunca identificador
+  externo.
+- Copy usa nome, preco, desconto opcional, loja, CTA e link persistido. Nao usa
+  cupom, comissao, score ou urgencia falsa.
+- Sub_ids sao planejados pelos utilitarios existentes e nao alteram o link.
+
+Persistencia e operacao:
+
+- `CommercialPipelineRun` aceita enums futuros, mas esta task cria somente
+  `DRY_RUN`.
+- `POST /commercial-pipeline/dry-run` e as rotas de historico nao recebem fila,
+  dispatch, Scheduler, Sender ou provider Evolution.
+- `corepack pnpm commercial:dry-run` usa PostgreSQL local, sincroniza apenas o
+  mock ficticio quando selecionado e bloqueia official, Scheduler, group send e
+  flags de confirmacao/envio.
+- O dashboard oferece somente executar dry-run, copiar preview e consultar
+  historico.
+
+Proximo passo:
+
+- Task 16.2 deve definir controles de confirmacao, autorizacao e idempotencia em
+  revisao separada antes de qualquer dispatch, job ou mensagem.

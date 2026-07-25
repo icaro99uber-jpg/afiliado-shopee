@@ -89,7 +89,20 @@ describe('envSchema Shopee Affiliate', () => {
     expect(config.SHOPEE_AFFILIATE_API_ENABLED).toBe(false);
     expect(config.SHOPEE_AFFILIATE_SUB_ID_PREFIX).toBe('whatsapp');
     expect(config.SHOPEE_AFFILIATE_SYNC_LIMIT).toBe(20);
+    expect(config.COMMERCIAL_COPY_MAX_LENGTH).toBe(1000);
   });
+
+  it.each(['0', '-1', '1.5', 'invalid'])(
+    'rejeita tamanho comercial que nao seja inteiro positivo: %s',
+    (maximumLength) => {
+      expect(
+        envSchema.safeParse({
+          ...baseEnv,
+          COMMERCIAL_COPY_MAX_LENGTH: maximumLength,
+        }).success,
+      ).toBe(false);
+    },
+  );
 
   it('permite manual sem credenciais', () => {
     expect(

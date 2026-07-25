@@ -35,6 +35,8 @@ const start = async () => {
     groupInstanceName: config.EVOLUTION_INSTANCE_NAME,
     shopeeOfferProvider,
     shopeeMaxOffersPerSync: config.SHOPEE_AFFILIATE_SYNC_LIMIT,
+    shopeeSubIdPrefix: config.SHOPEE_AFFILIATE_SUB_ID_PREFIX,
+    commercialCopyMaxLength: config.COMMERCIAL_COPY_MAX_LENGTH,
   });
   await app.listen({ host: '0.0.0.0', port: config.PORT });
 };

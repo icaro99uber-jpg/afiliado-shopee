@@ -62,6 +62,10 @@ class MemoryOfferRepository implements ShopeeOfferRepository {
     void filters;
     return { items: [...this.store.values()], total: this.store.size };
   }
+
+  async listCommercialCandidates() {
+    return [...this.store.values()];
+  }
 }
 
 const manual = (overrides: Record<string, unknown> = {}) => ({

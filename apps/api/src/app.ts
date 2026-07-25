@@ -28,6 +28,7 @@ import {
 } from '@shopee-auto-affiliate-ai/queue';
 import {
   createApplicationServices,
+  createCommercialPipelineService,
   createPrismaRepositories,
 } from './application-services';
 import type { AnalyticsService } from './analytics-service';
@@ -37,6 +38,10 @@ import {
   type WhatsAppGroupPublic,
 } from './group-directory-service';
 import { ShopeeOfferSyncService } from './shopee-offer-sync-service';
+import type {
+  CommercialPipelineInput,
+  CommercialPipelineService,
+} from './commercial-pipeline-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -66,6 +71,12 @@ type BuildAppOptions = {
   >;
   shopeeOfferProvider?: ShopeeAffiliateOfferProvider;
   shopeeMaxOffersPerSync?: number;
+  shopeeSubIdPrefix?: string;
+  commercialCopyMaxLength?: number;
+  commercialPipelineService?: Pick<
+    CommercialPipelineService,
+    'dryRun' | 'listRuns' | 'findRun'
+  >;
 };
 
 type PipelineJobLike = {
@@ -112,6 +123,66 @@ const offerStatus = (offer: { unavailableAt?: Date; offerEndsAt?: Date }) =>
     : offer.offerEndsAt && offer.offerEndsAt <= new Date()
       ? ('EXPIRED' as const)
       : ('ACTIVE' as const);
+
+const COMMERCIAL_INPUT_FIELDS = new Set([
+  'source',
+  'categoryId',
+  'minPrice',
+  'maxPrice',
+  'minDiscountRate',
+  'minRating',
+  'minSales',
+  'minCommissionRate',
+  'minimumScore',
+  'campaign',
+  'limitCandidates',
+]);
+
+const parseCommercialPipelineInput = (
+  body: unknown,
+): CommercialPipelineInput => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new AppError(
+      'Body do pipeline comercial e invalido',
+      'INVALID_PIPELINE_FILTERS',
+    );
+  }
+  const record = body as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !COMMERCIAL_INPUT_FIELDS.has(key))) {
+    throw new AppError(
+      'O body contem campos nao permitidos',
+      'INVALID_PIPELINE_FILTERS',
+    );
+  }
+  const input: CommercialPipelineInput = {};
+  if (record.source !== undefined) {
+    if (!['MOCK', 'MANUAL'].includes(String(record.source).toUpperCase()))
+      throw new AppError('source invalido', 'INVALID_PIPELINE_FILTERS');
+    input.source = String(record.source).toUpperCase() as 'MOCK' | 'MANUAL';
+  }
+  for (const field of [
+    'minPrice',
+    'maxPrice',
+    'minDiscountRate',
+    'minRating',
+    'minSales',
+    'minCommissionRate',
+    'minimumScore',
+    'limitCandidates',
+  ] as const) {
+    if (record[field] === undefined) continue;
+    if (typeof record[field] !== 'number' || !Number.isFinite(record[field]))
+      throw new AppError(`${field} invalido`, 'INVALID_PIPELINE_FILTERS');
+    input[field] = record[field];
+  }
+  for (const field of ['categoryId', 'campaign'] as const) {
+    if (record[field] === undefined) continue;
+    if (typeof record[field] !== 'string')
+      throw new AppError(`${field} invalido`, 'INVALID_PIPELINE_FILTERS');
+    input[field] = record[field];
+  }
+  return input;
+};
 
 export const sanitizeDispatchDestination = (destination: {
   destination: string;
@@ -186,6 +257,18 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       shopeeMaxOffersPerSync: options.shopeeMaxOffersPerSync ?? 20,
       logger: app.log,
     });
+  let commercialPipelineService = options.commercialPipelineService;
+  const getCommercialPipelineService = () => {
+    commercialPipelineService ??= createCommercialPipelineService({
+      repositories,
+      score: getApplicationServices().score,
+      instanceName: options.groupInstanceName ?? 'affiliate-bot',
+      subIdPrefix: options.shopeeSubIdPrefix ?? 'whatsapp',
+      maximumCopyLength: options.commercialCopyMaxLength ?? 1000,
+      logger: app.log,
+    });
+    return commercialPipelineService;
+  };
 
   await app.register(cors, { origin: true });
 
@@ -516,6 +599,107 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           .send({ error: error.code, message: error.message });
       }
       throw error;
+    }
+  });
+
+  app.post('/commercial-pipeline/dry-run', async (request, reply) => {
+    try {
+      const input = parseCommercialPipelineInput(request.body ?? {});
+      return await getCommercialPipelineService().dryRun(input);
+    } catch (error) {
+      const code =
+        error instanceof AppError ? error.code : 'COMMERCIAL_PIPELINE_FAILED';
+      const status =
+        code === 'INVALID_PIPELINE_FILTERS'
+          ? 400
+          : [
+                'NO_ELIGIBLE_PRODUCT',
+                'NO_AUTHORIZED_GROUP',
+                'MULTIPLE_AUTHORIZED_GROUPS',
+                'PRODUCT_ALREADY_SENT',
+              ].includes(code)
+            ? 409
+            : 500;
+      request.log.error(
+        { event: 'commercial-pipeline.route.failed', code },
+        'Commercial pipeline route failed',
+      );
+      return reply.status(status).send({
+        error: code,
+        message:
+          error instanceof AppError
+            ? error.message
+            : 'Falha segura no pipeline comercial',
+      });
+    }
+  });
+
+  app.get('/commercial-pipeline/runs', async (request, reply) => {
+    try {
+      const query = request.query as Record<string, unknown>;
+      const status =
+        query.status === undefined
+          ? undefined
+          : String(query.status).toUpperCase();
+      const mode =
+        query.mode === undefined
+          ? undefined
+          : String(query.mode).toUpperCase().replace('-', '_');
+      if (
+        (status &&
+          !['STARTED', 'COMPLETED', 'BLOCKED', 'FAILED'].includes(status)) ||
+        (mode && !['DRY_RUN', 'CONFIRMED'].includes(mode)) ||
+        (query.productId !== undefined && typeof query.productId !== 'string')
+      ) {
+        throw new AppError(
+          'Filtros de historico invalidos',
+          'INVALID_PIPELINE_FILTERS',
+        );
+      }
+      return await getCommercialPipelineService().listRuns({
+        status: status as
+          'STARTED' | 'COMPLETED' | 'BLOCKED' | 'FAILED' | undefined,
+        mode: mode as 'DRY_RUN' | 'CONFIRMED' | undefined,
+        productId:
+          typeof query.productId === 'string'
+            ? query.productId.trim() || undefined
+            : undefined,
+        page: parsePositiveInteger(query.page, 1, 100000),
+        limit: parsePositiveInteger(query.limit, 20, 100),
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        return reply.status(400).send({
+          error: 'INVALID_PIPELINE_FILTERS',
+          message: 'Filtros de historico invalidos',
+        });
+      }
+      return reply.status(500).send({
+        error: 'COMMERCIAL_PIPELINE_FAILED',
+        message: 'Falha ao consultar historico comercial',
+      });
+    }
+  });
+
+  app.get('/commercial-pipeline/runs/:id', async (request, reply) => {
+    try {
+      return await getCommercialPipelineService().findRun(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      if (
+        error instanceof AppError &&
+        error.code === 'COMMERCIAL_PIPELINE_RUN_NOT_FOUND'
+      ) {
+        return reply.status(404).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+      return reply.status(500).send({
+        error: 'COMMERCIAL_PIPELINE_FAILED',
+        message: 'Falha ao consultar execucao comercial',
+      });
     }
   });
 

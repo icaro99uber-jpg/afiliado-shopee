@@ -16,8 +16,12 @@ import { AnalyticsService } from './analytics-service';
 import { ShopeeOfferSyncService } from './shopee-offer-sync-service';
 import { CouponService } from './coupon-service';
 import { CopyPreviewService } from './copy-preview-service';
+import { CommercialCopyService } from './commercial-copy-service';
+import { CommercialPipelineService } from './commercial-pipeline-service';
 import {
   PrismaAnalyticsRepository,
+  PrismaCommercialDeliveryHistoryRepository,
+  PrismaCommercialPipelineRunRepository,
   PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
   PrismaProductRepository,
@@ -28,6 +32,8 @@ import {
 } from './prisma-repositories';
 import type {
   AnalyticsRepository,
+  CommercialDeliveryHistoryRepository,
+  CommercialPipelineRunRepository,
   CouponRepository,
   GeneratedCopyRepository,
   ProductRepository,
@@ -55,6 +61,8 @@ export type ApplicationRepositories = {
   whatsappGroups: WhatsAppGroupDirectoryRepository;
   shopeeOffers: ShopeeOfferRepository;
   coupons: CouponRepository;
+  commercialRuns: CommercialPipelineRunRepository;
+  commercialDeliveryHistory: CommercialDeliveryHistoryRepository;
 };
 
 export type ApplicationServices = {
@@ -68,6 +76,39 @@ export type ApplicationServices = {
   coupons: CouponService;
   copyPreview: CopyPreviewService;
 };
+
+export const createCommercialPipelineService = ({
+  repositories,
+  score,
+  instanceName,
+  subIdPrefix,
+  maximumCopyLength,
+  logger,
+}: {
+  repositories: Pick<
+    ApplicationRepositories,
+    | 'shopeeOffers'
+    | 'whatsappGroups'
+    | 'commercialRuns'
+    | 'commercialDeliveryHistory'
+  >;
+  score: Pick<ScoreService, 'calculate'>;
+  instanceName: string;
+  subIdPrefix: string;
+  maximumCopyLength: number;
+  logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+}) =>
+  new CommercialPipelineService({
+    offers: repositories.shopeeOffers,
+    groups: repositories.whatsappGroups,
+    score,
+    copy: new CommercialCopyService(maximumCopyLength),
+    runs: repositories.commercialRuns,
+    deliveryHistory: repositories.commercialDeliveryHistory,
+    instanceName,
+    subIdPrefix,
+    logger,
+  });
 
 export const createSenderService = ({
   repositories,
@@ -103,6 +144,10 @@ export const createPrismaRepositories = (
   whatsappGroups: new PrismaWhatsAppGroupDirectoryRepository(prisma),
   shopeeOffers: new PrismaShopeeOfferRepository(prisma),
   coupons: new PrismaCouponRepository(prisma),
+  commercialRuns: new PrismaCommercialPipelineRunRepository(prisma),
+  commercialDeliveryHistory: new PrismaCommercialDeliveryHistoryRepository(
+    prisma,
+  ),
 });
 
 export const createApplicationServices = ({

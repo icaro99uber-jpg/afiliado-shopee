@@ -1,0 +1,228 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import { buildApp } from '../src/app';
+
+const result = {
+  runId: 'run-safe-1',
+  mode: 'dry-run' as const,
+  status: 'ready' as const,
+  provider: 'mock' as const,
+  candidateCount: 2,
+  eligibleCount: 1,
+  rejectedCount: 1,
+  rejectionSummary: { SCORE_BELOW_MINIMUM: 1 },
+  selectedProduct: {
+    id: 'product-safe-1',
+    name: 'Produto ficticio',
+    price: '99.90',
+    score: 82,
+    affiliateLinkPresent: true as const,
+  },
+  selectedGroup: {
+    id: 'group-safe-1',
+    name: 'Grupo ficticio',
+    fingerprint: 'grp_123456789abc',
+  },
+  selectionReasons: ['Maior score elegivel: 82'],
+  copyPreview:
+    'Oferta ficticia\nhttps://example.invalid/affiliate/product-safe-1',
+  plannedSubIds: ['whatsapp', 'whatsapp', 'grp_123456789abc'],
+  dispatchWillBeCreated: false as const,
+  jobWillBeCreated: false as const,
+  messageWillBeSent: false as const,
+};
+
+const runHistory = {
+  id: 'run-safe-1',
+  mode: 'dry-run',
+  status: 'completed',
+  selectedProduct: result.selectedProduct,
+  selectedGroup: result.selectedGroup,
+  candidateCount: 2,
+  eligibleCount: 1,
+  rejectedCount: 1,
+  rejectionSummary: result.rejectionSummary,
+  selectionReasons: result.selectionReasons,
+  copyPreview: result.copyPreview,
+  plannedSubIds: result.plannedSubIds,
+  failureCode: null,
+  createdAt: '2026-07-25T12:00:00.000Z',
+  completedAt: '2026-07-25T12:00:01.000Z',
+  dispatchWasCreated: false,
+  jobWasCreated: false,
+  messageWasSent: false,
+};
+
+const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
+
+const setup = async (dryRun = vi.fn().mockResolvedValue(result)) => {
+  const pipelineAdd = vi.fn();
+  const commercialPipelineService = {
+    dryRun,
+    listRuns: vi.fn().mockResolvedValue({
+      items: [runHistory],
+      page: 1,
+      limit: 20,
+      total: 1,
+      totalPages: 1,
+    }),
+    findRun: vi.fn().mockResolvedValue(runHistory),
+  };
+  const app = await buildApp({
+    logger: false,
+    prisma: {} as never,
+    pipelineQueue: { add: pipelineAdd },
+    commercialPipelineService,
+  });
+  apps.push(app);
+  return { app, commercialPipelineService, pipelineAdd };
+};
+
+afterEach(async () => {
+  await Promise.all(apps.splice(0).map((app) => app.close()));
+});
+
+describe('Commercial pipeline API', () => {
+  it('retorna preview pronto sem fila ou dispatch', async () => {
+    const { app, pipelineAdd } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload: {},
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(result);
+    expect(response.json()).toMatchObject({
+      dispatchWillBeCreated: false,
+      jobWillBeCreated: false,
+      messageWillBeSent: false,
+    });
+    expect(pipelineAdd).not.toHaveBeenCalled();
+  });
+
+  it('aceita somente os filtros comerciais permitidos', async () => {
+    const { app, commercialPipelineService } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload: {
+        source: 'manual',
+        categoryId: 'cat-1',
+        minPrice: 10,
+        maxPrice: 100,
+        minDiscountRate: 5,
+        minRating: 4,
+        minSales: 10,
+        minCommissionRate: 3,
+        minimumScore: 70,
+        campaign: 'teste-local',
+        limitCandidates: 20,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(commercialPipelineService.dryRun).toHaveBeenCalledWith({
+      source: 'MANUAL',
+      categoryId: 'cat-1',
+      minPrice: 10,
+      maxPrice: 100,
+      minDiscountRate: 5,
+      minRating: 4,
+      minSales: 10,
+      minCommissionRate: 3,
+      minimumScore: 70,
+      campaign: 'teste-local',
+      limitCandidates: 20,
+    });
+  });
+
+  it.each([
+    ['body invalido', []],
+    ['coupon rejeitado', { coupon: 'FAKE' }],
+    ['groupId rejeitado', { groupId: 'group' }],
+    ['message rejeitado', { message: 'texto' }],
+    ['send rejeitado', { send: true }],
+  ])('%s', async (_, payload) => {
+    const { app, commercialPipelineService } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'INVALID_PIPELINE_FILTERS',
+      message: expect.any(String),
+    });
+    expect(commercialPipelineService.dryRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'NO_ELIGIBLE_PRODUCT',
+    'NO_AUTHORIZED_GROUP',
+    'MULTIPLE_AUTHORIZED_GROUPS',
+    'PRODUCT_ALREADY_SENT',
+  ])('retorna bloqueio publico %s', async (code) => {
+    const { app } = await setup(
+      vi.fn().mockRejectedValue(new AppError('Bloqueio seguro', code)),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload: {},
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: code,
+      message: 'Bloqueio seguro',
+    });
+  });
+
+  it('sanitiza erro inesperado', async () => {
+    const { app } = await setup(
+      vi.fn().mockRejectedValue(new Error('database detail')),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload: {},
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({
+      error: 'COMMERCIAL_PIPELINE_FAILED',
+      message: 'Falha segura no pipeline comercial',
+    });
+    expect(response.body).not.toContain('database detail');
+  });
+
+  it('lista runs sanitizados com filtros e paginacao', async () => {
+    const { app, commercialPipelineService } = await setup();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/commercial-pipeline/runs?status=completed&mode=dry-run&productId=product-safe-1&page=1&limit=20',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toEqual([runHistory]);
+    expect(commercialPipelineService.listRuns).toHaveBeenCalledWith({
+      status: 'COMPLETED',
+      mode: 'DRY_RUN',
+      productId: 'product-safe-1',
+      page: 1,
+      limit: 20,
+    });
+    expect(response.body).not.toContain('@g.us');
+  });
+
+  it('retorna detalhe sanitizado de run', async () => {
+    const { app, commercialPipelineService } = await setup();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/commercial-pipeline/runs/run-safe-1',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(runHistory);
+    expect(commercialPipelineService.findRun).toHaveBeenCalledWith(
+      'run-safe-1',
+    );
+    expect(response.body).not.toContain('@g.us');
+  });
+});
