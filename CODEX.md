@@ -45,6 +45,9 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
 - Analytics: contrato, adaptador Prisma, servico de snapshot e endpoint `GET /analytics` em `apps/api`, consumido pela visao geral do dashboard.
 - Configuracao: validacao de variaveis de ambiente com Zod em `packages/config`.
 - Shared: tipos, erros e utilitarios comuns em `packages/shared`.
+- Runtime ESM: `tsconfig.runtime.json` direciona todos os entrypoints `tsx`
+  para os fontes dos pacotes, enquanto build/typecheck usam os contratos de
+  declaracao e JavaScript compilado em `dist`.
 
 ## Dashboard operacional
 
@@ -372,6 +375,34 @@ Arquivos principais na raiz:
 - Implementacoes Prisma devem permanecer atras dos contratos de repositorio.
 - Novos servicos de aplicacao devem receber dependencias por construtor/factory.
 - Manter formatacao compativel com Prettier e validacao por ESLint.
+
+## Resolucao ESM em desenvolvimento
+
+Pacotes do workspace sao ESM explicitos por `type: "module"`. Seus entrypoints
+compilados permanecem em `dist/index.js`, acompanhados por `dist/index.d.ts`.
+Declaracoes servem somente ao TypeScript e nunca podem ser carregadas pelo
+runtime.
+
+O `apps/api/tsconfig.json` possui paths de build para declaracoes em `dist`. Se
+o `tsx` usar esse arquivo automaticamente, ele resolve imports como
+`@shopee-auto-affiliate-ai/shared` para `dist/index.d.ts`; esse modulo nao tem
+exports de valor e provoca erro ESM para `AppError`. Por isso todos os scripts
+`tsx` da API e do worker informam `../../tsconfig.runtime.json`, que mapeia cada
+pacote para seu `src/index.ts`.
+
+Regras:
+
+- desenvolvimento e CLIs com `tsx`: usar sempre `tsconfig.runtime.json`;
+- build/typecheck: manter o tsconfig proprio de cada pacote;
+- producao compilada: resolver JavaScript em `dist`, nunca TypeScript cru;
+- nao corrigir falhas de resolucao apagando cache ou `dist`;
+- `corepack pnpm --filter @shopee-auto-affiliate-ai/api dev` deve funcionar sem
+  build manual anterior;
+- `corepack pnpm test:runtime` valida a cadeia API -> providers -> shared,
+  consulta `/health` em ambiente mock e encerra o processo filho.
+
+O suporte declarado e Node.js 20.6 ou superior. O hotfix foi reproduzido e
+validado no Node.js 24.15.0 com `tsx` 4.23.1.
 
 ## Regras de commits
 

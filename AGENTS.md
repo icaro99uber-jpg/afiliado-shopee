@@ -13,6 +13,25 @@ Este documento descreve os agentes e componentes de orquestracao atuais do proje
 
 Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
 
+## Runtime ESM dos componentes
+
+- API e worker executados por `tsx` usam obrigatoriamente
+  `tsconfig.runtime.json` na raiz.
+- O arquivo de runtime resolve `config`, `database`, `providers`, `queue`,
+  `shared` e `agents` para seus `src/index.ts`.
+- Os tsconfigs de build podem apontar tipos para `dist/index.d.ts`, mas uma
+  declaracao `.d.ts` nunca pode ser usada como modulo em execucao.
+- Pacotes compilados continuam ESM por `type: "module"` e resolvem JavaScript
+  em `dist/index.js`; nao existem imports relativos cruzando pacotes.
+- O smoke `corepack pnpm test:runtime` inicia a API com ambiente mock,
+  Scheduler desativado e porta livre, valida `GET /health` com HTTP 200, garante
+  que o processo permaneceu ativo e o encerra.
+- O comando leigo suportado e
+  `corepack pnpm --filter @shopee-auto-affiliate-ai/api dev`, sem build manual e
+  sem pnpm global.
+- Suporte minimo: Node.js 20.6. O runtime foi validado no Node.js 24.15.0 e
+  `tsx` 4.23.1.
+
 ## Hunter
 
 Responsabilidade:
