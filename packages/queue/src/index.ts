@@ -6,6 +6,12 @@ import type {
   PipelineSchedulerState,
   SchedulerConfig,
 } from './scheduler';
+import type {
+  CommercialAutomationMode,
+  CommercialAutomationScheduler,
+  CommercialAutomationSchedulerConfig,
+  CommercialAutomationSchedulerState,
+} from './commercial-scheduler';
 
 export type { JobsOptions };
 export type {
@@ -14,18 +20,29 @@ export type {
   PipelineSchedulerStatus,
   SchedulerConfig,
 } from './scheduler';
+export type {
+  CommercialAutomationMode,
+  CommercialAutomationScheduler,
+  CommercialAutomationSchedulerConfig,
+  CommercialAutomationSchedulerState,
+  CommercialAutomationSchedulerStatus,
+} from './commercial-scheduler';
 
 export const QUEUE_NAMES = {
   productPipeline: 'product-pipeline',
   whatsappDispatch: 'whatsapp-dispatch',
+  commercialAutomation: 'commercial-automation',
 } as const;
 
 export const JOB_NAMES = {
   pipelineProduct: 'pipeline-product',
   whatsappDispatch: 'whatsapp-dispatch',
+  commercialAutomationTick: 'commercial-automation-tick',
 } as const;
 
 export const DEFAULT_PIPELINE_SCHEDULER_JOB_ID = 'scheduled-pipeline-product';
+export const DEFAULT_COMMERCIAL_AUTOMATION_SCHEDULER_JOB_ID =
+  'scheduled-commercial-automation';
 
 export const DEFAULT_WHATSAPP_DISPATCH_JOB_OPTIONS: JobsOptions = {
   attempts: 3,
@@ -40,6 +57,12 @@ export const CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS: JobsOptions = {
   removeOnFail: false,
 };
 
+export const COMMERCIAL_AUTOMATION_JOB_OPTIONS: JobsOptions = {
+  attempts: 1,
+  removeOnComplete: false,
+  removeOnFail: false,
+};
+
 export const createRedisConnection = (url: string) =>
   new IORedis(url, { maxRetriesPerRequest: null });
 
@@ -49,8 +72,14 @@ export const createProductPipelineQueue = (connection: IORedis) =>
 export const createWhatsAppDispatchQueue = (connection: IORedis) =>
   new Queue<WhatsAppDispatchJob>(QUEUE_NAMES.whatsappDispatch, { connection });
 
+export const createCommercialAutomationQueue = (connection: IORedis) =>
+  new Queue<CommercialAutomationJob>(QUEUE_NAMES.commercialAutomation, {
+    connection,
+  });
+
 export type PipelineProductJob = { filters?: ProductFilters };
 export type WhatsAppDispatchJob = { dispatchId: string };
+export type CommercialAutomationJob = { mode: CommercialAutomationMode };
 
 export const enqueuePipelineProduct = (
   queue: Queue<PipelineProductJob>,
@@ -180,3 +209,98 @@ export class BullMqPipelineScheduler implements PipelineScheduler {
 export const createBullMqPipelineScheduler = (
   queue: Queue<PipelineProductJob>,
 ) => new BullMqPipelineScheduler(queue);
+
+type CommercialJobSchedulerJson = JobSchedulerJson<CommercialAutomationJob> & {
+  template?: {
+    data?: CommercialAutomationJob;
+    opts?: JobsOptions;
+  };
+};
+
+export type BullMqCommercialAutomationSchedulerQueue = {
+  upsertJobScheduler: (
+    jobSchedulerId: string,
+    repeatOptions: { pattern: string; tz: string },
+    template: {
+      name: typeof JOB_NAMES.commercialAutomationTick;
+      data: CommercialAutomationJob;
+      opts: JobsOptions;
+    },
+  ) => Promise<unknown>;
+  getJobScheduler: (
+    jobSchedulerId: string,
+  ) => Promise<CommercialJobSchedulerJson | undefined>;
+  removeJobScheduler: (jobSchedulerId: string) => Promise<boolean>;
+};
+
+const toCommercialSchedulerState = (
+  jobId: string,
+  mode: CommercialAutomationMode,
+  scheduler?: CommercialJobSchedulerJson,
+): CommercialAutomationSchedulerState => ({
+  jobId,
+  status: scheduler ? 'registered' : 'not-registered',
+  cronExpression: scheduler?.pattern ?? null,
+  timezone: scheduler?.tz ?? null,
+  mode: scheduler?.template?.data?.mode ?? mode,
+  nextRunAt: scheduler?.next ? new Date(scheduler.next).toISOString() : null,
+});
+
+export class BullMqCommercialAutomationScheduler implements CommercialAutomationScheduler {
+  constructor(
+    private readonly queue: BullMqCommercialAutomationSchedulerQueue,
+  ) {}
+
+  async register(
+    config: CommercialAutomationSchedulerConfig,
+  ): Promise<CommercialAutomationSchedulerState> {
+    if (!config.enabled) {
+      return {
+        jobId: config.jobId,
+        status: 'disabled',
+        cronExpression: config.cronExpression,
+        timezone: config.timezone,
+        mode: config.mode,
+        nextRunAt: null,
+      };
+    }
+    const existing = await this.queue.getJobScheduler(config.jobId);
+    if (
+      existing?.name !== JOB_NAMES.commercialAutomationTick ||
+      existing.pattern !== config.cronExpression ||
+      existing.tz !== config.timezone ||
+      existing.template?.data?.mode !== config.mode ||
+      existing.template?.opts?.attempts !== 1 ||
+      existing.template?.opts?.removeOnComplete !== false ||
+      existing.template?.opts?.removeOnFail !== false
+    ) {
+      await this.queue.upsertJobScheduler(
+        config.jobId,
+        { pattern: config.cronExpression, tz: config.timezone },
+        {
+          name: JOB_NAMES.commercialAutomationTick,
+          data: { mode: config.mode },
+          opts: COMMERCIAL_AUTOMATION_JOB_OPTIONS,
+        },
+      );
+    }
+    return this.getState(config.jobId, config.mode);
+  }
+
+  async remove(jobId: string) {
+    await this.queue.removeJobScheduler(jobId);
+    return this.getState(jobId, 'preview');
+  }
+
+  async getState(jobId: string, mode: CommercialAutomationMode) {
+    return toCommercialSchedulerState(
+      jobId,
+      mode,
+      await this.queue.getJobScheduler(jobId),
+    );
+  }
+}
+
+export const createBullMqCommercialAutomationScheduler = (
+  queue: Queue<CommercialAutomationJob>,
+) => new BullMqCommercialAutomationScheduler(queue);

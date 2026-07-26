@@ -66,6 +66,97 @@ describe('envSchema automacao comercial', () => {
   });
 });
 
+describe('envSchema Scheduler comercial', () => {
+  it('usa Scheduler desligado e preview por padrao', () => {
+    const config = envSchema.parse(baseEnv);
+    expect(config.COMMERCIAL_SCHEDULER_ENABLED).toBe(false);
+    expect(config.COMMERCIAL_SCHEDULER_CRON).toBe('0 9 * * *');
+    expect(config.COMMERCIAL_SCHEDULER_TIMEZONE).toBe('America/Sao_Paulo');
+    expect(config.COMMERCIAL_AUTOMATION_MODE).toBe('preview');
+  });
+
+  it('valida cron, timezone e modo comerciais', () => {
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_SCHEDULER_CRON: 'cron-invalido',
+      }).success,
+    ).toBe(false);
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_SCHEDULER_TIMEZONE: 'Timezone/Inexistente',
+      }).success,
+    ).toBe(false);
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_AUTOMATION_MODE: 'invalid',
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each(['mock', 'manual'])(
+    'bloqueia send com provider Shopee %s',
+    (provider) => {
+      const result = envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_AUTOMATION_MODE: 'send',
+        SHOPEE_AFFILIATE_PROVIDER: provider,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.message)).toContain(
+          'COMMERCIAL_AUTOMATION_OFFICIAL_PROVIDER_REQUIRED',
+        );
+      }
+    },
+  );
+
+  it('aceita send somente com configuracao oficial, Evolution e grupos seguros', () => {
+    const safeSendEnv = {
+      ...baseEnv,
+      COMMERCIAL_AUTOMATION_MODE: 'send',
+      SHOPEE_AFFILIATE_PROVIDER: 'official',
+      SHOPEE_AFFILIATE_API_ENABLED: 'true',
+      SHOPEE_AFFILIATE_API_URL: 'https://example.invalid/open-api',
+      SHOPEE_AFFILIATE_APP_ID: 'placeholder-app-id',
+      SHOPEE_AFFILIATE_SECRET: 'placeholder-secret',
+      WHATSAPP_PROVIDER: 'evolution',
+      EVOLUTION_API_URL: 'http://localhost:8080',
+      EVOLUTION_API_KEY: 'placeholder-api-key',
+      EVOLUTION_INSTANCE_NAME: 'affiliate-bot',
+      EVOLUTION_SAFE_MODE: 'true',
+      WHATSAPP_GROUP_SEND_ENABLED: 'true',
+      SCHEDULER_ENABLED: 'false',
+    };
+    const config = envSchema.parse(safeSendEnv);
+    expect(config.COMMERCIAL_AUTOMATION_MODE).toBe('send');
+
+    for (const [field, value, expectedCode] of [
+      ['WHATSAPP_PROVIDER', 'mock', 'COMMERCIAL_AUTOMATION_EVOLUTION_REQUIRED'],
+      ['EVOLUTION_SAFE_MODE', 'false', 'COMMERCIAL_AUTOMATION_SAFE_MODE_REQUIRED'],
+      [
+        'WHATSAPP_GROUP_SEND_ENABLED',
+        'false',
+        'COMMERCIAL_AUTOMATION_GROUP_SEND_REQUIRED',
+      ],
+      ['SCHEDULER_ENABLED', 'true', 'LEGACY_SCHEDULER_MUST_REMAIN_DISABLED'],
+    ] as const) {
+      const result = envSchema.safeParse({
+        ...safeSendEnv,
+        [field]: value,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.message)).toContain(
+          expectedCode,
+        );
+      }
+    }
+  });
+});
+
 describe('envSchema WhatsApp provider', () => {
   it('usa mock por padrao sem exigir Evolution API', () => {
     const config = envSchema.parse(baseEnv);

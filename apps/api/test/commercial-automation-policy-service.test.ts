@@ -70,6 +70,7 @@ class MemoryHistory implements CommercialAutomationHistoryRepository {
   groupSentToday = 0;
   lastSentAt: Date | null = null;
   ambiguous = false;
+  active = false;
   lastRange?: { dayStartsAt: Date; dayEndsAt: Date; groupId?: string };
 
   async getSnapshot(input: {
@@ -87,6 +88,10 @@ class MemoryHistory implements CommercialAutomationHistoryRepository {
 
   async hasAmbiguousCommercialExecution() {
     return this.ambiguous;
+  }
+
+  async hasActiveCommercialExecution() {
+    return this.active;
   }
 }
 
@@ -323,6 +328,16 @@ describe('CommercialAutomationPolicyService', () => {
 
     await expect(service.evaluateAutomationReadiness()).resolves.toMatchObject({
       reasons: ['AMBIGUOUS_COMMERCIAL_RUN_EXISTS'],
+      nextAllowedAt: null,
+    });
+  });
+
+  it('bloqueia enquanto existir execucao comercial em andamento', async () => {
+    const { service, history } = createSubject();
+    history.active = true;
+
+    await expect(service.evaluateAutomationReadiness()).resolves.toMatchObject({
+      reasons: ['COMMERCIAL_EXECUTION_IN_PROGRESS'],
       nextAllowedAt: null,
     });
   });

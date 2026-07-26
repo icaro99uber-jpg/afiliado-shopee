@@ -106,6 +106,13 @@ export const COMMERCIAL_AUTOMATION_DEFAULTS = {
   minimumIntervalMinutes: 60,
 } as const;
 
+export const COMMERCIAL_SCHEDULER_DEFAULTS = {
+  enabled: false,
+  cronExpression: '0 9 * * *',
+  timezone: 'America/Sao_Paulo',
+  mode: 'preview',
+} as const;
+
 export const envSchema = z
   .object({
     NODE_ENV: z
@@ -150,6 +157,20 @@ export const envSchema = z
     COMMERCIAL_MIN_INTERVAL_MINUTES: positiveIntegerFromEnv.default(
       COMMERCIAL_AUTOMATION_DEFAULTS.minimumIntervalMinutes,
     ),
+    COMMERCIAL_SCHEDULER_ENABLED: booleanFromEnv.default(
+      COMMERCIAL_SCHEDULER_DEFAULTS.enabled,
+    ),
+    COMMERCIAL_SCHEDULER_CRON: z
+      .string()
+      .trim()
+      .default(COMMERCIAL_SCHEDULER_DEFAULTS.cronExpression),
+    COMMERCIAL_SCHEDULER_TIMEZONE: z
+      .string()
+      .trim()
+      .default(COMMERCIAL_SCHEDULER_DEFAULTS.timezone),
+    COMMERCIAL_AUTOMATION_MODE: z
+      .enum(['preview', 'send'])
+      .default(COMMERCIAL_SCHEDULER_DEFAULTS.mode),
     WHATSAPP_PROVIDER: z.enum(['mock', 'evolution']).default('mock'),
     EVOLUTION_API_URL: z
       .string()
@@ -181,6 +202,59 @@ export const envSchema = z
         path: ['COMMERCIAL_ALLOWED_END_TIME'],
         message: 'A janela comercial deve ter inicio e fim diferentes',
       });
+    }
+    if (!isValidCronExpression(env.COMMERCIAL_SCHEDULER_CRON)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COMMERCIAL_SCHEDULER_CRON'],
+        message:
+          'COMMERCIAL_SCHEDULER_CRON deve ser uma expressao cron valida com cinco campos',
+      });
+    }
+    if (!isValidTimezone(env.COMMERCIAL_SCHEDULER_TIMEZONE)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COMMERCIAL_SCHEDULER_TIMEZONE'],
+        message:
+          'COMMERCIAL_SCHEDULER_TIMEZONE deve ser um timezone IANA valido',
+      });
+    }
+    if (env.COMMERCIAL_AUTOMATION_MODE === 'send') {
+      if (env.SHOPEE_AFFILIATE_PROVIDER !== 'official') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SHOPEE_AFFILIATE_PROVIDER'],
+          message: 'COMMERCIAL_AUTOMATION_OFFICIAL_PROVIDER_REQUIRED',
+        });
+      }
+      if (env.WHATSAPP_PROVIDER !== 'evolution') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['WHATSAPP_PROVIDER'],
+          message: 'COMMERCIAL_AUTOMATION_EVOLUTION_REQUIRED',
+        });
+      }
+      if (!env.EVOLUTION_SAFE_MODE) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['EVOLUTION_SAFE_MODE'],
+          message: 'COMMERCIAL_AUTOMATION_SAFE_MODE_REQUIRED',
+        });
+      }
+      if (!env.WHATSAPP_GROUP_SEND_ENABLED) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['WHATSAPP_GROUP_SEND_ENABLED'],
+          message: 'COMMERCIAL_AUTOMATION_GROUP_SEND_REQUIRED',
+        });
+      }
+      if (env.SCHEDULER_ENABLED) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SCHEDULER_ENABLED'],
+          message: 'LEGACY_SCHEDULER_MUST_REMAIN_DISABLED',
+        });
+      }
     }
     if (env.SHOPEE_AFFILIATE_PROVIDER === 'official') {
       if (!env.SHOPEE_AFFILIATE_API_ENABLED) {

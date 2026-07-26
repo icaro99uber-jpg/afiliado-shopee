@@ -181,6 +181,24 @@ model CommercialAutomationSettings {
   updatedAt DateTime  @updatedAt
 }
 
+model CommercialAutomationExecution {
+  id              String                              @id @default(cuid())
+  schedulerJobId  String
+  bullMqJobId     String?                             @unique
+  activeKey       String?                             @unique
+  mode            CommercialAutomationExecutionMode
+  status          CommercialAutomationExecutionStatus
+  reasons         Json
+  commercialRunId String?
+  failureCode     String?
+  startedAt       DateTime                            @default(now())
+  completedAt     DateTime?
+
+  @@index([startedAt])
+  @@index([status])
+  @@index([commercialRunId])
+}
+
 enum WhatsAppDispatchStatus {
   PENDING
   PROCESSING
@@ -224,6 +242,20 @@ enum CommercialPipelineRunStatus {
 enum CommercialPipelineFinalStatus {
   PENDING
   SENT
+  FAILED
+  AMBIGUOUS
+}
+
+enum CommercialAutomationExecutionMode {
+  PREVIEW
+  SEND
+}
+
+enum CommercialAutomationExecutionStatus {
+  STARTED
+  BLOCKED
+  PREVIEW_READY
+  QUEUED
   FAILED
   AMBIGUOUS
 }

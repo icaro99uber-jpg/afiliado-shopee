@@ -25,6 +25,7 @@ import {
 } from './commercial-pipeline-confirmation-service';
 import {
   PrismaCommercialAutomationHistoryRepository,
+  PrismaCommercialAutomationExecutionRepository,
   PrismaCommercialAutomationSettingsRepository,
   PrismaAnalyticsRepository,
   PrismaCommercialDeliveryHistoryRepository,
@@ -40,6 +41,7 @@ import {
 import type {
   AnalyticsRepository,
   CommercialAutomationHistoryRepository,
+  CommercialAutomationExecutionRepository,
   CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
   CommercialPipelineRunRepository,
@@ -78,6 +80,7 @@ export type ApplicationRepositories = {
   commercialDeliveryHistory: CommercialDeliveryHistoryRepository;
   commercialAutomationSettings: CommercialAutomationSettingsRepository;
   commercialAutomationHistory: CommercialAutomationHistoryRepository;
+  commercialAutomationExecutions: CommercialAutomationExecutionRepository;
 };
 
 export type ApplicationServices = {
@@ -232,6 +235,8 @@ export const createPrismaRepositories = (
   commercialAutomationHistory: new PrismaCommercialAutomationHistoryRepository(
     prisma,
   ),
+  commercialAutomationExecutions:
+    new PrismaCommercialAutomationExecutionRepository(prisma),
 });
 
 export const createApplicationServices = ({

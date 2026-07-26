@@ -83,7 +83,7 @@ export type ShopeeOfferFilters = {
 };
 
 export type CommercialOfferCandidateFilters = {
-  source: Extract<ShopeeAffiliateOfferSource, 'MOCK' | 'MANUAL'>;
+  source: ShopeeAffiliateOfferSource;
   categoryId?: string;
   minPrice?: number;
   maxPrice?: number;
@@ -226,6 +226,60 @@ export interface CommercialAutomationHistoryRepository {
     dayEndsAt: Date;
   }): Promise<CommercialAutomationHistorySnapshot>;
   hasAmbiguousCommercialExecution(): Promise<boolean>;
+  hasActiveCommercialExecution(): Promise<boolean>;
+}
+
+export type CommercialAutomationExecutionMode = 'PREVIEW' | 'SEND';
+export type CommercialAutomationExecutionStatus =
+  'STARTED' | 'BLOCKED' | 'PREVIEW_READY' | 'QUEUED' | 'FAILED' | 'AMBIGUOUS';
+
+export type CommercialAutomationExecutionRecord = {
+  id: string;
+  schedulerJobId: string;
+  bullMqJobId: string | null;
+  mode: CommercialAutomationExecutionMode;
+  status: CommercialAutomationExecutionStatus;
+  reasons: string[];
+  commercialRunId: string | null;
+  failureCode: string | null;
+  startedAt: Date;
+  completedAt: Date | null;
+};
+
+export type StartCommercialAutomationExecutionResult =
+  | { outcome: 'created'; execution: CommercialAutomationExecutionRecord }
+  | { outcome: 'existing'; execution: CommercialAutomationExecutionRecord }
+  | { outcome: 'concurrent' };
+
+export interface CommercialAutomationExecutionRepository {
+  start(input: {
+    schedulerJobId: string;
+    bullMqJobId?: string;
+    mode: CommercialAutomationExecutionMode;
+    startedAt: Date;
+  }): Promise<StartCommercialAutomationExecutionResult>;
+  createBlocked(input: {
+    schedulerJobId: string;
+    bullMqJobId?: string;
+    mode: CommercialAutomationExecutionMode;
+    reasons: string[];
+    completedAt: Date;
+  }): Promise<CommercialAutomationExecutionRecord>;
+  finish(
+    id: string,
+    input: {
+      status: Exclude<CommercialAutomationExecutionStatus, 'STARTED'>;
+      reasons?: string[];
+      commercialRunId?: string;
+      failureCode?: string;
+      completedAt: Date;
+    },
+  ): Promise<CommercialAutomationExecutionRecord>;
+  list(input: {
+    page: number;
+    limit: number;
+  }): Promise<{ items: CommercialAutomationExecutionRecord[]; total: number }>;
+  findById(id: string): Promise<CommercialAutomationExecutionRecord | null>;
 }
 
 export type CouponSource = 'MANUAL' | 'OFFICIAL';

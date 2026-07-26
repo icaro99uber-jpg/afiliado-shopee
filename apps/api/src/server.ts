@@ -52,6 +52,12 @@ const start = async () => {
       dailyGroupLimit: config.COMMERCIAL_DAILY_GROUP_LIMIT,
       minimumIntervalMinutes: config.COMMERCIAL_MIN_INTERVAL_MINUTES,
     },
+    commercialSchedulerConfig: {
+      enabled: config.COMMERCIAL_SCHEDULER_ENABLED,
+      cron: config.COMMERCIAL_SCHEDULER_CRON,
+      timezone: config.COMMERCIAL_SCHEDULER_TIMEZONE,
+      mode: config.COMMERCIAL_AUTOMATION_MODE,
+    },
   });
   await app.listen({ host: config.HOST, port: config.PORT });
 };

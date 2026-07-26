@@ -196,7 +196,7 @@ export class CommercialPipelineConfirmationService {
       const product = await this.options.offers.findOfferById(run.productId);
       if (
         !product ||
-        !['MOCK', 'MANUAL'].includes(product.source) ||
+        !['MOCK', 'MANUAL', 'OFFICIAL'].includes(product.source) ||
         commercialProductRejections(product, this.clock()).length > 0 ||
         product.productName !== run.productName ||
         product.price !== run.productPrice ||

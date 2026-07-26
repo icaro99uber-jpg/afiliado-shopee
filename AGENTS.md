@@ -690,3 +690,51 @@ Operacao:
   explicita do ambiente.
 - O dashboard apresenta o controle em Configuracoes e deixa explicito que
   pausar/retomar nao envia mensagens nem altera o Scheduler.
+
+## Commercial Automation Scheduler
+
+Responsabilidade:
+
+- Agendar e executar um tick comercial isolado, sempre passando primeiro por
+  `CommercialAutomationPolicyService`.
+- Sincronizar o catalogo uma vez, executar um dry-run comercial uma vez e
+  terminar em preview ou delegar a confirmacao ao servico existente.
+- Persistir cada tentativa em `CommercialAutomationExecution`, com identidade
+  BullMQ, estado terminal e motivo sanitizado.
+
+Isolamento e idempotencia:
+
+- Usa somente a fila `commercial-automation`, o job
+  `commercial-automation-tick` e o Scheduler ID
+  `scheduled-commercial-automation`.
+- A fila legada `product-pipeline`, o job `pipeline-product` e o Scheduler ID
+  `scheduled-pipeline-product` nao sao registrados, removidos nem consumidos
+  por este bootstrap.
+- O worker comercial tem concorrencia 1. Jobs possuem `attempts: 1`, sem
+  backoff e sem remocao automatica; jobs desconhecidos sao ignorados.
+- `bullMqJobId` torna a execucao idempotente e `activeKey` impede ticks
+  simultaneos. Run confirmado iniciado, final pendente ou dispatch comercial
+  `PENDING/PROCESSING` tambem bloqueia com
+  `COMMERCIAL_EXECUTION_IN_PROGRESS`.
+
+Configuracao e seguranca:
+
+- `COMMERCIAL_SCHEDULER_ENABLED=false`, cron `0 9 * * *`, timezone
+  `America/Sao_Paulo` e modo `preview` sao os defaults.
+- O modo `send` exige provider Shopee `official`, Evolution, safe mode e o
+  master switch de grupos, mantendo o Scheduler legado desligado. Providers
+  `mock` e `manual` sao bloqueados para envio.
+- O bootstrap apenas registra ou remove o Scheduler comercial e inicia seu
+  consumer; nao executa um tick na inicializacao.
+- O CLI `corepack pnpm commercial:automation:preview` forca preview, exige os
+  dois Schedulers desligados e nao cria dispatch, job de WhatsApp ou mensagem.
+  Nao existe CLI de envio para esta automacao.
+
+Observabilidade:
+
+- `GET /commercial-automation/scheduler` expoe somente estado, agenda, modo e
+  proxima execucao sanitizados.
+- `GET /commercial-automation/executions` e
+  `GET /commercial-automation/executions/:id` expoem historico sanitizado.
+- Nao existe endpoint para disparar tick ou habilitar o Scheduler, e o
+  dashboard nao ganhou controles nesta sprint.

@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { COMMERCIAL_AUTOMATION_DEFAULTS } from '@shopee-auto-affiliate-ai/config';
+import {
+  COMMERCIAL_AUTOMATION_DEFAULTS,
+  COMMERCIAL_SCHEDULER_DEFAULTS,
+} from '@shopee-auto-affiliate-ai/config';
 import {
   createPrismaClient,
   type DatabaseClient,
@@ -21,6 +24,8 @@ import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import {
   createBullMqPipelineScheduler,
+  createBullMqCommercialAutomationScheduler,
+  createCommercialAutomationQueue,
   createProductPipelineQueue,
   createRedisConnection,
   createWhatsAppDispatchQueue,
@@ -29,6 +34,7 @@ import {
   type JobsOptions,
   type PipelineProductJob,
   type WhatsAppDispatchJob,
+  type CommercialAutomationMode,
 } from '@shopee-auto-affiliate-ai/queue';
 import {
   createApplicationServices,
@@ -53,6 +59,11 @@ import type {
   CommercialAutomationPolicyConfig,
   CommercialAutomationPolicyService,
 } from './commercial-automation-policy-service';
+import { CommercialAutomationExecutionService } from './commercial-automation-execution-service';
+import {
+  CommercialAutomationSchedulerStatusService,
+  type CommercialAutomationSchedulerStatusSnapshot,
+} from './commercial-automation-scheduler-status-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -112,6 +123,19 @@ type BuildAppOptions = {
     'evaluateAutomationReadiness' | 'setPaused'
   >;
   commercialAutomationConfig?: CommercialAutomationPolicyConfig;
+  commercialAutomationExecutionService?: Pick<
+    CommercialAutomationExecutionService,
+    'list' | 'find'
+  >;
+  commercialAutomationSchedulerStatusServiceFactory?: () => {
+    getStatus(): Promise<CommercialAutomationSchedulerStatusSnapshot>;
+  };
+  commercialSchedulerConfig?: {
+    enabled: boolean;
+    cron: string;
+    timezone: string;
+    mode: CommercialAutomationMode;
+  };
 };
 
 type PipelineJobLike = {
@@ -276,6 +300,13 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     whatsappDispatchQueue ??= createWhatsAppDispatchQueue(getRedisConnection());
     return whatsappDispatchQueue as NonNullable<typeof whatsappDispatchQueue>;
   };
+  let commercialAutomationQueue:
+    ReturnType<typeof createCommercialAutomationQueue> | undefined;
+  const getCommercialAutomationQueue = () => {
+    commercialAutomationQueue ??=
+      createCommercialAutomationQueue(getRedisConnection());
+    return commercialAutomationQueue;
+  };
   let pipelineScheduler:
     ReturnType<typeof createBullMqPipelineScheduler> | undefined;
   const schedulerReader = {
@@ -292,6 +323,33 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         schedulerReader,
         options.schedulerEnabled ?? false,
       );
+  const commercialSchedulerConfig = options.commercialSchedulerConfig ?? {
+    enabled: COMMERCIAL_SCHEDULER_DEFAULTS.enabled,
+    cron: COMMERCIAL_SCHEDULER_DEFAULTS.cronExpression,
+    timezone: COMMERCIAL_SCHEDULER_DEFAULTS.timezone,
+    mode: COMMERCIAL_SCHEDULER_DEFAULTS.mode,
+  };
+  let commercialAutomationScheduler:
+    ReturnType<typeof createBullMqCommercialAutomationScheduler> | undefined;
+  const commercialSchedulerStatusService =
+    options.commercialAutomationSchedulerStatusServiceFactory?.() ??
+    new CommercialAutomationSchedulerStatusService(
+      {
+        getState: (jobId, mode) => {
+          commercialAutomationScheduler ??=
+            createBullMqCommercialAutomationScheduler(
+              getCommercialAutomationQueue(),
+            );
+          return commercialAutomationScheduler.getState(jobId, mode);
+        },
+      },
+      commercialSchedulerConfig,
+    );
+  const commercialAutomationExecutionService =
+    options.commercialAutomationExecutionService ??
+    new CommercialAutomationExecutionService(
+      repositories.commercialAutomationExecutions,
+    );
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -409,6 +467,69 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return reply.status(500).send({
         error: 'COMMERCIAL_AUTOMATION_STATUS_FAILED',
         message: 'Falha ao consultar controle da automacao comercial',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/scheduler', async (request, reply) => {
+    try {
+      return await commercialSchedulerStatusService.getStatus();
+    } catch (error) {
+      request.log.error(
+        {
+          event: 'commercial-automation.scheduler-status.failed',
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        },
+        'Commercial automation scheduler status failed',
+      );
+      return reply.status(503).send({
+        error: 'COMMERCIAL_AUTOMATION_SCHEDULER_STATUS_UNAVAILABLE',
+        message: 'Status do Scheduler comercial indisponivel',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/executions', async (request, reply) => {
+    try {
+      const query = request.query as { page?: string; limit?: string };
+      return await commercialAutomationExecutionService.list({
+        page: parsePositiveInteger(query.page, 1, 10_000),
+        limit: parsePositiveInteger(query.limit, 20, 100),
+      });
+    } catch (error) {
+      const status =
+        error instanceof AppError && error.code === 'INVALID_PAGINATION'
+          ? 400
+          : 500;
+      return reply.status(status).send({
+        error:
+          status === 400
+            ? 'INVALID_PAGINATION'
+            : 'COMMERCIAL_AUTOMATION_EXECUTIONS_UNAVAILABLE',
+        message:
+          status === 400
+            ? 'Paginacao invalida'
+            : 'Historico da automacao comercial indisponivel',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/executions/:id', async (request, reply) => {
+    try {
+      return await commercialAutomationExecutionService.find(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      const notFound =
+        error instanceof AppError &&
+        error.code === 'COMMERCIAL_AUTOMATION_EXECUTION_NOT_FOUND';
+      return reply.status(notFound ? 404 : 500).send({
+        error: notFound
+          ? 'COMMERCIAL_AUTOMATION_EXECUTION_NOT_FOUND'
+          : 'COMMERCIAL_AUTOMATION_EXECUTION_UNAVAILABLE',
+        message: notFound
+          ? 'Execucao da automacao comercial nao encontrada'
+          : 'Execucao da automacao comercial indisponivel',
       });
     }
   });
@@ -1237,12 +1358,35 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   });
 
   app.addHook('onClose', async () => {
-    await pipelineQueue?.close?.();
-    if (whatsappDispatchQueue !== pipelineQueue) {
-      await whatsappDispatchQueue?.close?.();
+    const cleanups = [
+      async () => pipelineQueue?.close?.(),
+      async () => {
+        if (whatsappDispatchQueue !== pipelineQueue) {
+          await whatsappDispatchQueue?.close?.();
+        }
+      },
+      async () => {
+        if (
+          commercialAutomationQueue !== pipelineQueue &&
+          commercialAutomationQueue !== whatsappDispatchQueue
+        ) {
+          await commercialAutomationQueue?.close();
+        }
+      },
+      async () => redisConnection?.quit(),
+      async () => {
+        if (!options.prisma) await prisma.$disconnect();
+      },
+    ];
+    let firstError: unknown;
+    for (const cleanup of cleanups) {
+      try {
+        await cleanup();
+      } catch (error) {
+        firstError ??= error;
+      }
     }
-    await redisConnection?.quit();
-    if (!options.prisma) await prisma.$disconnect();
+    if (firstError) throw firstError;
   });
 
   return app;
