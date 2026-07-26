@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { envSchema } from './index';
+import { envSchema, parseDotEnv } from './index';
 
 const baseEnv = {
   DATABASE_URL: 'postgresql://localhost:5432/app',
   REDIS_URL: 'redis://localhost:6379',
 };
+
+describe('parseDotEnv', () => {
+  it('preserva valores quoted e remove comentarios apenas de unquoted', () => {
+    expect(
+      parseDotEnv('A="value # kept"\nB=value # ignored\nexport C=ok\n'),
+    ).toEqual({ A: 'value # kept', B: 'value', C: 'ok' });
+  });
+});
 
 describe('envSchema automacao comercial', () => {
   it('usa bind local e defaults conservadores', () => {
@@ -135,7 +143,11 @@ describe('envSchema Scheduler comercial', () => {
 
     for (const [field, value, expectedCode] of [
       ['WHATSAPP_PROVIDER', 'mock', 'COMMERCIAL_AUTOMATION_EVOLUTION_REQUIRED'],
-      ['EVOLUTION_SAFE_MODE', 'false', 'COMMERCIAL_AUTOMATION_SAFE_MODE_REQUIRED'],
+      [
+        'EVOLUTION_SAFE_MODE',
+        'false',
+        'COMMERCIAL_AUTOMATION_SAFE_MODE_REQUIRED',
+      ],
       [
         'WHATSAPP_GROUP_SEND_ENABLED',
         'false',

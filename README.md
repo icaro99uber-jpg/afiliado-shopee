@@ -900,3 +900,53 @@ Endpoints somente leitura:
 
 Nao existe endpoint para executar um tick, habilitar o Scheduler ou alterar a
 agenda. O dashboard nao foi modificado nesta sprint.
+
+## Operacao local com um comando
+
+O supervisor local inicia somente a topologia atual e explicita do projeto. Ele
+nao executa `pnpm dev`, nao compoe o worker do pipeline legado e nao dispara
+tick, dry-run, confirmacao, dispatch ou mensagem durante o bootstrap.
+
+```powershell
+corepack pnpm system:start
+corepack pnpm system:status
+corepack pnpm system:status -- --json
+corepack pnpm system:logs
+corepack pnpm system:logs -- --service=supervisor --lines=50
+corepack pnpm system:stop
+```
+
+`system:start` carrega o `.env` ignorado da raiz e aplica variaveis do processo
+por cima, somente em memoria. Ele valida Node, Corepack, Docker e arquivos
+obrigatorios; inicia os dois composes; aguarda PostgreSQL, Redis e Evolution;
+executa `prisma generate` e `prisma migrate deploy`; e sobe API, dashboard e o
+worker comercial. O consumer isolado de `whatsapp-dispatch` e iniciado somente
+quando `COMMERCIAL_AUTOMATION_MODE=send`. Esse consumer reutiliza o provider, a
+politica de grupos e a finalizacao comercial existentes, sem Scheduler, Hunter,
+Score, Copy ou `PipelineService` legado.
+
+O estado sanitizado e os logs locais ficam em `.runtime/local-system/`, que e
+ignorado pelo Git. O estado guarda somente versao, horario, modo, portas, nomes
+logicos, PIDs e caminhos relativos de log. PIDs sao validados por identidade e
+horario antes de qualquer encerramento. `system:stop` para apenas processos
+registrados e confirmados, usa `docker compose stop` e preserva containers,
+volumes, dados e agendamentos BullMQ.
+
+Defaults continuam conservadores: iniciar o sistema nao habilita automacao ou
+Schedulers, nao remove pausa persistida e nao cria trabalho. Para uma validacao
+local inequivocamente segura, aplique somente ao processo:
+
+```powershell
+$env:COMMERCIAL_AUTOMATION_MODE='preview'
+$env:COMMERCIAL_SCHEDULER_ENABLED='false'
+$env:COMMERCIAL_AUTOMATION_ENABLED='false'
+$env:SCHEDULER_ENABLED='false'
+corepack pnpm system:start
+```
+
+Se o Docker daemon estiver desligado, o comando falha com
+`DOCKER_DAEMON_UNAVAILABLE` e pede a inicializacao manual do Docker Desktop. Se
+uma porta da API ou do dashboard estiver ocupada por outro processo, o
+supervisor informa `SYSTEM_PORT_OCCUPIED` e nao encerra o ocupante. Em uma
+parada com PID divergente ou recurso que nao encerrou, o estado e preservado e
+a intervencao manual necessaria e reportada.

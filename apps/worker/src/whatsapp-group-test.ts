@@ -9,6 +9,7 @@ import {
   EvolutionApiGroupDirectoryProvider,
   fingerprintWhatsAppGroupId,
   normalizeWhatsAppGroupId,
+  parseEvolutionConnectionState,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
   CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS,
@@ -250,13 +251,6 @@ const validateBaseConfig = (config: AppEnv) => {
   }
 };
 
-const extractInstanceState = (body: unknown) => {
-  if (!body || typeof body !== 'object') return undefined;
-  const value = body as { state?: unknown; instance?: { state?: unknown } };
-  const state = value.instance?.state ?? value.state;
-  return typeof state === 'string' ? state.toLowerCase() : undefined;
-};
-
 export const runWhatsAppGroupTestPreflight = async (
   config: AppEnv,
 ): Promise<WhatsAppGroupTestPreflight> => {
@@ -289,7 +283,7 @@ export const runWhatsAppGroupTestPreflight = async (
     );
     if (
       !instanceResponse.ok ||
-      extractInstanceState(await instanceResponse.json()) !== 'open'
+      parseEvolutionConnectionState(await instanceResponse.json()) !== 'open'
     ) {
       throw new WhatsAppGroupTestError(
         'A instancia controlada nao esta conectada',

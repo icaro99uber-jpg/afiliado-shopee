@@ -1,5 +1,28 @@
 import { z } from 'zod';
 
+export const parseDotEnv = (contents: string): NodeJS.ProcessEnv => {
+  const parsed: NodeJS.ProcessEnv = {};
+  for (const rawLine of contents.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(
+      line,
+    );
+    if (!match) continue;
+    let value = match[2].trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/, '').trim();
+    }
+    parsed[match[1]] = value;
+  }
+  return parsed;
+};
+
 const booleanFromEnv = z.preprocess((value) => {
   if (typeof value !== 'string') return value;
   if (value.toLowerCase() === 'true') return true;
