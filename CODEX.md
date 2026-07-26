@@ -542,4 +542,24 @@ contagens, rejeicoes, snapshots sanitizados, copy e horario. As rotas
 `POST /commercial-pipeline/dry-run`, `GET /commercial-pipeline/runs` e
 `GET /commercial-pipeline/runs/:id` nao criam dispatch ou job. O CLI
 `corepack pnpm commercial:dry-run` tambem bloqueia official, Scheduler e group
-send. Qualquer modo confirmado fica reservado para a Task 16.2.
+send. Esse endpoint permanece sem dispatch, job ou envio mesmo depois da Task
+16.2.
+
+## Pipeline comercial confirmado
+
+A Task 16.2 preserva o endpoint de dry-run e adiciona a confirmacao separada
+`POST /commercial-pipeline/runs/:id/confirm`. O body aceita somente a frase
+`CONFIRMAR_ENVIO_COMERCIAL`. A confirmacao atualiza o mesmo run para
+`CONFIRMED`, preserva seus snapshots e nao recalcula ranking, produto, grupo ou
+copy.
+
+IDs de copy tecnica, dispatch e job sao derivados do `dryRunId`. A transicao do
+run e atomica e qualquer run confirmado, dispatch, job ou estado parcial
+impede repeticao. O job controlado usa uma tentativa, sem backoff, sem remocao e
+sem alterar a politica de tres tentativas dos jobs normais.
+
+O worker `whatsapp-dispatch` existente finaliza o run como `SENT`, `FAILED` ou
+`AMBIGUOUS`. Falhas e timeout exigem investigacao manual e nunca reenfileiram.
+O CLI isolado inicia somente esse consumer e exige provider Evolution, safe
+mode, master switch, limites iguais a 1, Scheduler desligado e ausencia de
+workers concorrentes. Cupons e Shopee oficial permanecem fora do fluxo.

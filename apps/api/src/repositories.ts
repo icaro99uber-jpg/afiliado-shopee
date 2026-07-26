@@ -116,6 +116,8 @@ export interface ShopeeOfferRepository {
 export type CommercialPipelineRunMode = 'DRY_RUN' | 'CONFIRMED';
 export type CommercialPipelineRunStatus =
   'STARTED' | 'COMPLETED' | 'BLOCKED' | 'FAILED';
+export type CommercialPipelineFinalStatus =
+  'PENDING' | 'SENT' | 'FAILED' | 'AMBIGUOUS';
 
 export type CommercialPipelineRejectionCode =
   | 'MISSING_AFFILIATE_LINK'
@@ -150,6 +152,11 @@ export type CommercialPipelineRunData = {
   selectionReasons: string[];
   copyPreview?: string | null;
   plannedSubIds: string[];
+  dispatchId?: string | null;
+  jobId?: string | null;
+  confirmedAt?: Date | null;
+  finalStatus?: CommercialPipelineFinalStatus | null;
+  investigationRequired?: boolean;
   failureCode?: string | null;
   createdAt?: Date;
   completedAt?: Date | null;
@@ -178,6 +185,13 @@ export interface CommercialPipelineRunRepository {
     filters: CommercialPipelineRunFilters,
   ): Promise<{ items: CommercialPipelineRunRecord[]; total: number }>;
   findById(id: string): Promise<CommercialPipelineRunRecord | null>;
+  findByDispatchId(
+    dispatchId: string,
+  ): Promise<CommercialPipelineRunRecord | null>;
+  claimConfirmation(
+    id: string,
+    confirmedAt: Date,
+  ): Promise<CommercialPipelineRunRecord | null>;
 }
 
 export interface CommercialDeliveryHistoryRepository {
@@ -287,7 +301,8 @@ export type WhatsAppGroupFilters = {
   available?: boolean;
 };
 
-export type WhatsAppDispatchStatus = 'PENDING' | 'SENT' | 'FAILED';
+export type WhatsAppDispatchStatus =
+  'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED';
 
 export type WhatsAppDispatchCreateData = {
   id?: string;

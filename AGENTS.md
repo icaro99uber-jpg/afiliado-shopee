@@ -622,7 +622,35 @@ Persistencia e operacao:
 - O dashboard oferece somente executar dry-run, copiar preview e consultar
   historico.
 
-Proximo passo:
+## Commercial Pipeline Confirmed
 
-- Task 16.2 deve definir controles de confirmacao, autorizacao e idempotencia em
-  revisao separada antes de qualquer dispatch, job ou mensagem.
+Responsabilidade:
+
+- Confirmar somente um `CommercialPipelineRun` `DRY_RUN/COMPLETED` existente.
+- Revalidar o mesmo produto, copy e grupo, sem executar ranking novamente.
+- Atualizar o proprio run para `CONFIRMED`, criar um dispatch e um job e
+  finalizar o historico a partir do worker de dispatch existente.
+
+Idempotencia e seguranca:
+
+- Copy, dispatch e job usam IDs deterministicos derivados do `dryRunId`.
+- A reivindicacao do run e atomica; modo confirmado, dispatch, job ou qualquer
+  estado parcial bloqueiam definitivamente nova execucao.
+- O job `whatsapp-dispatch` usa `attempts: 1`, sem backoff e sem remocao.
+- Timeout, falha ou resultado ambiguo registram `investigationRequired=true` e
+  nunca autorizam retry ou limpeza de historico.
+- Imediatamente antes do dispatch, produto/link, grupo unico, instancia, safe
+  mode, master switch, Scheduler desligado e limite 1 sao revalidados.
+- A copy enviada e o snapshot aprovado. Cupons, score, comissao, IDs tecnicos e
+  urgencia falsa continuam ausentes.
+
+Operacao:
+
+- `POST /commercial-pipeline/runs/:id/confirm` aceita somente
+  `{ "confirmation": "CONFIRMAR_ENVIO_COMERCIAL" }`.
+- `corepack pnpm commercial:confirm -- --run-id=<id>
+  --confirm-one-real-commercial-message` e o unico CLI real, bloqueado em CI e
+  composto apenas com fila/worker de dispatch.
+- O dashboard exige a mesma frase em modal, remove a acao depois de qualquer
+  tentativa e exibe apenas fingerprint, status, tentativas e existencia de ID
+  externo.

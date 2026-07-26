@@ -55,7 +55,17 @@ const runHistory = {
 
 const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
 
-const setup = async (dryRun = vi.fn().mockResolvedValue(result)) => {
+const setup = async (
+  dryRun = vi.fn().mockResolvedValue(result),
+  confirm = vi.fn().mockResolvedValue({
+    runId: 'run-safe-1',
+    mode: 'confirmed',
+    status: 'queued',
+    dispatchWasCreated: true,
+    jobWasCreated: true,
+    messageWasSent: false,
+  }),
+) => {
   const pipelineAdd = vi.fn();
   const commercialPipelineService = {
     dryRun,
@@ -73,9 +83,10 @@ const setup = async (dryRun = vi.fn().mockResolvedValue(result)) => {
     prisma: {} as never,
     pipelineQueue: { add: pipelineAdd },
     commercialPipelineService,
+    commercialPipelineConfirmationService: { confirm },
   });
   apps.push(app);
-  return { app, commercialPipelineService, pipelineAdd };
+  return { app, commercialPipelineService, pipelineAdd, confirm };
 };
 
 afterEach(async () => {
@@ -83,6 +94,69 @@ afterEach(async () => {
 });
 
 describe('Commercial pipeline API', () => {
+  it('confirma em endpoint separado com body estrito', async () => {
+    const { app, confirm } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/runs/run-safe-1/confirm',
+      payload: { confirmation: 'CONFIRMAR_ENVIO_COMERCIAL' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'queued',
+      dispatchWasCreated: true,
+      jobWasCreated: true,
+      messageWasSent: false,
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      'run-safe-1',
+      'CONFIRMAR_ENVIO_COMERCIAL',
+    );
+  });
+
+  it.each([
+    {},
+    { confirmation: 'CONFIRMAR_ENVIO_COMERCIAL', groupId: 'forbidden' },
+    { confirmation: 'CONFIRMAR_ENVIO_COMERCIAL', coupon: 'forbidden' },
+    { confirmation: true },
+  ])('rejeita body confirmado com campos invalidos', async (payload) => {
+    const { app, confirm } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/runs/run-safe-1/confirm',
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('COMMERCIAL_CONFIRMATION_INVALID');
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['COMMERCIAL_CONFIRMATION_INVALID', 400],
+    ['COMMERCIAL_RUN_NOT_READY', 404],
+    ['COMMERCIAL_RUN_ALREADY_CONFIRMED', 409],
+    ['COMMERCIAL_PRODUCT_CHANGED', 409],
+    ['COMMERCIAL_GROUP_CHANGED', 409],
+    ['PRODUCT_ALREADY_SENT', 409],
+    ['GROUP_SEND_DISABLED', 409],
+    ['COMMERCIAL_DISPATCH_FAILED', 500],
+  ])('mapeia erro publico confirmado %s', async (code, status) => {
+    const { app } = await setup(
+      undefined,
+      vi.fn().mockRejectedValue(new AppError('Falha sanitizada', code)),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/runs/run-safe-1/confirm',
+      payload: { confirmation: 'CONFIRMAR_ENVIO_COMERCIAL' },
+    });
+    expect(response.statusCode).toBe(status);
+    expect(response.json()).toEqual({
+      error: code,
+      message: 'Falha sanitizada',
+    });
+  });
+
   it('retorna preview pronto sem fila ou dispatch', async () => {
     const { app, pipelineAdd } = await setup();
     const response = await app.inject({

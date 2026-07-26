@@ -1,14 +1,16 @@
 import React, { act } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { click, render } from '../../test/render';
+import { change, click, render } from '../../test/render';
 import CommercialPipelinePage from './page';
 
 const listMock = vi.fn();
 const runMock = vi.fn();
+const confirmMock = vi.fn();
 
 vi.mock('../../lib/api', () => ({
   listCommercialPipelineRuns: (...args: unknown[]) => listMock(...args),
   runCommercialPipelineDryRun: (...args: unknown[]) => runMock(...args),
+  confirmCommercialPipelineRun: (...args: unknown[]) => confirmMock(...args),
 }));
 
 const result = {
@@ -64,11 +66,18 @@ const history = {
   copyPreview: result.copyPreview,
   plannedSubIds: result.plannedSubIds,
   failureCode: null,
+  confirmedAt: null,
+  finalStatus: null,
+  dispatchStatus: null,
+  attemptCount: 0,
+  externalMessageIdRecorded: false,
+  investigationRequired: false,
   createdAt: '2026-07-25T12:00:00.000Z',
   completedAt: '2026-07-25T12:00:01.000Z',
   dispatchWasCreated: false,
   jobWasCreated: false,
   messageWasSent: false,
+  confirmationAvailable: true,
 };
 
 beforeEach(() => {
@@ -80,6 +89,7 @@ beforeEach(() => {
     totalPages: 1,
   });
   runMock.mockReset().mockResolvedValue(result);
+  confirmMock.mockReset().mockResolvedValue({ status: 'queued' });
 });
 
 const executeButton = (container: HTMLElement) =>
@@ -122,13 +132,13 @@ describe('CommercialPipelinePage', () => {
     expect(text).toContain('Sem link afiliado');
     expect(text).toContain('Nenhuma mensagem foi enviada');
     expect(text).not.toContain('Enviar mensagem');
-    expect(text).not.toContain('Confirmar envio');
+    expect(text).toContain('Confirmar envio real');
     await screen.unmount();
   });
 
   it('exibe historico de dry-runs', async () => {
     const screen = await render(<CommercialPipelinePage />);
-    expect(screen.container.textContent).toContain('Historico de dry-runs');
+    expect(screen.container.textContent).toContain('Historico comercial');
     expect(screen.container.textContent).toContain(
       'Produto ficticio selecionado',
     );
@@ -180,6 +190,90 @@ describe('CommercialPipelinePage', () => {
     expect(screen.container.textContent).toContain(
       'Cupons nao fazem parte deste fluxo',
     );
+    await screen.unmount();
+  });
+
+  it('exige token no modal e remove confirmacao depois da tentativa', async () => {
+    const confirmed = {
+      ...history,
+      mode: 'confirmed',
+      status: 'started',
+      confirmedAt: '2026-07-25T12:01:00.000Z',
+      finalStatus: 'pending',
+      dispatchStatus: 'pending',
+      dispatchWasCreated: true,
+      jobWasCreated: true,
+      confirmationAvailable: false,
+    };
+    listMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        items: [history],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [confirmed],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+    const screen = await render(<CommercialPipelinePage />);
+    const open = Array.from(screen.container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirmar envio real'),
+    ) as HTMLButtonElement;
+    await click(open);
+    expect(screen.container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(screen.container.textContent).toContain('grp_123456789abc');
+    expect(screen.container.textContent).toContain(result.copyPreview);
+    const send = Array.from(screen.container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Enviar uma mensagem real'),
+    ) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    const input = screen.container.querySelector(
+      '[role="dialog"] input',
+    ) as HTMLInputElement;
+    await change(input, 'CONFIRMAR_ENVIO_COMERCIAL');
+    expect(send.disabled).toBe(false);
+    await click(send);
+    expect(confirmMock).toHaveBeenCalledWith(
+      'run-safe',
+      'CONFIRMAR_ENVIO_COMERCIAL',
+    );
+    expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(screen.container.textContent).toContain('Status do dispatch');
+    expect(screen.container.textContent).not.toContain('Confirmar envio real');
+    await screen.unmount();
+  });
+
+  it('nao oferece retry depois de resultado ambiguo', async () => {
+    listMock.mockReset().mockResolvedValue({
+      items: [
+        {
+          ...history,
+          mode: 'confirmed',
+          status: 'failed',
+          finalStatus: 'ambiguous',
+          dispatchStatus: 'failed',
+          attemptCount: 1,
+          investigationRequired: true,
+          dispatchWasCreated: true,
+          jobWasCreated: true,
+          confirmationAvailable: false,
+        },
+      ],
+      page: 1,
+      limit: 10,
+      total: 1,
+      totalPages: 1,
+    });
+    const screen = await render(<CommercialPipelinePage />);
+    expect(screen.container.textContent).toContain('investigacao manual');
+    expect(screen.container.textContent).not.toContain('Confirmar envio real');
+    expect(screen.container.textContent).not.toContain('Reenviar');
     await screen.unmount();
   });
 });

@@ -37,6 +37,12 @@ const start = async () => {
     shopeeMaxOffersPerSync: config.SHOPEE_AFFILIATE_SYNC_LIMIT,
     shopeeSubIdPrefix: config.SHOPEE_AFFILIATE_SUB_ID_PREFIX,
     commercialCopyMaxLength: config.COMMERCIAL_COPY_MAX_LENGTH,
+    commercialConfirmationEnvironment: {
+      groupSendEnabled: config.WHATSAPP_GROUP_SEND_ENABLED,
+      safeMode: config.EVOLUTION_SAFE_MODE,
+      schedulerEnabled: config.SCHEDULER_ENABLED,
+      maximumMessagesPerRun: config.WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN,
+    },
   });
   await app.listen({ host: '0.0.0.0', port: config.PORT });
 };

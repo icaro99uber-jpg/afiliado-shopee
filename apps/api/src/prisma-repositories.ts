@@ -494,6 +494,37 @@ export class PrismaCommercialPipelineRunRepository implements CommercialPipeline
       ? mapCommercialPipelineRun(record as unknown as Record<string, unknown>)
       : null;
   }
+
+  async findByDispatchId(
+    dispatchId: string,
+  ): Promise<CommercialPipelineRunRecord | null> {
+    if (!this.prisma.commercialPipelineRun) return null;
+    const record = await this.prisma.commercialPipelineRun.findUnique({
+      where: { dispatchId } as never,
+    });
+    return record
+      ? mapCommercialPipelineRun(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async claimConfirmation(
+    id: string,
+    confirmedAt: Date,
+  ): Promise<CommercialPipelineRunRecord | null> {
+    const result = await this.prisma.commercialPipelineRun.updateMany({
+      where: { id, mode: 'DRY_RUN', status: 'COMPLETED' },
+      data: {
+        mode: 'CONFIRMED',
+        status: 'STARTED',
+        confirmedAt,
+        completedAt: null,
+        failureCode: null,
+        investigationRequired: false,
+      } as never,
+    });
+    if (result.count !== 1) return null;
+    return this.findById(id);
+  }
 }
 
 export class PrismaCommercialDeliveryHistoryRepository implements CommercialDeliveryHistoryRepository {
@@ -761,7 +792,7 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
     filters: WhatsAppDispatchFilters,
   ): Promise<WhatsAppDispatchDetails[]> {
     const status = (
-      ['PENDING', 'SENT', 'FAILED'] as WhatsAppDispatchStatus[]
+      ['PENDING', 'PROCESSING', 'SENT', 'FAILED'] as WhatsAppDispatchStatus[]
     ).includes(filters.status as WhatsAppDispatchStatus)
       ? (filters.status as WhatsAppDispatchStatus)
       : undefined;
@@ -771,7 +802,7 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
         status,
         destinationId: filters.destinationId,
         productId: filters.productId,
-      },
+      } as never,
       include: { product: true, generatedCopy: true, destination: true },
       orderBy: { createdAt: 'desc' },
     })) as WhatsAppDispatchDetails[];
@@ -781,10 +812,10 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
     return (await this.prisma.whatsAppDispatch.update({
       where: { id },
       data: {
-        status: 'PENDING',
+        status: 'PROCESSING',
         attemptCount: { increment: 1 },
         errorMessage: null,
-      },
+      } as never,
     })) as WhatsAppDispatchRecord;
   }
 

@@ -22,6 +22,7 @@
     "whatsapp:group-test": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker whatsapp:group-test",
     "shopee:import": "corepack pnpm --filter @shopee-auto-affiliate-ai/api shopee:import",
     "commercial:dry-run": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:dry-run",
+    "commercial:confirm": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:confirm",
     "test:runtime": "corepack pnpm --filter @shopee-auto-affiliate-ai/api test:runtime",
     "build": "turbo build",
     "lint": "turbo lint",

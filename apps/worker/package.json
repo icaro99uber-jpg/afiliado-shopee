@@ -9,6 +9,7 @@
     "evolution:test-message": "tsx --tsconfig ../../tsconfig.runtime.json src/evolution-single-message-test.ts",
     "whatsapp:e2e-test": "tsx --tsconfig ../../tsconfig.runtime.json src/whatsapp-dispatch-e2e.ts",
     "whatsapp:group-test": "tsx --tsconfig ../../tsconfig.runtime.json src/whatsapp-group-test.ts",
+    "commercial:confirm": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-confirm.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

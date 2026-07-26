@@ -33,6 +33,9 @@ import type {
 } from '../../api/src/repositories';
 import { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 import { createWhatsAppDispatchWorker } from './whatsapp-dispatch-worker';
+import { parseLocalDotEnv } from './local-env';
+
+export { parseLocalDotEnv as parseGroupTestDotEnv } from './local-env';
 
 export const WHATSAPP_GROUP_TEST_REAL_FLAG = '--confirm-one-real-group-message';
 export const WHATSAPP_GROUP_TEST_MESSAGE =
@@ -172,27 +175,6 @@ const isCiActive = (value: string | undefined) =>
   value.trim() !== '' &&
   value.trim().toLowerCase() !== 'false';
 
-export const parseGroupTestDotEnv = (contents: string): NodeJS.ProcessEnv => {
-  const parsed: NodeJS.ProcessEnv = {};
-  for (const rawLine of contents.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(
-      line,
-    );
-    if (!match) continue;
-    let value = match[2].trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    parsed[match[1]] = value;
-  }
-  return parsed;
-};
-
 const loadLocalEnvironment = (options: WhatsAppGroupTestOptions) => {
   const path = options.envPath ?? ROOT_ENV_PATH;
   const reader =
@@ -204,7 +186,7 @@ const loadLocalEnvironment = (options: WhatsAppGroupTestOptions) => {
     );
   }
   return {
-    ...parseGroupTestDotEnv(reader(path)),
+    ...parseLocalDotEnv(reader(path)),
     ...(options.env ?? process.env),
   };
 };

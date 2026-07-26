@@ -1,7 +1,11 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { WhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
-import type { WhatsAppDispatchRepository } from './repositories';
+import type {
+  WhatsAppDispatchRepository,
+  WhatsAppDispatchRecord,
+  WhatsAppDispatchStatus,
+} from './repositories';
 import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
 
 export type SenderServiceOptions = {
@@ -32,7 +36,8 @@ type DispatchWithRelations = {
     sourceInstanceName?: string | null;
   };
   product?: { comissao?: number | null } | null;
-  status?: string;
+  status: WhatsAppDispatchStatus;
+  attemptCount: number;
 };
 
 const errorMessage = (error: unknown) =>
@@ -53,7 +58,7 @@ export const buildWhatsAppPublicMessage = (copy: {
 export class SenderService {
   constructor(private readonly options: SenderServiceOptions) {}
 
-  async sendDispatch(dispatchId: string) {
+  async sendDispatch(dispatchId: string): Promise<WhatsAppDispatchRecord> {
     this.options.logger.info(
       { event: 'whatsapp.dispatch.started', dispatchId },
       'WhatsApp dispatch started',

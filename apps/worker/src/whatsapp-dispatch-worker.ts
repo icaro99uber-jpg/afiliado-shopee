@@ -16,6 +16,7 @@ import {
   createSenderService,
 } from '../../api/src/application-services';
 import type { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
+import { finalizeCommercialPipelineRun } from '../../api/src/commercial-pipeline-run-finalizer';
 
 export type WhatsAppDispatchWorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -66,7 +67,41 @@ export const processWhatsAppDispatchJob = async (
     messageBuilder: options.messageBuilder,
     groupSendPolicy: options.groupSendPolicy,
   });
-  return sender.sendDispatch(job.data.dispatchId);
+  try {
+    const dispatch = await sender.sendDispatch(job.data.dispatchId);
+    await finalizeCommercialPipelineRun({
+      runs: repositories.commercialRuns,
+      dispatch,
+      failed: false,
+      logger: options.logger,
+    });
+    return dispatch;
+  } catch (error) {
+    const dispatch = await repositories.whatsappDispatches.findByIdWithDetails(
+      job.data.dispatchId,
+    );
+    if (dispatch) {
+      await finalizeCommercialPipelineRun({
+        runs: repositories.commercialRuns,
+        dispatch,
+        failed: true,
+        logger: options.logger,
+      }).catch((finalizationError) => {
+        options.logger.error(
+          {
+            event: 'commercial-pipeline.finalization.error',
+            dispatchId: job.data.dispatchId,
+            errorType:
+              finalizationError instanceof Error
+                ? finalizationError.name
+                : 'UnknownError',
+          },
+          'Commercial pipeline finalization failed',
+        );
+      });
+    }
+    throw error;
+  }
 };
 
 export const createWhatsAppDispatchWorker = (

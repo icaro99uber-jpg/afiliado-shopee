@@ -19,6 +19,11 @@ import { CopyPreviewService } from './copy-preview-service';
 import { CommercialCopyService } from './commercial-copy-service';
 import { CommercialPipelineService } from './commercial-pipeline-service';
 import {
+  CommercialPipelineConfirmationService,
+  type CommercialConfirmationEnvironment,
+  type CommercialConfirmationQueue,
+} from './commercial-pipeline-confirmation-service';
+import {
   PrismaAnalyticsRepository,
   PrismaCommercialDeliveryHistoryRepository,
   PrismaCommercialPipelineRunRepository,
@@ -89,6 +94,7 @@ export const createCommercialPipelineService = ({
     ApplicationRepositories,
     | 'shopeeOffers'
     | 'whatsappGroups'
+    | 'whatsappDispatches'
     | 'commercialRuns'
     | 'commercialDeliveryHistory'
   >;
@@ -105,8 +111,46 @@ export const createCommercialPipelineService = ({
     copy: new CommercialCopyService(maximumCopyLength),
     runs: repositories.commercialRuns,
     deliveryHistory: repositories.commercialDeliveryHistory,
+    dispatches: repositories.whatsappDispatches,
     instanceName,
     subIdPrefix,
+    logger,
+  });
+
+export const createCommercialPipelineConfirmationService = ({
+  repositories,
+  queue,
+  instanceName,
+  maximumCopyLength,
+  environment,
+  logger,
+}: {
+  repositories: Pick<
+    ApplicationRepositories,
+    | 'shopeeOffers'
+    | 'whatsappGroups'
+    | 'generatedCopies'
+    | 'whatsappDispatches'
+    | 'commercialRuns'
+    | 'commercialDeliveryHistory'
+  >;
+  queue: CommercialConfirmationQueue;
+  instanceName: string;
+  maximumCopyLength: number;
+  environment: CommercialConfirmationEnvironment;
+  logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+}) =>
+  new CommercialPipelineConfirmationService({
+    offers: repositories.shopeeOffers,
+    groups: repositories.whatsappGroups,
+    generatedCopies: repositories.generatedCopies,
+    dispatches: repositories.whatsappDispatches,
+    runs: repositories.commercialRuns,
+    deliveryHistory: repositories.commercialDeliveryHistory,
+    copy: new CommercialCopyService(maximumCopyLength),
+    queue,
+    instanceName,
+    environment,
     logger,
   });
 
