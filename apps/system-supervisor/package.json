@@ -1,0 +1,20 @@
+{
+  "name": "@shopee-auto-affiliate-ai/system-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src test --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@shopee-auto-affiliate-ai/config": "workspace:*",
+    "@shopee-auto-affiliate-ai/providers": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "vitest": "^2.0.0"
+  }
+}

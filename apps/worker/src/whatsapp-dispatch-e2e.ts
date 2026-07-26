@@ -2,12 +2,17 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { QueueEvents, type Job } from 'bullmq';
-import { loadConfig, type AppEnv } from '@shopee-auto-affiliate-ai/config';
+import {
+  loadConfig,
+  parseDotEnv,
+  type AppEnv,
+} from '@shopee-auto-affiliate-ai/config';
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import {
   createWhatsAppProvider,
   maskEvolutionDestination,
   normalizeEvolutionDestination,
+  parseEvolutionConnectionState,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
   CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS,
@@ -162,24 +167,7 @@ const isCiActive = (value: string | undefined) =>
   value.trim() !== '' &&
   value.trim().toLowerCase() !== 'false';
 
-export const parseDotEnv = (contents: string): NodeJS.ProcessEnv => {
-  const parsed: NodeJS.ProcessEnv = {};
-  for (const rawLine of contents.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(
-      line,
-    );
-    if (!match) continue;
-    let value = match[2].trim();
-    const quoted =
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"));
-    if (quoted) value = value.slice(1, -1);
-    parsed[match[1]] = value;
-  }
-  return parsed;
-};
+export { parseDotEnv };
 
 const loadLocalEnvironment = ({
   env,
@@ -267,16 +255,6 @@ const validateControlledConfig = (config: AppEnv) => {
   };
 };
 
-const extractInstanceState = (body: unknown) => {
-  if (!body || typeof body !== 'object') return undefined;
-  const response = body as {
-    state?: unknown;
-    instance?: { state?: unknown };
-  };
-  const state = response.instance?.state ?? response.state;
-  return typeof state === 'string' ? state.toLowerCase() : undefined;
-};
-
 export const runWhatsAppDispatchE2EPreflight = async (
   config: AppEnv,
 ): Promise<WhatsAppDispatchE2EPreflight> => {
@@ -313,7 +291,9 @@ export const runWhatsAppDispatchE2EPreflight = async (
         'WHATSAPP_E2E_INSTANCE_UNAVAILABLE',
       );
     }
-    const instanceState = extractInstanceState(await instanceResponse.json());
+    const instanceState = parseEvolutionConnectionState(
+      await instanceResponse.json(),
+    );
     if (instanceState !== 'open') {
       throw new WhatsAppDispatchE2EError(
         'A instancia controlada nao esta conectada',

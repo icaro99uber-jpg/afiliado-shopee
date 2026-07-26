@@ -4,6 +4,7 @@ export * from './shopee-affiliate-offers';
 export * from './manual-shopee-affiliate-offer-provider';
 export * from './mock-shopee-affiliate-offer-provider';
 export * from './official-shopee-affiliate-offer-provider';
+export { parseEvolutionConnectionState } from './evolution-connection-state';
 
 export {
   EvolutionApiWhatsAppProvider,

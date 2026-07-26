@@ -1,1 +1,23 @@
-{"name":"@shopee-auto-affiliate-ai/database","version":"0.1.0","private":true,"type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"prisma generate && tsc -p tsconfig.json","lint":"eslint src --ext .ts","typecheck":"tsc -p tsconfig.json --noEmit","test":"vitest run --passWithNoTests","db:generate":"prisma generate","db:migrate":"prisma migrate dev"},"dependencies":{"@prisma/client":"^5.18.0"},"devDependencies":{"prisma":"^5.18.0"}}
+{
+  "name": "@shopee-auto-affiliate-ai/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "db:generate": "prisma generate",
+    "db:deploy": "prisma migrate deploy",
+    "db:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.18.0"
+  }
+}

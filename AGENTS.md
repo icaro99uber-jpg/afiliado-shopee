@@ -738,3 +738,35 @@ Observabilidade:
   `GET /commercial-automation/executions/:id` expoem historico sanitizado.
 - Nao existe endpoint para disparar tick ou habilitar o Scheduler, e o
   dashboard nao ganhou controles nesta sprint.
+
+## Supervisor local
+
+Responsabilidade:
+
+- Operar a topologia local atual por `system:start`, `system:status`,
+  `system:logs` e `system:stop`.
+- Iniciar explicitamente API, dashboard e worker comercial; adicionar o worker
+  isolado de `whatsapp-dispatch` somente em modo `send`.
+- Manter estado e logs locais sanitizados em `.runtime/local-system/`.
+
+Dependencias:
+
+- `apps/system-supervisor`, implementado com APIs nativas de Node.js e
+  adaptadores injetaveis.
+- Compose principal e compose isolado em `infra/evolution`.
+- Endpoints existentes de health, Scheduler e automacao comercial.
+- Bootstrap isolado `apps/worker/src/whatsapp-dispatch-runtime.ts`.
+
+Comportamento operacional:
+
+- Nunca executar o script raiz `dev` nem iniciar o worker do pipeline legado.
+- Nunca disparar tick, dry-run, confirmacao, dispatch, E2E ou mensagem no
+  bootstrap.
+- Carregar `.env` ignorado com variaveis do processo prevalecendo, sem
+  persistir ou imprimir segredos.
+- Validar identidade e horario de cada PID antes da parada; ocupantes externos
+  de porta e PIDs divergentes nunca sao encerrados.
+- Usar `prisma migrate deploy`, nunca `migrate dev`, na operacao local.
+- Parar composes sem remover volumes, dados ou agendamentos.
+- O supervisor apenas consulta Schedulers; registro ou remocao continuam sob
+  responsabilidade dos bootstraps dos respectivos workers.

@@ -632,3 +632,38 @@ A API oferece apenas leitura em `GET /commercial-automation/scheduler`,
 ativacao. O CLI `corepack pnpm commercial:automation:preview` forca preview,
 exige ambos os Schedulers desligados e nao compoe Evolution, fila de dispatch
 ou worker de WhatsApp.
+
+## Supervisor do sistema local
+
+`apps/system-supervisor` e a camada operacional local da Sprint 17.3. Sua CLI
+possui quatro comandos raiz: `system:start`, `system:status`, `system:logs` e
+`system:stop`. O nucleo recebe adaptadores de comando, processo, porta, HTTP,
+relogio e espera, permitindo testes sem Docker, Redis, Prisma, processos ou
+rede reais.
+
+O start usa uma sequencia fixa: validacao da raiz e ferramentas, `docker info`,
+compose principal, script `evolution:up`, healthchecks, `prisma generate`,
+`prisma migrate deploy`, API, dashboard, worker comercial e, apenas em `send`,
+o consumer isolado de dispatch. Ele nunca chama o script raiz `dev`, o bootstrap
+legado de `apps/worker/src/index.ts`, um tick comercial, o E2E ou CLIs de
+confirmacao. Falhas depois do spawn encerram somente filhos criados pela
+tentativa atual.
+
+O runtime persiste em `.runtime/local-system/state.json` apenas metadados
+sanitizados. A validacao combina PID, marcador conhecido do entrypoint e horario
+de criacao para evitar matar PID reutilizado. Em Windows, a parada tenta sinal
+gracioso e depois encerra a arvore somente do PID validado. Os composes recebem
+`stop`, nunca `down -v`; o supervisor nao registra nem remove Schedulers.
+
+`apps/worker/src/whatsapp-dispatch-runtime.ts` e o unico novo bootstrap de
+envio. Ele compoe `createWhatsAppProvider`, `WhatsAppGroupSendPolicy` e
+`createWhatsAppDispatchWorker`; por isso consome somente `whatsapp-dispatch` e
+preserva `finalizeCommercialPipelineRun`. Nao cria dispatch, job ou mensagem no
+bootstrap e nao importa Hunter, Score, Copy, Scheduler ou o pipeline legado.
+
+O status e parcial-safe e consulta os contratos existentes `/health`,
+`/scheduler`, `/commercial-automation/status` e
+`/commercial-automation/scheduler`, alem da saude dos composes e do contrato
+read-only `instance/connectionState` da Evolution. A saida nunca inclui API key,
+JID, mensagem, payload, credencial, headers ou resposta externa bruta. Logs
+aceitam somente nomes logicos predefinidos e de 1 a 1000 linhas.
