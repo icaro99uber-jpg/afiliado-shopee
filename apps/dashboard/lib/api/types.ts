@@ -107,7 +107,8 @@ export type WhatsAppGroupSyncReport = {
   active: number;
 };
 
-export type WhatsAppDispatchStatus = 'PENDING' | 'SENT' | 'FAILED';
+export type WhatsAppDispatchStatus =
+  'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED';
 
 export type DashboardProduct = Product & {
   providerProductId?: string;
@@ -288,11 +289,34 @@ export type CommercialPipelineRun = {
   copyPreview: string | null;
   plannedSubIds: string[];
   failureCode: string | null;
+  confirmedAt: string | null;
+  finalStatus: 'pending' | 'sent' | 'failed' | 'ambiguous' | null;
+  dispatchStatus: 'pending' | 'processing' | 'sent' | 'failed' | null;
+  attemptCount: number;
+  externalMessageIdRecorded: boolean;
+  investigationRequired: boolean;
   createdAt: string;
   completedAt: string | null;
-  dispatchWasCreated: false;
-  jobWasCreated: false;
+  dispatchWasCreated: boolean;
+  jobWasCreated: boolean;
+  messageWasSent: boolean;
+  confirmationAvailable: boolean;
+};
+
+export type CommercialPipelineConfirmationResult = {
+  runId: string;
+  mode: 'confirmed';
+  status: 'queued';
+  selectedProduct: Pick<CommercialSelectedProduct, 'name' | 'price'>;
+  selectedGroup: Pick<CommercialSelectedGroup, 'name' | 'fingerprint'>;
+  copyPreview: string;
+  dispatchWasCreated: true;
+  jobWasCreated: true;
   messageWasSent: false;
+  dispatchStatus: 'pending';
+  attemptCount: 0;
+  externalMessageIdRecorded: false;
+  investigationRequired: false;
 };
 
 export type CommercialPipelineRunPage = {

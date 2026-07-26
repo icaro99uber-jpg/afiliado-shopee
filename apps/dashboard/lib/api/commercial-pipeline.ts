@@ -1,6 +1,7 @@
 import { apiRequest } from './client';
 import type {
   CommercialPipelineDryRunResult,
+  CommercialPipelineConfirmationResult,
   CommercialPipelineInput,
   CommercialPipelineRun,
   CommercialPipelineRunPage,
@@ -14,10 +15,22 @@ export const runCommercialPipelineDryRun = (input: CommercialPipelineInput) =>
 
 export const listCommercialPipelineRuns = (page = 1, limit = 10) =>
   apiRequest<CommercialPipelineRunPage>(
-    `/commercial-pipeline/runs?page=${page}&limit=${limit}&mode=DRY_RUN`,
+    `/commercial-pipeline/runs?page=${page}&limit=${limit}`,
   );
 
 export const getCommercialPipelineRun = (id: string) =>
   apiRequest<CommercialPipelineRun>(
     `/commercial-pipeline/runs/${encodeURIComponent(id)}`,
+  );
+
+export const confirmCommercialPipelineRun = (
+  id: string,
+  confirmation: string,
+) =>
+  apiRequest<CommercialPipelineConfirmationResult>(
+    `/commercial-pipeline/runs/${encodeURIComponent(id)}/confirm`,
+    {
+      method: 'POST',
+      body: { confirmation },
+    },
   );

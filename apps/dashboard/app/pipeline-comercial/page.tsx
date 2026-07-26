@@ -6,8 +6,10 @@ import {
   History,
   PackageCheck,
   PlayCircle,
+  Send,
   ShieldCheck,
   Users,
+  X,
 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { CopyButton } from '../../components/copy-button';
@@ -17,6 +19,7 @@ import { LoadingState } from '../../components/loading-state';
 import { PageHeader } from '../../components/page-header';
 import { StatusBadge } from '../../components/status-badge';
 import {
+  confirmCommercialPipelineRun,
   listCommercialPipelineRuns,
   runCommercialPipelineDryRun,
   type CommercialPipelineDryRunResult,
@@ -126,6 +129,13 @@ export default function CommercialPipelinePage() {
   const [running, setRunning] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [confirmingRun, setConfirmingRun] =
+    useState<CommercialPipelineRun | null>(null);
+  const [confirmationText, setConfirmationText] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(
+    null,
+  );
 
   const loadHistory = useCallback(async () => {
     setLoadingHistory(true);
@@ -168,12 +178,38 @@ export default function CommercialPipelinePage() {
     void execute();
   };
 
+  const closeConfirmation = () => {
+    if (confirming) return;
+    setConfirmingRun(null);
+    setConfirmationText('');
+    setConfirmationError(null);
+  };
+
+  const confirmRealSend = async () => {
+    if (!confirmingRun || confirming) return;
+    setConfirming(true);
+    setConfirmationError(null);
+    try {
+      await confirmCommercialPipelineRun(confirmingRun.id, confirmationText);
+      setConfirmingRun(null);
+      setConfirmationText('');
+      await loadHistory();
+    } catch (error) {
+      setConfirmationError(
+        error instanceof Error ? error.message : 'Erro inesperado.',
+      );
+      await loadHistory();
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   return (
     <div className="grid gap-6">
       <PageHeader
         title="Pipeline comercial"
-        description="Selecione um produto e um unico grupo autorizado, gere a copy final e audite o plano sem criar dispatch, job ou mensagem."
-        actions={<StatusBadge tone="warning">Somente dry-run</StatusBadge>}
+        description="Prepare o dry-run, revise o snapshot e confirme no maximo um envio real ao grupo autorizado."
+        actions={<StatusBadge tone="warning">Envio controlado</StatusBadge>}
       />
 
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -423,7 +459,7 @@ export default function CommercialPipelinePage() {
         <div className="flex items-center gap-2">
           <History className="h-5 w-5 text-slate-600" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-slate-950">
-            Historico de dry-runs
+            Historico comercial
           </h2>
         </div>
         {loadingHistory ? <LoadingState label="Carregando historico" /> : null}
@@ -436,7 +472,7 @@ export default function CommercialPipelinePage() {
         {!loadingHistory && !historyError && runs.length === 0 ? (
           <EmptyState
             title="Historico vazio"
-            description="As execucoes dry-run aparecerao aqui para auditoria."
+            description="Dry-runs e confirmacoes aparecerao aqui para auditoria."
           />
         ) : null}
         {!loadingHistory && !historyError && runs.length > 0 ? (
@@ -457,12 +493,16 @@ export default function CommercialPipelinePage() {
                         tone={
                           run.status === 'completed'
                             ? 'ok'
-                            : run.status === 'blocked'
+                            : run.status === 'blocked' ||
+                                run.status === 'started'
                               ? 'warning'
                               : 'error'
                         }
                       >
                         {run.status}
+                      </StatusBadge>
+                      <StatusBadge tone="neutral">
+                        {run.mode === 'confirmed' ? 'confirmado' : 'dry-run'}
                       </StatusBadge>
                       <span className="text-xs text-slate-500">
                         {formatDate(run.createdAt)}
@@ -500,11 +540,153 @@ export default function CommercialPipelinePage() {
                     </div>
                   </div>
                 </div>
+                {run.mode === 'confirmed' || run.dispatchWasCreated ? (
+                  <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-sm sm:grid-cols-3">
+                    <div>
+                      <span className="block text-xs text-slate-500">
+                        Status do dispatch
+                      </span>
+                      <strong className="text-slate-950">
+                        {run.dispatchStatus ?? run.finalStatus ?? 'pendente'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-xs text-slate-500">
+                        Tentativas
+                      </span>
+                      <strong className="text-slate-950">
+                        {run.attemptCount}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-xs text-slate-500">
+                        ID externo registrado
+                      </span>
+                      <strong className="text-slate-950">
+                        {run.externalMessageIdRecorded ? 'Sim' : 'Nao'}
+                      </strong>
+                    </div>
+                    {run.investigationRequired ? (
+                      <p className="sm:col-span-3 rounded-md bg-amber-50 p-3 text-amber-900">
+                        Resultado ambiguo ou falho. Nao tente novamente; faca
+                        investigacao manual.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {run.confirmationAvailable ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmingRun(run);
+                      setConfirmationText('');
+                      setConfirmationError(null);
+                    }}
+                    className="mt-4 inline-flex items-center gap-2 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    <Send className="h-4 w-4" aria-hidden="true" />
+                    Confirmar envio real
+                  </button>
+                ) : null}
               </article>
             ))}
           </div>
         ) : null}
       </section>
+
+      {confirmingRun ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="commercial-confirm-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-red-600">
+                  Envio real e irreversivel
+                </p>
+                <h2
+                  id="commercial-confirm-title"
+                  className="mt-1 text-xl font-semibold text-slate-950"
+                >
+                  Confirmar uma mensagem comercial
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeConfirmation}
+                disabled={confirming}
+                aria-label="Fechar confirmacao"
+                className="rounded-md p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2">
+              <div>
+                <span className="text-slate-500">Produto</span>
+                <p className="font-medium text-slate-950">
+                  {confirmingRun.selectedProduct?.name}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500">Grupo autorizado</span>
+                <p className="font-mono text-xs text-slate-950">
+                  {confirmingRun.selectedGroup?.fingerprint}
+                </p>
+              </div>
+            </div>
+            <pre className="mt-4 max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-sm leading-6 text-slate-50">
+              {confirmingRun.copyPreview}
+            </pre>
+
+            <label className="mt-5 block">
+              <span className="text-sm font-medium text-slate-800">
+                Digite CONFIRMAR_ENVIO_COMERCIAL
+              </span>
+              <input
+                value={confirmationText}
+                onChange={(event) => setConfirmationText(event.target.value)}
+                autoComplete="off"
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </label>
+            {confirmationError ? (
+              <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-800">
+                {confirmationError}
+              </p>
+            ) : null}
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              Esta acao cria um unico dispatch e um unico job, sem retry. Um
+              timeout ou resultado ambiguo exige investigacao manual.
+            </p>
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeConfirmation}
+                disabled={confirming}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRealSend()}
+                disabled={
+                  confirming || confirmationText !== 'CONFIRMAR_ENVIO_COMERCIAL'
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+                {confirming ? 'Confirmando...' : 'Enviar uma mensagem real'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

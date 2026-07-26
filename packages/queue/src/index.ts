@@ -1,8 +1,4 @@
-import {
-  Queue,
-  type JobSchedulerJson,
-  type JobsOptions,
-} from 'bullmq';
+import { Queue, type JobSchedulerJson, type JobsOptions } from 'bullmq';
 import IORedis from 'ioredis';
 import type { ProductFilters } from '@shopee-auto-affiliate-ai/shared';
 import type {
@@ -29,8 +25,7 @@ export const JOB_NAMES = {
   whatsappDispatch: 'whatsapp-dispatch',
 } as const;
 
-export const DEFAULT_PIPELINE_SCHEDULER_JOB_ID =
-  'scheduled-pipeline-product';
+export const DEFAULT_PIPELINE_SCHEDULER_JOB_ID = 'scheduled-pipeline-product';
 
 export const DEFAULT_WHATSAPP_DISPATCH_JOB_OPTIONS: JobsOptions = {
   attempts: 3,
@@ -73,7 +68,7 @@ export const enqueueWhatsAppDispatch = (
     ...opts,
   });
 
-export const enqueueControlledE2EWhatsAppDispatch = (
+export const enqueueControlledWhatsAppDispatch = (
   queue: Queue<WhatsAppDispatchJob>,
   data: WhatsAppDispatchJob,
   jobId: string,
@@ -82,6 +77,9 @@ export const enqueueControlledE2EWhatsAppDispatch = (
     ...CONTROLLED_E2E_WHATSAPP_DISPATCH_JOB_OPTIONS,
     jobId,
   });
+
+export const enqueueControlledE2EWhatsAppDispatch =
+  enqueueControlledWhatsAppDispatch;
 
 export type BullMqPipelineSchedulerQueue = {
   upsertJobScheduler: (
@@ -98,10 +96,7 @@ export type BullMqPipelineSchedulerQueue = {
   removeJobScheduler: (jobSchedulerId: string) => Promise<boolean>;
 };
 
-const filtersAreEqual = (
-  left?: ProductFilters,
-  right?: ProductFilters,
-) => {
+const filtersAreEqual = (left?: ProductFilters, right?: ProductFilters) => {
   const leftEntries = Object.entries(left ?? {});
   const rightEntries = Object.entries(right ?? {});
   return (
@@ -132,9 +127,7 @@ const toSchedulerState = (
     cronExpression: scheduler.pattern ?? null,
     timezone: scheduler.tz ?? null,
     filters: scheduler.template?.data?.filters,
-    nextRunAt: scheduler.next
-      ? new Date(scheduler.next).toISOString()
-      : null,
+    nextRunAt: scheduler.next ? new Date(scheduler.next).toISOString() : null,
   };
 };
 

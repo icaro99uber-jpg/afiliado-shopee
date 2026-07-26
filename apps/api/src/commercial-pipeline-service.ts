@@ -13,6 +13,8 @@ import type {
   CommercialPipelineRunRepository,
   ShopeeOfferRecord,
   ShopeeOfferRepository,
+  WhatsAppDispatchDetails,
+  WhatsAppDispatchRepository,
   WhatsAppGroupDirectoryRepository,
   WhatsAppGroupRecord,
 } from './repositories';
@@ -79,6 +81,7 @@ export type CommercialPipelineServiceOptions = {
   copy: CommercialCopyGenerator;
   runs: CommercialPipelineRunRepository;
   deliveryHistory: CommercialDeliveryHistoryRepository;
+  dispatches?: Pick<WhatsAppDispatchRepository, 'findByIdWithDetails'>;
   instanceName: string;
   subIdPrefix: string;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
@@ -86,7 +89,7 @@ export type CommercialPipelineServiceOptions = {
 };
 
 const MAXIMUM_CANDIDATES = 100;
-const GROUP_FINGERPRINT = /^grp_[a-f0-9]{12}$/;
+export const COMMERCIAL_GROUP_FINGERPRINT = /^grp_[a-f0-9]{12}$/;
 const HTTP_URL = /^https?:\/\//i;
 
 const normalizeInput = (
@@ -151,7 +154,7 @@ const addReason = (
   summary[code] = (summary[code] ?? 0) + 1;
 };
 
-const productRejections = (
+export const commercialProductRejections = (
   product: ShopeeOfferRecord,
   now: Date,
 ): CommercialPipelineRejectionCode[] => {
@@ -199,6 +202,7 @@ const rankCandidates = (
 
 export const sanitizeCommercialPipelineRun = (
   run: CommercialPipelineRunRecord,
+  dispatch?: WhatsAppDispatchDetails | null,
 ) => ({
   id: run.id,
   mode: run.mode.toLocaleLowerCase().replace('_', '-'),
@@ -227,11 +231,23 @@ export const sanitizeCommercialPipelineRun = (
   copyPreview: run.copyPreview,
   plannedSubIds: run.plannedSubIds,
   failureCode: run.failureCode,
+  confirmedAt: run.confirmedAt?.toISOString() ?? null,
+  finalStatus: run.finalStatus?.toLocaleLowerCase() ?? null,
+  dispatchStatus: dispatch?.status?.toLocaleLowerCase() ?? null,
+  attemptCount: dispatch?.attemptCount ?? 0,
+  externalMessageIdRecorded: Boolean(dispatch?.externalMessageId),
+  investigationRequired: run.investigationRequired ?? false,
   createdAt: run.createdAt.toISOString(),
   completedAt: run.completedAt?.toISOString() ?? null,
-  dispatchWasCreated: false,
-  jobWasCreated: false,
-  messageWasSent: false,
+  dispatchWasCreated: Boolean(run.dispatchId),
+  jobWasCreated: Boolean(run.jobId),
+  messageWasSent: run.finalStatus === 'SENT' || dispatch?.status === 'SENT',
+  confirmationAvailable:
+    run.mode === 'DRY_RUN' &&
+    run.status === 'COMPLETED' &&
+    !run.confirmedAt &&
+    !run.dispatchId &&
+    !run.jobId,
 });
 
 export class CommercialPipelineService {
@@ -312,7 +328,7 @@ export class CommercialPipelineService {
       const ranked: { product: ShopeeOfferRecord; score: number }[] = [];
 
       for (const product of candidates) {
-        const reasons = productRejections(product, startedAt);
+        const reasons = commercialProductRejections(product, startedAt);
         const score = this.options.score.calculate({
           id: product.id,
           providerProductId: product.providerProductId,
@@ -355,7 +371,7 @@ export class CommercialPipelineService {
           group.active === true &&
           group.available === true &&
           group.sourceInstanceName === this.options.instanceName &&
-          GROUP_FINGERPRINT.test(group.fingerprint),
+          COMMERCIAL_GROUP_FINGERPRINT.test(group.fingerprint),
       );
       if (groups.length === 0) {
         return await block('NO_AUTHORIZED_GROUP', {
@@ -507,8 +523,18 @@ export class CommercialPipelineService {
 
   async listRuns(filters: CommercialPipelineRunFilters) {
     const result = await this.options.runs.list(filters);
+    const items = await Promise.all(
+      result.items.map(async (run) =>
+        sanitizeCommercialPipelineRun(
+          run,
+          run.dispatchId && this.options.dispatches
+            ? await this.options.dispatches.findByIdWithDetails(run.dispatchId)
+            : null,
+        ),
+      ),
+    );
     return {
-      items: result.items.map(sanitizeCommercialPipelineRun),
+      items,
       page: filters.page,
       limit: filters.limit,
       total: result.total,
@@ -523,6 +549,10 @@ export class CommercialPipelineService {
         'Execucao comercial nao encontrada',
         'COMMERCIAL_PIPELINE_RUN_NOT_FOUND',
       );
-    return sanitizeCommercialPipelineRun(run);
+    const dispatch =
+      run.dispatchId && this.options.dispatches
+        ? await this.options.dispatches.findByIdWithDetails(run.dispatchId)
+        : null;
+    return sanitizeCommercialPipelineRun(run, dispatch);
   }
 }

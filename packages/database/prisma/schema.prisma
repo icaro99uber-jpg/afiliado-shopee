@@ -86,20 +86,21 @@ model WhatsAppDestination {
 }
 
 model WhatsAppDispatch {
-  id                String                 @id @default(cuid())
-  productId         String
-  product           ProductLead            @relation(fields: [productId], references: [id], onDelete: Cascade)
-  generatedCopyId   String
-  generatedCopy     GeneratedCopy          @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
-  destinationId     String
-  destination       WhatsAppDestination    @relation(fields: [destinationId], references: [id], onDelete: Cascade)
-  externalMessageId String?
-  status            WhatsAppDispatchStatus @default(PENDING)
-  attemptCount      Int                    @default(0)
-  errorMessage      String?
-  sentAt            DateTime?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  id                    String                 @id @default(cuid())
+  productId             String
+  product               ProductLead            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  generatedCopyId       String
+  generatedCopy         GeneratedCopy          @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
+  destinationId         String
+  destination           WhatsAppDestination    @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  externalMessageId     String?
+  status                WhatsAppDispatchStatus @default(PENDING)
+  attemptCount          Int                    @default(0)
+  errorMessage          String?
+  sentAt                DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  commercialPipelineRun CommercialPipelineRun?
 
   @@unique([generatedCopyId, destinationId])
   @@index([productId])
@@ -133,28 +134,34 @@ model Coupon {
 }
 
 model CommercialPipelineRun {
-  id                 String                      @id @default(cuid())
-  mode               CommercialPipelineRunMode
-  status             CommercialPipelineRunStatus
-  productId          String?
-  product            ProductLead?                @relation(fields: [productId], references: [id], onDelete: SetNull)
-  groupDestinationId String?
-  groupDestination   WhatsAppDestination?        @relation(fields: [groupDestinationId], references: [id], onDelete: SetNull)
-  productName        String?
-  productPrice       Decimal?                    @db.Decimal(14, 4)
-  groupName          String?
-  groupFingerprint   String?
-  score              Int?
-  candidateCount     Int                         @default(0)
-  eligibleCount      Int                         @default(0)
-  rejectedCount      Int                         @default(0)
-  rejectionSummary   Json
-  selectionReasons   Json
-  copyPreview        String?
-  plannedSubIds      Json
-  failureCode        String?
-  createdAt          DateTime                    @default(now())
-  completedAt        DateTime?
+  id                    String                         @id @default(cuid())
+  mode                  CommercialPipelineRunMode
+  status                CommercialPipelineRunStatus
+  productId             String?
+  product               ProductLead?                   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  groupDestinationId    String?
+  groupDestination      WhatsAppDestination?           @relation(fields: [groupDestinationId], references: [id], onDelete: SetNull)
+  productName           String?
+  productPrice          Decimal?                       @db.Decimal(14, 4)
+  groupName             String?
+  groupFingerprint      String?
+  score                 Int?
+  candidateCount        Int                            @default(0)
+  eligibleCount         Int                            @default(0)
+  rejectedCount         Int                            @default(0)
+  rejectionSummary      Json
+  selectionReasons      Json
+  copyPreview           String?
+  plannedSubIds         Json
+  dispatchId            String?                        @unique
+  dispatch              WhatsAppDispatch?              @relation(fields: [dispatchId], references: [id], onDelete: SetNull)
+  jobId                 String?                        @unique
+  confirmedAt           DateTime?
+  finalStatus           CommercialPipelineFinalStatus?
+  investigationRequired Boolean                        @default(false)
+  failureCode           String?
+  createdAt             DateTime                       @default(now())
+  completedAt           DateTime?
 
   @@index([createdAt])
   @@index([status, mode])
@@ -164,6 +171,7 @@ model CommercialPipelineRun {
 
 enum WhatsAppDispatchStatus {
   PENDING
+  PROCESSING
   SENT
   FAILED
 }
@@ -199,4 +207,11 @@ enum CommercialPipelineRunStatus {
   COMPLETED
   BLOCKED
   FAILED
+}
+
+enum CommercialPipelineFinalStatus {
+  PENDING
+  SENT
+  FAILED
+  AMBIGUOUS
 }

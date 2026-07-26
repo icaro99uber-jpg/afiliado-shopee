@@ -239,10 +239,32 @@ O resultado fixa `dispatchWillBeCreated=false`, `jobWillBeCreated=false` e
 `messageWillBeSent=false`. Nao ha endpoint confirmado e nenhuma acao desta task
 chama Shopee real, Evolution, Redis, worker ou fila.
 
-## Task 16.2
+## Pipeline comercial confirmado — Task 16.2
 
-Uma task futura separada podera desenhar confirmacao comercial, autenticacao,
-autorizacao, idempotencia e controles operacionais. Ela devera revisar
-explicitamente o historico, o grupo, o produto, o link e as protecoes de envio
-antes de criar qualquer dispatch ou job. O dry-run desta task nao concede
-autorizacao para envio.
+`POST /commercial-pipeline/runs/:id/confirm` confirma somente um dry-run
+`COMPLETED` existente e aceita exclusivamente
+`CONFIRMAR_ENVIO_COMERCIAL`. O proprio run muda para `CONFIRMED`; produto,
+grupo, copy e Sub_ids permanecem os snapshots aprovados.
+
+Antes do dispatch, o fluxo revalida a oferta `MOCK` ou `MANUAL`, o link, a copy,
+o unico grupo autorizado da instancia, o historico de entrega, safe mode,
+master switch, Scheduler desligado e limite de uma mensagem. Nenhum ranking e
+executado e nenhum outro produto/grupo e escolhido.
+
+Copy tecnica, dispatch e job possuem IDs deterministicos ligados ao `dryRunId`.
+A reivindicacao atomica e a existencia de qualquer um desses registros bloqueiam
+repeticao. O job `whatsapp-dispatch` tem uma tentativa, sem backoff ou remocao.
+O worker existente finaliza o run; timeout, falha e ambiguidade nunca geram
+retry e registram investigacao obrigatoria.
+
+Comando controlado:
+
+```powershell
+corepack pnpm commercial:confirm -- --run-id=<id> --confirm-one-real-commercial-message
+```
+
+O comando carrega o `.env` ignorado sem imprimi-lo, bloqueia CI, provider Shopee
+official, Scheduler, safe mode falso, master switch desligado, limites diferentes
+de 1 e workers concorrentes. Ele inicia somente o consumer de dispatch. Cupons,
+scraping, API oficial da Shopee, Hunter, Score, Copy legado, pipeline-product e
+Scheduler continuam fora do fluxo.

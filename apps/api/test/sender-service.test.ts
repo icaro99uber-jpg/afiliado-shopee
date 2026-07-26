@@ -98,7 +98,7 @@ describe('SenderService', () => {
       1,
       expect.objectContaining({
         data: expect.objectContaining({
-          status: 'PENDING',
+          status: 'PROCESSING',
           attemptCount: { increment: 1 },
         }),
       }),

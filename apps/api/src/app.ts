@@ -22,12 +22,16 @@ import {
   createBullMqPipelineScheduler,
   createProductPipelineQueue,
   createRedisConnection,
+  createWhatsAppDispatchQueue,
+  enqueueControlledWhatsAppDispatch,
   JOB_NAMES,
   type JobsOptions,
   type PipelineProductJob,
+  type WhatsAppDispatchJob,
 } from '@shopee-auto-affiliate-ai/queue';
 import {
   createApplicationServices,
+  createCommercialPipelineConfirmationService,
   createCommercialPipelineService,
   createPrismaRepositories,
 } from './application-services';
@@ -42,6 +46,7 @@ import type {
   CommercialPipelineInput,
   CommercialPipelineService,
 } from './commercial-pipeline-service';
+import type { CommercialPipelineConfirmationService } from './commercial-pipeline-confirmation-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -62,6 +67,15 @@ type BuildAppOptions = {
     getJob?: (id: string) => Promise<PipelineJobLike | null | undefined>;
     close?: () => Promise<void>;
   };
+  whatsappDispatchQueue?: {
+    add: (
+      name: string,
+      data: WhatsAppDispatchJob,
+      opts?: JobsOptions,
+    ) => Promise<{ id?: string | number }>;
+    getJob: (id: string) => Promise<unknown | null | undefined>;
+    close?: () => Promise<void>;
+  };
   redisUrl?: string;
   groupDirectoryProvider?: WhatsAppGroupDirectoryProvider;
   groupInstanceName?: string;
@@ -77,6 +91,16 @@ type BuildAppOptions = {
     CommercialPipelineService,
     'dryRun' | 'listRuns' | 'findRun'
   >;
+  commercialPipelineConfirmationService?: Pick<
+    CommercialPipelineConfirmationService,
+    'confirm'
+  >;
+  commercialConfirmationEnvironment?: {
+    groupSendEnabled: boolean;
+    safeMode: boolean;
+    schedulerEnabled: boolean;
+    maximumMessagesPerRun: number;
+  };
 };
 
 type PipelineJobLike = {
@@ -223,15 +247,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         })
       : undefined);
   let redisConnection: ReturnType<typeof createRedisConnection> | undefined;
+  const getRedisConnection = () => {
+    redisConnection ??= createRedisConnection(
+      options.redisUrl ?? process.env.REDIS_URL ?? 'redis://localhost:6379',
+    );
+    return redisConnection;
+  };
   let pipelineQueue = options.pipelineQueue;
   const getPipelineQueue = () => {
     if (!pipelineQueue) {
-      redisConnection = createRedisConnection(
-        options.redisUrl ?? process.env.REDIS_URL ?? 'redis://localhost:6379',
-      );
-      pipelineQueue = createProductPipelineQueue(redisConnection);
+      pipelineQueue = createProductPipelineQueue(getRedisConnection());
     }
     return pipelineQueue as NonNullable<typeof pipelineQueue>;
+  };
+  let whatsappDispatchQueue = options.whatsappDispatchQueue;
+  const getWhatsAppDispatchQueue = () => {
+    whatsappDispatchQueue ??= createWhatsAppDispatchQueue(getRedisConnection());
+    return whatsappDispatchQueue as NonNullable<typeof whatsappDispatchQueue>;
   };
   let pipelineScheduler:
     ReturnType<typeof createBullMqPipelineScheduler> | undefined;
@@ -268,6 +300,37 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       logger: app.log,
     });
     return commercialPipelineService;
+  };
+  let commercialPipelineConfirmationService =
+    options.commercialPipelineConfirmationService;
+  const getCommercialPipelineConfirmationService = () => {
+    commercialPipelineConfirmationService ??=
+      createCommercialPipelineConfirmationService({
+        repositories,
+        queue: {
+          hasJob: async (jobId) =>
+            Boolean(await getWhatsAppDispatchQueue().getJob(jobId)),
+          enqueue: async (dispatchId, jobId) => {
+            await enqueueControlledWhatsAppDispatch(
+              getWhatsAppDispatchQueue() as ReturnType<
+                typeof createWhatsAppDispatchQueue
+              >,
+              { dispatchId },
+              jobId,
+            );
+          },
+        },
+        instanceName: options.groupInstanceName ?? 'affiliate-bot',
+        maximumCopyLength: options.commercialCopyMaxLength ?? 1000,
+        environment: options.commercialConfirmationEnvironment ?? {
+          groupSendEnabled: false,
+          safeMode: true,
+          schedulerEnabled: options.schedulerEnabled ?? false,
+          maximumMessagesPerRun: 1,
+        },
+        logger: app.log,
+      });
+    return commercialPipelineConfirmationService;
   };
 
   await app.register(cors, { origin: true });
@@ -630,6 +693,51 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           error instanceof AppError
             ? error.message
             : 'Falha segura no pipeline comercial',
+      });
+    }
+  });
+
+  app.post('/commercial-pipeline/runs/:id/confirm', async (request, reply) => {
+    const body = request.body;
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 1 ||
+      typeof (body as Record<string, unknown>).confirmation !== 'string'
+    ) {
+      return reply.status(400).send({
+        error: 'COMMERCIAL_CONFIRMATION_INVALID',
+        message: 'Confirmacao comercial invalida',
+      });
+    }
+    try {
+      const { id } = request.params as { id: string };
+      return await getCommercialPipelineConfirmationService().confirm(
+        id,
+        (body as { confirmation: string }).confirmation,
+      );
+    } catch (error) {
+      const code =
+        error instanceof AppError ? error.code : 'COMMERCIAL_DISPATCH_FAILED';
+      const status =
+        code === 'COMMERCIAL_CONFIRMATION_INVALID'
+          ? 400
+          : code === 'COMMERCIAL_RUN_NOT_READY'
+            ? 404
+            : code === 'COMMERCIAL_DISPATCH_FAILED'
+              ? 500
+              : 409;
+      request.log.error(
+        { event: 'commercial-pipeline.confirm.route.failed', code },
+        'Commercial pipeline confirmation route failed',
+      );
+      return reply.status(status).send({
+        error: code,
+        message:
+          error instanceof AppError
+            ? error.message
+            : 'Falha segura ao confirmar pipeline comercial',
       });
     }
   });
@@ -1037,6 +1145,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   app.addHook('onClose', async () => {
     await pipelineQueue?.close?.();
+    if (whatsappDispatchQueue !== pipelineQueue) {
+      await whatsappDispatchQueue?.close?.();
+    }
     await redisConnection?.quit();
     if (!options.prisma) await prisma.$disconnect();
   });

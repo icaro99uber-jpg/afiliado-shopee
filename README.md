@@ -782,8 +782,34 @@ API:
 
 O dashboard possui a pagina `Pipeline comercial`, com filtros, produto e grupo
 selecionados, motivos, rejeicoes, preview copiavel, `plannedSubIds` e historico.
-Nao existe botao de envio ou confirmacao real. A migration
+O dry-run em si nunca exibe uma acao capaz de enviar. A migration
 `20260725210000_commercial_pipeline_dry_run` cria o historico sem guardar JID,
 telefone, segredos ou payloads externos. Consulte
-[docs/shopee-affiliate.md](docs/shopee-affiliate.md). A Task 16.2 devera tratar
-qualquer confirmacao real em uma revisao separada.
+[docs/shopee-affiliate.md](docs/shopee-affiliate.md).
+
+## Pipeline comercial confirmado
+
+Um dry-run `COMPLETED` pode ser confirmado uma unica vez pela rota separada:
+
+```text
+POST /commercial-pipeline/runs/:id/confirm
+{ "confirmation": "CONFIRMAR_ENVIO_COMERCIAL" }
+```
+
+O dashboard apresenta a confirmacao em modal e remove a acao depois de qualquer
+tentativa. O historico mostra status do dispatch, `attemptCount`, se um ID
+externo foi registrado e se investigacao manual e obrigatoria, sem revelar o
+valor externo ou o identificador do grupo.
+
+O CLI real e estrito:
+
+```powershell
+corepack pnpm commercial:confirm -- --run-id=<id> --confirm-one-real-commercial-message
+```
+
+Ele e bloqueado em CI e exige Evolution, safe mode, exatamente um grupo,
+master switch ligado somente no processo, limites iguais a 1, Scheduler
+desligado e nenhum worker concorrente. O job usa `attempts: 1`, sem backoff,
+retry ou remocao. O mesmo `dryRunId` determina copy, dispatch e job; qualquer
+estado anterior bloqueia outra tentativa. A copy e exatamente o snapshot do
+dry-run, sem cupom, comissao, score ou urgencia falsa.
