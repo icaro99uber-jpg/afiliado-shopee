@@ -22,7 +22,7 @@ import type {
 import type { ScoreService } from './score-service';
 
 export type CommercialPipelineInput = {
-  source?: 'MOCK' | 'MANUAL';
+  source?: 'MOCK' | 'MANUAL' | 'OFFICIAL';
   categoryId?: string;
   minPrice?: number;
   maxPrice?: number;
@@ -50,7 +50,7 @@ export type CommercialPipelineDryRunResult = {
   runId: string;
   mode: 'dry-run';
   status: 'ready';
-  provider: 'mock' | 'manual';
+  provider: 'mock' | 'manual' | 'official';
   candidateCount: number;
   eligibleCount: number;
   rejectedCount: number;
@@ -109,7 +109,7 @@ const normalizeInput = (
     ['minimumScore', minimumScore],
   ] as const;
 
-  if (!['MOCK', 'MANUAL'].includes(source)) {
+  if (!['MOCK', 'MANUAL', 'OFFICIAL'].includes(source)) {
     throw new AppError('Origem comercial invalida', 'INVALID_PIPELINE_FILTERS');
   }
   if (
@@ -464,7 +464,10 @@ export class CommercialPipelineService {
         runId: run.id,
         mode: 'dry-run',
         status: 'ready',
-        provider: input.source.toLocaleLowerCase() as 'mock' | 'manual',
+        provider: input.source.toLocaleLowerCase() as
+          | 'mock'
+          | 'manual'
+          | 'official',
         candidateCount: candidates.length,
         eligibleCount: neverSent.length,
         rejectedCount,

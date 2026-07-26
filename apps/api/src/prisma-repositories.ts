@@ -1,6 +1,8 @@
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   AnalyticsRepository,
+  CommercialAutomationExecutionRecord,
+  CommercialAutomationExecutionRepository,
   CommercialAutomationHistoryRepository,
   CommercialAutomationSettingsRecord,
   CommercialAutomationSettingsRepository,
@@ -606,7 +608,9 @@ export class PrismaCommercialAutomationHistoryRepository implements CommercialAu
   constructor(
     private readonly prisma: Pick<
       DatabaseClient,
-      'whatsAppDispatch' | 'commercialPipelineRun'
+      | 'whatsAppDispatch'
+      | 'commercialPipelineRun'
+      | 'commercialAutomationExecution'
     >,
   ) {}
 
@@ -656,14 +660,194 @@ export class PrismaCommercialAutomationHistoryRepository implements CommercialAu
   }
 
   async hasAmbiguousCommercialExecution(): Promise<boolean> {
-    return Boolean(
-      await this.prisma.commercialPipelineRun.findFirst({
+    const [run, execution] = await Promise.all([
+      this.prisma.commercialPipelineRun.findFirst({
         where: {
           OR: [{ finalStatus: 'AMBIGUOUS' }, { investigationRequired: true }],
         },
         select: { id: true },
       }),
+      this.prisma.commercialAutomationExecution.findFirst({
+        where: { status: 'AMBIGUOUS' },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(run || execution);
+  }
+
+  async hasActiveCommercialExecution(): Promise<boolean> {
+    return Boolean(
+      await this.prisma.commercialPipelineRun.findFirst({
+        where: {
+          OR: [
+            { mode: 'CONFIRMED', status: 'STARTED' },
+            { finalStatus: 'PENDING' },
+            { dispatch: { status: { in: ['PENDING', 'PROCESSING'] } } },
+          ],
+        },
+        select: { id: true },
+      }),
     );
+  }
+}
+
+const COMMERCIAL_AUTOMATION_ACTIVE_KEY = 'commercial-automation';
+
+const mapCommercialAutomationExecution = (
+  record: Record<string, unknown>,
+): CommercialAutomationExecutionRecord => ({
+  id: record.id as string,
+  schedulerJobId: record.schedulerJobId as string,
+  bullMqJobId: (record.bullMqJobId as string | null) ?? null,
+  mode: record.mode as CommercialAutomationExecutionRecord['mode'],
+  status: record.status as CommercialAutomationExecutionRecord['status'],
+  reasons: record.reasons as string[],
+  commercialRunId: (record.commercialRunId as string | null) ?? null,
+  failureCode: (record.failureCode as string | null) ?? null,
+  startedAt: record.startedAt as Date,
+  completedAt: (record.completedAt as Date | null) ?? null,
+});
+
+export class PrismaCommercialAutomationExecutionRepository implements CommercialAutomationExecutionRepository {
+  constructor(
+    private readonly prisma: Pick<
+      DatabaseClient,
+      'commercialAutomationExecution'
+    >,
+  ) {}
+
+  private async findByBullMqJobId(bullMqJobId: string) {
+    const record = await this.prisma.commercialAutomationExecution.findUnique({
+      where: { bullMqJobId },
+    });
+    return record
+      ? mapCommercialAutomationExecution(
+          record as unknown as Record<string, unknown>,
+        )
+      : null;
+  }
+
+  async start(input: {
+    schedulerJobId: string;
+    bullMqJobId?: string;
+    mode: CommercialAutomationExecutionRecord['mode'];
+    startedAt: Date;
+  }) {
+    try {
+      const record = await this.prisma.commercialAutomationExecution.create({
+        data: {
+          schedulerJobId: input.schedulerJobId,
+          bullMqJobId: input.bullMqJobId,
+          activeKey: COMMERCIAL_AUTOMATION_ACTIVE_KEY,
+          mode: input.mode,
+          status: 'STARTED',
+          reasons: [],
+          startedAt: input.startedAt,
+        },
+      });
+      return {
+        outcome: 'created' as const,
+        execution: mapCommercialAutomationExecution(
+          record as unknown as Record<string, unknown>,
+        ),
+      };
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const existing = input.bullMqJobId
+        ? await this.findByBullMqJobId(input.bullMqJobId)
+        : null;
+      return existing
+        ? { outcome: 'existing' as const, execution: existing }
+        : { outcome: 'concurrent' as const };
+    }
+  }
+
+  async createBlocked(input: {
+    schedulerJobId: string;
+    bullMqJobId?: string;
+    mode: CommercialAutomationExecutionRecord['mode'];
+    reasons: string[];
+    completedAt: Date;
+  }) {
+    try {
+      const record = await this.prisma.commercialAutomationExecution.create({
+        data: {
+          schedulerJobId: input.schedulerJobId,
+          bullMqJobId: input.bullMqJobId,
+          mode: input.mode,
+          status: 'BLOCKED',
+          reasons: input.reasons,
+          startedAt: input.completedAt,
+          completedAt: input.completedAt,
+        },
+      });
+      return mapCommercialAutomationExecution(
+        record as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      if (!isUniqueConstraintError(error) || !input.bullMqJobId) throw error;
+      const existing = await this.findByBullMqJobId(input.bullMqJobId);
+      if (!existing) throw error;
+      return existing;
+    }
+  }
+
+  async finish(
+    id: string,
+    input: {
+      status: Exclude<CommercialAutomationExecutionRecord['status'], 'STARTED'>;
+      reasons?: string[];
+      commercialRunId?: string;
+      failureCode?: string;
+      completedAt: Date;
+    },
+  ) {
+    const record = await this.prisma.commercialAutomationExecution.update({
+      where: { id },
+      data: {
+        activeKey: null,
+        status: input.status,
+        reasons: input.reasons,
+        commercialRunId: input.commercialRunId,
+        failureCode: input.failureCode,
+        completedAt: input.completedAt,
+      },
+    });
+    return mapCommercialAutomationExecution(
+      record as unknown as Record<string, unknown>,
+    );
+  }
+
+  async list(input: { page: number; limit: number }) {
+    const where = {};
+    const [records, total] = await Promise.all([
+      this.prisma.commercialAutomationExecution.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        skip: (input.page - 1) * input.limit,
+        take: input.limit,
+      }),
+      this.prisma.commercialAutomationExecution.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapCommercialAutomationExecution(
+          record as unknown as Record<string, unknown>,
+        ),
+      ),
+      total,
+    };
+  }
+
+  async findById(id: string) {
+    const record = await this.prisma.commercialAutomationExecution.findUnique({
+      where: { id },
+    });
+    return record
+      ? mapCommercialAutomationExecution(
+          record as unknown as Record<string, unknown>,
+        )
+      : null;
   }
 }
 

@@ -11,6 +11,9 @@ import type {
 export const COMMERCIAL_AUTOMATION_RESUME_CONFIRMATION =
   'RETOMAR_AUTOMACAO_COMERCIAL';
 
+export const COMMERCIAL_EXECUTION_IN_PROGRESS =
+  'COMMERCIAL_EXECUTION_IN_PROGRESS';
+
 export const COMMERCIAL_AUTOMATION_REASONS = [
   'AUTOMATION_DISABLED',
   'AUTOMATION_PAUSED',
@@ -21,6 +24,7 @@ export const COMMERCIAL_AUTOMATION_REASONS = [
   'NO_AUTHORIZED_GROUP',
   'MULTIPLE_AUTHORIZED_GROUPS',
   'AMBIGUOUS_COMMERCIAL_RUN_EXISTS',
+  COMMERCIAL_EXECUTION_IN_PROGRESS,
 ] as const;
 
 export type CommercialAutomationReason =
@@ -182,6 +186,7 @@ const HARD_BLOCKING_REASONS = new Set<CommercialAutomationReason>([
   'NO_AUTHORIZED_GROUP',
   'MULTIPLE_AUTHORIZED_GROUPS',
   'AMBIGUOUS_COMMERCIAL_RUN_EXISTS',
+  COMMERCIAL_EXECUTION_IN_PROGRESS,
 ]);
 
 export class CommercialAutomationPolicyService {
@@ -208,12 +213,13 @@ export class CommercialAutomationPolicyService {
 
   private async loadOperationalContext(now: Date) {
     const dayRange = getLocalDayRange(now, this.dependencies.config.timezone);
-    const [groups, ambiguousExecution] = await Promise.all([
+    const [groups, ambiguousExecution, activeExecution] = await Promise.all([
       this.dependencies.groups.list(this.dependencies.instanceName, {
         active: true,
         available: true,
       }),
       this.dependencies.history.hasAmbiguousCommercialExecution(),
+      this.dependencies.history.hasActiveCommercialExecution(),
     ]);
     const authorizedGroups = groups.filter((group) =>
       isCommercialAuthorizedGroup(group, this.dependencies.instanceName),
@@ -227,6 +233,7 @@ export class CommercialAutomationPolicyService {
     return {
       authorizedGroupCount: authorizedGroups.length,
       ambiguousExecution,
+      activeExecution,
       history,
       dayEndsAt: dayRange.dayEndsAt,
     };
@@ -259,6 +266,7 @@ export class CommercialAutomationPolicyService {
     settings,
     authorizedGroupCount,
     ambiguousExecution,
+    activeExecution,
     history,
     dayEndsAt,
   }: {
@@ -266,6 +274,7 @@ export class CommercialAutomationPolicyService {
     settings: CommercialAutomationSettingsRecord;
     authorizedGroupCount: number;
     ambiguousExecution: boolean;
+    activeExecution: boolean;
     history: {
       globalSentToday: number;
       groupSentToday: number;
@@ -302,6 +311,7 @@ export class CommercialAutomationPolicyService {
     if (authorizedGroupCount === 0) reasons.push('NO_AUTHORIZED_GROUP');
     if (authorizedGroupCount > 1) reasons.push('MULTIPLE_AUTHORIZED_GROUPS');
     if (ambiguousExecution) reasons.push('AMBIGUOUS_COMMERCIAL_RUN_EXISTS');
+    if (activeExecution) reasons.push('COMMERCIAL_EXECUTION_IN_PROGRESS');
 
     let nextAllowedAt: Date | null = null;
     if (

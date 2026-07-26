@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  PrismaCommercialAutomationExecutionRepository,
   PrismaCommercialAutomationHistoryRepository,
   PrismaCommercialAutomationSettingsRepository,
 } from '../src/prisma-repositories';
@@ -142,20 +143,84 @@ describe('commercial automation Prisma repositories', () => {
   });
 
   it('detecta finalStatus ambiguo ou investigacao pendente', async () => {
-    const findFirst = vi.fn().mockResolvedValue({ id: 'run-ambiguous' });
+    const runFindFirst = vi.fn().mockResolvedValue({ id: 'run-ambiguous' });
+    const executionFindFirst = vi.fn().mockResolvedValue(null);
     const repository = new PrismaCommercialAutomationHistoryRepository({
       whatsAppDispatch: {},
-      commercialPipelineRun: { findFirst },
+      commercialPipelineRun: { findFirst: runFindFirst },
+      commercialAutomationExecution: { findFirst: executionFindFirst },
     } as never);
 
     await expect(repository.hasAmbiguousCommercialExecution()).resolves.toBe(
       true,
     );
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(runFindFirst).toHaveBeenCalledWith({
       where: {
         OR: [{ finalStatus: 'AMBIGUOUS' }, { investigationRequired: true }],
       },
       select: { id: true },
     });
+    expect(executionFindFirst).toHaveBeenCalledWith({
+      where: { status: 'AMBIGUOUS' },
+      select: { id: true },
+    });
+  });
+
+  it('detecta run confirmado ativo, final pendente ou dispatch comercial em processamento', async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: 'run-active' });
+    const repository = new PrismaCommercialAutomationHistoryRepository({
+      whatsAppDispatch: {},
+      commercialPipelineRun: { findFirst },
+    } as never);
+
+    await expect(repository.hasActiveCommercialExecution()).resolves.toBe(true);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { mode: 'CONFIRMED', status: 'STARTED' },
+          { finalStatus: 'PENDING' },
+          { dispatch: { status: { in: ['PENDING', 'PROCESSING'] } } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it('usa bullMqJobId como identidade idempotente da execucao', async () => {
+    const existing = {
+      id: 'execution-1',
+      schedulerJobId: 'scheduled-commercial-automation',
+      bullMqJobId: 'job-1',
+      activeKey: null,
+      mode: 'PREVIEW',
+      status: 'PREVIEW_READY',
+      reasons: [],
+      commercialRunId: 'run-1',
+      failureCode: null,
+      startedAt: new Date('2026-07-26T15:00:00.000Z'),
+      completedAt: new Date('2026-07-26T15:00:01.000Z'),
+    };
+    const findUnique = vi.fn().mockResolvedValue(existing);
+    const create = vi.fn().mockRejectedValue({ code: 'P2002' });
+    const repository = new PrismaCommercialAutomationExecutionRepository({
+      commercialAutomationExecution: { findUnique, create },
+    } as never);
+
+    await expect(
+      repository.start({
+        schedulerJobId: 'scheduled-commercial-automation',
+        bullMqJobId: 'job-1',
+        mode: 'PREVIEW',
+        startedAt: new Date('2026-07-26T15:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'existing',
+      execution: {
+        id: 'execution-1',
+        bullMqJobId: 'job-1',
+        status: 'PREVIEW_READY',
+      },
+    });
+    expect(create).toHaveBeenCalledOnce();
   });
 });

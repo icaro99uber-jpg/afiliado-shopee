@@ -592,3 +592,43 @@ politica ao Scheduler ou pipeline e nao cria job, dispatch ou mensagem.
 
 O servidor Fastify usa `HOST=127.0.0.1` por padrao. Exposicao em outra interface
 so ocorre com valor explicito no ambiente.
+
+## Scheduler da automacao comercial
+
+A Sprint 17.2 conecta a politica existente a um orquestrador independente de
+Fastify e BullMQ. A ordem fixa e politica, uma sincronizacao, um dry-run e,
+conforme o modo, preview ou a confirmacao existente. O orquestrador nao duplica
+ranking, copy, confirmacao ou envio.
+
+O runtime usa uma infraestrutura dedicada:
+
+- fila `commercial-automation`;
+- job `commercial-automation-tick`;
+- Scheduler ID `scheduled-commercial-automation`;
+- worker com concorrencia 1;
+- `attempts: 1`, sem backoff e sem remocao automatica.
+
+Esse bootstrap nao importa nem compoe o `PipelineService` legado. A fila
+`product-pipeline`, o job `pipeline-product` e o ID
+`scheduled-pipeline-product` permanecem sob o bootstrap anterior. Ligar,
+desligar ou consultar o Scheduler comercial nunca altera o legado, e a
+inicializacao nao executa tick.
+
+`CommercialAutomationExecution` registra cada tentativa. O `bullMqJobId`
+deduplica entregas do mesmo job e uma chave ativa unica impede concorrencia. A
+politica tambem bloqueia quando existe run confirmado iniciado, final pendente
+ou dispatch comercial `PENDING/PROCESSING`. Falhas anteriores a confirmacao
+terminam como `FAILED`; falhas depois que a confirmacao foi tentada terminam
+como `AMBIGUOUS` e nao recebem retry automatico.
+
+Os defaults sao Scheduler desligado, cron `0 9 * * *`, timezone
+`America/Sao_Paulo` e modo `preview`. `send` so e uma configuracao valida com
+Shopee `official`, Evolution, safe mode, envio para grupos habilitado e
+Scheduler legado desligado. Mock e importacao manual nunca autorizam envio.
+
+A API oferece apenas leitura em `GET /commercial-automation/scheduler`,
+`GET /commercial-automation/executions` e
+`GET /commercial-automation/executions/:id`. Nao existe rota de trigger ou de
+ativacao. O CLI `corepack pnpm commercial:automation:preview` forca preview,
+exige ambos os Schedulers desligados e nao compoe Evolution, fila de dispatch
+ou worker de WhatsApp.

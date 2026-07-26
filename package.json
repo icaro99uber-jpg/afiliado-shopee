@@ -23,6 +23,8 @@
     "shopee:import": "corepack pnpm --filter @shopee-auto-affiliate-ai/api shopee:import",
     "commercial:dry-run": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:dry-run",
     "commercial:confirm": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:confirm",
+    "commercial:automation:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:preview",
+    "commercial:automation:worker": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:worker",
     "test:runtime": "corepack pnpm --filter @shopee-auto-affiliate-ai/api test:runtime",
     "build": "turbo build",
     "lint": "turbo lint",

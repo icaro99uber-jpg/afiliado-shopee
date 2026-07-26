@@ -139,6 +139,9 @@ importers:
       '@shopee-auto-affiliate-ai/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@shopee-auto-affiliate-ai/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       bullmq:
         specifier: ^5.0.0
         version: 5.81.1

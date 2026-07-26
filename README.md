@@ -101,6 +101,11 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
   criar dispatch, job, worker ou mensagem.
 - `pnpm shopee:import -- --file caminho.json`: valida importacao manual em
   dry-run; somente `--confirm-import` permite persistir.
+- `corepack pnpm commercial:automation:preview`: executa um unico preview
+  comercial local, com os Schedulers desligados e sem enviar mensagem.
+- `corepack pnpm commercial:automation:worker`: inicia somente o Scheduler e o
+  consumer comerciais; com o default desabilitado, remove apenas seu proprio
+  agendamento e permanece sem tick de bootstrap.
 - `pnpm build`: compila todos os pacotes e aplicações.
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
@@ -841,9 +846,57 @@ Endpoints:
   ou `{ "paused": false, "confirmation": "RETOMAR_AUTOMACAO_COMERCIAL" }`.
 
 O dashboard mostra esse estado em Configuracoes, com pausa direta e retomada em
-modal. O contrato futuro para o Scheduler e
-`evaluateAutomationReadiness()`, ainda sem integracao nesta Sprint.
+modal. O Scheduler comercial usa `evaluateAutomationReadiness()` antes de
+qualquer sincronizacao ou dry-run.
 
 A API faz bind em `127.0.0.1` por padrao por meio de `HOST`. Use outro host
 somente por configuracao explicita de ambiente quando a exposicao for realmente
 necessaria.
+
+## Scheduler da automacao comercial
+
+A Sprint 17.2 adiciona um Scheduler separado do pipeline legado. Seus defaults
+seguros sao:
+
+```env
+COMMERCIAL_SCHEDULER_ENABLED=false
+COMMERCIAL_SCHEDULER_CRON=0 9 * * *
+COMMERCIAL_SCHEDULER_TIMEZONE=America/Sao_Paulo
+COMMERCIAL_AUTOMATION_MODE=preview
+```
+
+Ele usa exclusivamente a fila `commercial-automation`, o job
+`commercial-automation-tick` e o ID `scheduled-commercial-automation`. A fila
+`product-pipeline`, o job `pipeline-product` e seu agendamento permanecem
+inalterados. O worker comercial tem concorrencia 1; cada job tem uma tentativa,
+sem backoff, retry ou remocao automatica. O bootstrap nao dispara um tick.
+
+Cada tick passa pelos guardrails, sincroniza o catalogo uma vez e executa um
+dry-run uma vez. Em `preview`, termina sem dispatch ou job de WhatsApp. Em
+`send`, delega somente ao fluxo de confirmacao ja existente e a configuracao e
+aceita apenas com Shopee `official`, Evolution, safe mode e master switch de
+grupos, com o Scheduler legado desligado. `mock` e `manual` nunca enviam.
+
+As execucoes ficam em `CommercialAutomationExecution`. A identidade BullMQ
+deduplica o mesmo job, uma chave ativa impede ticks simultaneos e qualquer run
+confirmado iniciado, final pendente ou dispatch comercial em processamento
+bloqueia nova execucao.
+
+Para validar com seguranca:
+
+```powershell
+corepack pnpm commercial:automation:preview
+```
+
+O comando forca `preview` independentemente do modo configurado, exige os dois
+Schedulers desligados e nao inicializa Evolution, dispatch, worker de WhatsApp
+ou envio. Nao existe CLI de `send` para a automacao.
+
+Endpoints somente leitura:
+
+- `GET /commercial-automation/scheduler`;
+- `GET /commercial-automation/executions?page=1&limit=20`;
+- `GET /commercial-automation/executions/:id`.
+
+Nao existe endpoint para executar um tick, habilitar o Scheduler ou alterar a
+agenda. O dashboard nao foi modificado nesta sprint.
