@@ -1,6 +1,9 @@
 import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   AnalyticsRepository,
+  CommercialAutomationHistoryRepository,
+  CommercialAutomationSettingsRecord,
+  CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
   CommercialOfferCandidateFilters,
   CommercialPipelineRunData,
@@ -559,6 +562,108 @@ export class PrismaCommercialDeliveryHistoryRepository implements CommercialDeli
       }),
     ]);
     return Boolean(sentDispatch || confirmedRun);
+  }
+}
+
+const COMMERCIAL_AUTOMATION_SETTINGS_ID = 'commercial-automation';
+
+export class PrismaCommercialAutomationSettingsRepository implements CommercialAutomationSettingsRepository {
+  constructor(
+    private readonly prisma: Pick<
+      DatabaseClient,
+      'commercialAutomationSettings'
+    >,
+  ) {}
+
+  async getOrCreate(now: Date): Promise<CommercialAutomationSettingsRecord> {
+    return this.prisma.commercialAutomationSettings.upsert({
+      where: { id: COMMERCIAL_AUTOMATION_SETTINGS_ID },
+      create: {
+        id: COMMERCIAL_AUTOMATION_SETTINGS_ID,
+        paused: true,
+        pausedAt: now,
+      },
+      update: {},
+    });
+  }
+
+  async setPaused(
+    paused: boolean,
+    now: Date,
+  ): Promise<CommercialAutomationSettingsRecord> {
+    const current = await this.getOrCreate(now);
+    if (current.paused === paused) return current;
+    return this.prisma.commercialAutomationSettings.update({
+      where: { id: COMMERCIAL_AUTOMATION_SETTINGS_ID },
+      data: paused
+        ? { paused: true, pausedAt: now }
+        : { paused: false, resumedAt: now },
+    });
+  }
+}
+
+export class PrismaCommercialAutomationHistoryRepository implements CommercialAutomationHistoryRepository {
+  constructor(
+    private readonly prisma: Pick<
+      DatabaseClient,
+      'whatsAppDispatch' | 'commercialPipelineRun'
+    >,
+  ) {}
+
+  async getSnapshot({
+    groupId,
+    dayStartsAt,
+    dayEndsAt,
+  }: {
+    groupId?: string;
+    dayStartsAt: Date;
+    dayEndsAt: Date;
+  }) {
+    const sentDuringDay = {
+      status: 'SENT' as const,
+      sentAt: { gte: dayStartsAt, lt: dayEndsAt },
+      destination: { type: 'GROUP' as const },
+    };
+    const [countsByGroup, lastSent] = await Promise.all([
+      this.prisma.whatsAppDispatch.groupBy({
+        by: ['destinationId'],
+        where: sentDuringDay,
+        _count: { _all: true },
+      }),
+      this.prisma.whatsAppDispatch.findFirst({
+        where: {
+          status: 'SENT',
+          sentAt: { not: null },
+          destination: { type: 'GROUP' },
+        },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      }),
+    ]);
+    const globalSentToday = countsByGroup.reduce(
+      (total, row) => total + row._count._all,
+      0,
+    );
+    const groupSentToday = groupId
+      ? (countsByGroup.find((row) => row.destinationId === groupId)?._count
+          ._all ?? 0)
+      : 0;
+    return {
+      globalSentToday,
+      groupSentToday,
+      lastSentAt: lastSent?.sentAt ?? null,
+    };
+  }
+
+  async hasAmbiguousCommercialExecution(): Promise<boolean> {
+    return Boolean(
+      await this.prisma.commercialPipelineRun.findFirst({
+        where: {
+          OR: [{ finalStatus: 'AMBIGUOUS' }, { investigationRequired: true }],
+        },
+        select: { id: true },
+      }),
+    );
   }
 }
 

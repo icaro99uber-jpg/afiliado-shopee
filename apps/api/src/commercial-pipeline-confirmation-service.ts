@@ -2,10 +2,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import type { CommercialCopyGenerator } from './commercial-copy-service';
-import {
-  COMMERCIAL_GROUP_FINGERPRINT,
-  commercialProductRejections,
-} from './commercial-pipeline-service';
+import { isCommercialAuthorizedGroup } from './commercial-group-selection';
+import { commercialProductRejections } from './commercial-pipeline-service';
 import type {
   CommercialDeliveryHistoryRepository,
   CommercialPipelineRunRecord,
@@ -229,13 +227,8 @@ export class CommercialPipelineConfirmationService {
           active: true,
           available: true,
         })
-      ).filter(
-        (group): group is WhatsAppGroupRecord =>
-          group.type === 'GROUP' &&
-          group.active === true &&
-          group.available === true &&
-          group.sourceInstanceName === this.options.instanceName &&
-          COMMERCIAL_GROUP_FINGERPRINT.test(group.fingerprint),
+      ).filter((group): group is WhatsAppGroupRecord =>
+        isCommercialAuthorizedGroup(group, this.options.instanceName),
       );
       const group = groups[0];
       if (

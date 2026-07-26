@@ -30,6 +30,40 @@ export type SchedulerStatus = {
   nextRunAt: string | null;
 };
 
+export type CommercialAutomationReason =
+  | 'AUTOMATION_DISABLED'
+  | 'AUTOMATION_PAUSED'
+  | 'OUTSIDE_ALLOWED_WINDOW'
+  | 'GLOBAL_DAILY_LIMIT_REACHED'
+  | 'GROUP_DAILY_LIMIT_REACHED'
+  | 'MINIMUM_INTERVAL_NOT_REACHED'
+  | 'NO_AUTHORIZED_GROUP'
+  | 'MULTIPLE_AUTHORIZED_GROUPS'
+  | 'AMBIGUOUS_COMMERCIAL_RUN_EXISTS';
+
+export type CommercialAutomationStatus = {
+  enabled: boolean;
+  allowed: boolean;
+  reasons: CommercialAutomationReason[];
+  nextAllowedAt: string | null;
+  globalSentToday: number;
+  globalRemainingToday: number;
+  groupSentToday: number;
+  groupRemainingToday: number;
+  lastSentAt: string | null;
+  paused: boolean;
+  pausedAt: string | null;
+  resumedAt: string | null;
+  updatedAt: string;
+  allowedStartTime: string;
+  allowedEndTime: string;
+  timezone: string;
+  dailyGlobalLimit: number;
+  dailyGroupLimit: number;
+  minimumIntervalMinutes: number;
+  authorizedGroupCount: number;
+};
+
 export type ApiErrorPayload = {
   error?: string;
   message?: string;

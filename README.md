@@ -35,7 +35,7 @@ pnpm --filter @shopee-auto-affiliate-ai/database db:generate
 pnpm dev
 ```
 
-A API ficará disponível em `http://localhost:3333/health` e o dashboard em `http://localhost:3000`.
+A API ficará disponível em `http://localhost:3333/health` e o dashboard em `http://localhost:3000`. O bind padrão da API é local, com `HOST=127.0.0.1`.
 
 Para executar cada parte separadamente:
 
@@ -813,3 +813,37 @@ desligado e nenhum worker concorrente. O job usa `attempts: 1`, sem backoff,
 retry ou remocao. O mesmo `dryRunId` determina copy, dispatch e job; qualquer
 estado anterior bloqueia outra tentativa. A copy e exatamente o snapshot do
 dry-run, sem cupom, comissao, score ou urgencia falsa.
+
+## Controles operacionais da automacao comercial
+
+A Sprint 17.1 adiciona uma politica somente de avaliacao. Ela nao esta ligada ao
+Scheduler e nao executa o pipeline comercial. Os defaults sao conservadores:
+
+```env
+COMMERCIAL_AUTOMATION_ENABLED=false
+COMMERCIAL_TIMEZONE=America/Sao_Paulo
+COMMERCIAL_ALLOWED_START_TIME=08:00
+COMMERCIAL_ALLOWED_END_TIME=20:00
+COMMERCIAL_DAILY_GLOBAL_LIMIT=1
+COMMERCIAL_DAILY_GROUP_LIMIT=1
+COMMERCIAL_MIN_INTERVAL_MINUTES=60
+```
+
+O estado persistido tambem nasce pausado. Retomar exige a frase exata
+`RETOMAR_AUTOMACAO_COMERCIAL`; essa acao remove apenas a pausa e nao envia
+mensagem, nao cria job e nao ativa o Scheduler.
+
+Endpoints:
+
+- `GET /commercial-automation/status`: decisao, motivos, janela, limites,
+  historico real `SENT` e proxima permissao calculavel;
+- `PATCH /commercial-automation/settings`: aceita somente `{ "paused": true }`
+  ou `{ "paused": false, "confirmation": "RETOMAR_AUTOMACAO_COMERCIAL" }`.
+
+O dashboard mostra esse estado em Configuracoes, com pausa direta e retomada em
+modal. O contrato futuro para o Scheduler e
+`evaluateAutomationReadiness()`, ainda sem integracao nesta Sprint.
+
+A API faz bind em `127.0.0.1` por padrao por meio de `HOST`. Use outro host
+somente por configuracao explicita de ambiente quando a exposicao for realmente
+necessaria.

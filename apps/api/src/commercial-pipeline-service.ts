@@ -5,6 +5,7 @@ import {
 } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type { CommercialCopyGenerator } from './commercial-copy-service';
+import { isCommercialAuthorizedGroup } from './commercial-group-selection';
 import type {
   CommercialDeliveryHistoryRepository,
   CommercialPipelineRejectionCode,
@@ -89,7 +90,6 @@ export type CommercialPipelineServiceOptions = {
 };
 
 const MAXIMUM_CANDIDATES = 100;
-export const COMMERCIAL_GROUP_FINGERPRINT = /^grp_[a-f0-9]{12}$/;
 const HTTP_URL = /^https?:\/\//i;
 
 const normalizeInput = (
@@ -365,13 +365,8 @@ export class CommercialPipelineService {
           active: true,
           available: true,
         })
-      ).filter(
-        (group): group is WhatsAppGroupRecord =>
-          group.type === 'GROUP' &&
-          group.active === true &&
-          group.available === true &&
-          group.sourceInstanceName === this.options.instanceName &&
-          COMMERCIAL_GROUP_FINGERPRINT.test(group.fingerprint),
+      ).filter((group): group is WhatsAppGroupRecord =>
+        isCommercialAuthorizedGroup(group, this.options.instanceName),
       );
       if (groups.length === 0) {
         return await block('NO_AUTHORIZED_GROUP', {
