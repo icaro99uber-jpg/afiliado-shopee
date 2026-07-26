@@ -2,6 +2,8 @@
 
 import { CalendarClock, Info, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
+import { CommercialAutomationControl } from '../../components/commercial-automation-control';
 import { ErrorState } from '../../components/error-state';
 import { LoadingState } from '../../components/loading-state';
 import { PageHeader } from '../../components/page-header';
@@ -18,7 +20,7 @@ import {
   SCHEDULER_DATE_FALLBACK,
 } from '../../lib/scheduler-display';
 
-function SchedulerDetail({
+function SettingsDetail({
   label,
   children,
 }: {
@@ -85,8 +87,8 @@ export default function SettingsPage() {
   return (
     <div className="grid gap-6">
       <PageHeader
-        title="Configuracoes"
-        description="Informacoes seguras de operacao do dashboard. Credenciais nunca devem ser inseridas no navegador."
+        title="Configurações"
+        description="Informações seguras de operação do dashboard. Credenciais nunca devem ser inseridas no navegador."
       />
 
       {loading ? <LoadingState label="Verificando API" /> : null}
@@ -105,6 +107,8 @@ export default function SettingsPage() {
           </StatusBadge>
         </div>
       </section>
+
+      <CommercialAutomationControl />
 
       <section
         className="rounded-lg border border-slate-200 bg-white p-5"
@@ -145,8 +149,8 @@ export default function SettingsPage() {
         <div className="mt-4 flex gap-3 border-l-4 border-sky-400 bg-sky-50 p-3 text-sm text-sky-900">
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p>
-            O Scheduler é configurado no ambiente do worker. Esta tela é
-            somente leitura.
+            O Scheduler é configurado no ambiente do worker. Esta tela é somente
+            leitura.
           </p>
         </div>
 
@@ -163,37 +167,30 @@ export default function SettingsPage() {
           ) : null}
           {scheduler && !schedulerLoading ? (
             <dl className="grid gap-x-8 sm:grid-cols-2">
-              <SchedulerDetail label="Habilitado">
+              <SettingsDetail label="Habilitado">
                 {scheduler.enabled ? 'Sim' : 'Não'}
-              </SchedulerDetail>
-              <SchedulerDetail label="Status">
+              </SettingsDetail>
+              <SettingsDetail label="Status">
                 <StatusBadge
                   tone={schedulerStatusDisplay[scheduler.status].tone}
                 >
                   {schedulerStatusDisplay[scheduler.status].label}
                 </StatusBadge>
-              </SchedulerDetail>
-              <SchedulerDetail label="Job ID">
-                {scheduler.jobId}
-              </SchedulerDetail>
-              <SchedulerDetail label="Fila">
-                {scheduler.queue}
-              </SchedulerDetail>
-              <SchedulerDetail label="Nome do job">
+              </SettingsDetail>
+              <SettingsDetail label="Job ID">{scheduler.jobId}</SettingsDetail>
+              <SettingsDetail label="Fila">{scheduler.queue}</SettingsDetail>
+              <SettingsDetail label="Nome do job">
                 {scheduler.jobName}
-              </SchedulerDetail>
-              <SchedulerDetail label="Expressão cron">
+              </SettingsDetail>
+              <SettingsDetail label="Expressão cron">
                 {scheduler.cronExpression ?? SCHEDULER_DATE_FALLBACK}
-              </SchedulerDetail>
-              <SchedulerDetail label="Timezone">
+              </SettingsDetail>
+              <SettingsDetail label="Timezone">
                 {scheduler.timezone ?? SCHEDULER_DATE_FALLBACK}
-              </SchedulerDetail>
-              <SchedulerDetail label="Próxima execução">
-                {formatSchedulerDate(
-                  scheduler.nextRunAt,
-                  scheduler.timezone,
-                )}
-              </SchedulerDetail>
+              </SettingsDetail>
+              <SettingsDetail label="Próxima execução">
+                {formatSchedulerDate(scheduler.nextRunAt, scheduler.timezone)}
+              </SettingsDetail>
             </dl>
           ) : null}
         </div>
@@ -211,18 +208,18 @@ export default function SettingsPage() {
             </h2>
             <div className="mt-3 grid gap-3 text-sm leading-6 text-slate-700">
               <p>
-                O frontend conhece apenas configuracoes publicas, como
+                O frontend conhece apenas configurações públicas, como
                 NEXT_PUBLIC_API_URL. Chaves da Evolution API ficam no .env local
                 do worker.
               </p>
               <p>
-                WHATSAPP_PROVIDER=mock e o modo seguro padrao e nao envia
-                mensagens reais. WHATSAPP_PROVIDER=evolution exige configuracao
-                explicita no ambiente do worker.
+                WHATSAPP_PROVIDER=mock é o modo seguro padrão e não envia
+                mensagens reais. WHATSAPP_PROVIDER=evolution exige configuração
+                explícita no ambiente do worker.
               </p>
               <p>
-                O dashboard nao salva segredos em localStorage e nao possui campo
-                para EVOLUTION_API_KEY.
+                O dashboard não salva segredos em localStorage e não possui
+                campo para EVOLUTION_API_KEY.
               </p>
             </div>
           </div>
@@ -230,15 +227,16 @@ export default function SettingsPage() {
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-950">Limitacoes atuais</h2>
+        <h2 className="font-semibold text-slate-950">Limitações atuais</h2>
         <ul className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
-          <li>Nao ha endpoint publico de listagem completa de produtos.</li>
-          <li>Nao ha endpoint agregado para indicadores de score e aprovacao.</li>
-          <li>Nao ha endpoint de historico/listagem de copies geradas.</li>
-          <li>Nao ha endpoint de reprocessamento manual de dispatches.</li>
+          <li>Não há endpoint público de listagem completa de produtos.</li>
+          <li>
+            Não há endpoint agregado para indicadores de score e aprovação.
+          </li>
+          <li>Não há endpoint de histórico/listagem de copies geradas.</li>
+          <li>Não há endpoint de reprocessamento manual de dispatches.</li>
         </ul>
       </section>
     </div>
   );
 }
-

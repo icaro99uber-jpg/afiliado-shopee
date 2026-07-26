@@ -12,6 +12,11 @@ const positiveIntegerFromEnv = z.preprocess(
   z.number().int().positive(),
 );
 
+const timeOfDayFromEnv = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
 const optionalTrimmedString = z.preprocess(
   (value) =>
     typeof value === 'string' && value.trim() === '' ? undefined : value,
@@ -91,11 +96,22 @@ const isValidTimezone = (value: string) => {
   }
 };
 
+export const COMMERCIAL_AUTOMATION_DEFAULTS = {
+  enabled: false,
+  timezone: 'America/Sao_Paulo',
+  allowedStartTime: '08:00',
+  allowedEndTime: '20:00',
+  dailyGlobalLimit: 1,
+  dailyGroupLimit: 1,
+  minimumIntervalMinutes: 60,
+} as const;
+
 export const envSchema = z
   .object({
     NODE_ENV: z
       .enum(['development', 'test', 'production'])
       .default('development'),
+    HOST: z.string().trim().min(1).default('127.0.0.1'),
     PORT: z.coerce.number().default(3333),
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
@@ -112,6 +128,28 @@ export const envSchema = z
     SHOPEE_AFFILIATE_SUB_ID_PREFIX: z.string().trim().default('whatsapp'),
     SHOPEE_AFFILIATE_SYNC_LIMIT: positiveIntegerFromEnv.default(20),
     COMMERCIAL_COPY_MAX_LENGTH: positiveIntegerFromEnv.default(1000),
+    COMMERCIAL_AUTOMATION_ENABLED: booleanFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.enabled,
+    ),
+    COMMERCIAL_TIMEZONE: z
+      .string()
+      .trim()
+      .default(COMMERCIAL_AUTOMATION_DEFAULTS.timezone),
+    COMMERCIAL_ALLOWED_START_TIME: timeOfDayFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.allowedStartTime,
+    ),
+    COMMERCIAL_ALLOWED_END_TIME: timeOfDayFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.allowedEndTime,
+    ),
+    COMMERCIAL_DAILY_GLOBAL_LIMIT: positiveIntegerFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.dailyGlobalLimit,
+    ),
+    COMMERCIAL_DAILY_GROUP_LIMIT: positiveIntegerFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.dailyGroupLimit,
+    ),
+    COMMERCIAL_MIN_INTERVAL_MINUTES: positiveIntegerFromEnv.default(
+      COMMERCIAL_AUTOMATION_DEFAULTS.minimumIntervalMinutes,
+    ),
     WHATSAPP_PROVIDER: z.enum(['mock', 'evolution']).default('mock'),
     EVOLUTION_API_URL: z
       .string()
@@ -130,6 +168,20 @@ export const envSchema = z
     SCHEDULER_TIMEZONE: z.string().trim().optional(),
   })
   .superRefine((env, context) => {
+    if (!isValidTimezone(env.COMMERCIAL_TIMEZONE)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COMMERCIAL_TIMEZONE'],
+        message: 'COMMERCIAL_TIMEZONE deve ser um timezone IANA valido',
+      });
+    }
+    if (env.COMMERCIAL_ALLOWED_START_TIME === env.COMMERCIAL_ALLOWED_END_TIME) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COMMERCIAL_ALLOWED_END_TIME'],
+        message: 'A janela comercial deve ter inicio e fim diferentes',
+      });
+    }
     if (env.SHOPEE_AFFILIATE_PROVIDER === 'official') {
       if (!env.SHOPEE_AFFILIATE_API_ENABLED) {
         context.addIssue({

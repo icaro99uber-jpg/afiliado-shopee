@@ -563,3 +563,32 @@ O worker `whatsapp-dispatch` existente finaliza o run como `SENT`, `FAILED` ou
 O CLI isolado inicia somente esse consumer e exige provider Evolution, safe
 mode, master switch, limites iguais a 1, Scheduler desligado e ausencia de
 workers concorrentes. Cupons e Shopee oficial permanecem fora do fluxo.
+
+## Guardrails da automacao comercial
+
+`CommercialAutomationPolicyService` e independente de Fastify, Prisma, BullMQ,
+Evolution e Scheduler. Ele recebe configuracao, relogio e tres contratos
+pequenos: pausa persistida, historico operacional e diretorio de grupos. O
+metodo estavel `evaluateAutomationReadiness()` retorna uma decisao sanitizada
+com todos os motivos de bloqueio, contagens, restante diario e proximo horario
+calculavel.
+
+A politica exige simultaneamente master switch, ausencia de pausa, janela
+permitida no timezone configurado, limites global e por grupo, intervalo minimo,
+exatamente um grupo ativo/disponivel da instancia e ausencia de run comercial
+ambiguo. `nextAllowedAt` e informado apenas para bloqueios temporais; estados
+que exigem acao humana retornam `null`.
+
+O singleton `CommercialAutomationSettings` nasce pausado. Pausar e direto;
+retomar exige `RETOMAR_AUTOMACAO_COMERCIAL`. A API expoe somente
+`GET /commercial-automation/status` e
+`PATCH /commercial-automation/settings`, rejeita campos extras e nunca altera
+arquivos `.env`.
+
+O historico usa `WhatsAppDispatch` `SENT` de grupos e `sentAt` no dia local.
+Dry-runs, dispatches `FAILED` e runs sem envio nao contam. Runs com status final
+`AMBIGUOUS` ou investigacao pendente bloqueiam. A Sprint 17.1 nao conecta essa
+politica ao Scheduler ou pipeline e nao cria job, dispatch ou mensagem.
+
+O servidor Fastify usa `HOST=127.0.0.1` por padrao. Exposicao em outra interface
+so ocorre com valor explicito no ambiente.

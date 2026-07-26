@@ -649,8 +649,44 @@ Operacao:
 - `POST /commercial-pipeline/runs/:id/confirm` aceita somente
   `{ "confirmation": "CONFIRMAR_ENVIO_COMERCIAL" }`.
 - `corepack pnpm commercial:confirm -- --run-id=<id>
-  --confirm-one-real-commercial-message` e o unico CLI real, bloqueado em CI e
+--confirm-one-real-commercial-message` e o unico CLI real, bloqueado em CI e
   composto apenas com fila/worker de dispatch.
 - O dashboard exige a mesma frase em modal, remove a acao depois de qualquer
   tentativa e exibe apenas fingerprint, status, tentativas e existencia de ID
   externo.
+
+## Commercial Automation Guardrails
+
+Responsabilidade:
+
+- Avaliar de forma deterministica se uma futura automacao comercial estaria
+  autorizada, sem executar pipeline, Scheduler, fila, dispatch ou provider.
+- Reunir master switch, pausa persistida, janela no timezone configurado,
+  limites diarios, intervalo minimo, grupo unico e bloqueios ambiguos.
+- Expor `evaluateAutomationReadiness()` como contrato estavel para integracao
+  futura.
+
+Persistencia e historico:
+
+- `CommercialAutomationSettings` e um singleton criado pausado e armazena
+  `paused`, `pausedAt`, `resumedAt` e `updatedAt`.
+- `CommercialAutomationSettingsRepository` e
+  `CommercialAutomationHistoryRepository` isolam o servico do Prisma.
+- Contagens usam somente `WhatsAppDispatch` `SENT`, com destino `GROUP` e
+  `sentAt` dentro do dia no timezone configurado. Dry-runs e falhas nao criam
+  contadores paralelos.
+- `CommercialPipelineRun` com `finalStatus=AMBIGUOUS` ou
+  `investigationRequired=true` bloqueia novas decisoes ate investigacao manual.
+
+Operacao:
+
+- `COMMERCIAL_AUTOMATION_ENABLED=false` e pausa persistida ativa sao os dois
+  defaults de seguranca.
+- `GET /commercial-automation/status` retorna somente decisao, motivos,
+  horarios e contagens sanitizadas.
+- `PATCH /commercial-automation/settings` pausa com `{ "paused": true }` e
+  retoma somente com a confirmacao exata `RETOMAR_AUTOMACAO_COMERCIAL`.
+- A API usa `HOST=127.0.0.1` por padrao. Alterar o bind exige configuracao
+  explicita do ambiente.
+- O dashboard apresenta o controle em Configuracoes e deixa explicito que
+  pausar/retomar nao envia mensagens nem altera o Scheduler.

@@ -24,6 +24,8 @@ import {
   type CommercialConfirmationQueue,
 } from './commercial-pipeline-confirmation-service';
 import {
+  PrismaCommercialAutomationHistoryRepository,
+  PrismaCommercialAutomationSettingsRepository,
   PrismaAnalyticsRepository,
   PrismaCommercialDeliveryHistoryRepository,
   PrismaCommercialPipelineRunRepository,
@@ -37,6 +39,8 @@ import {
 } from './prisma-repositories';
 import type {
   AnalyticsRepository,
+  CommercialAutomationHistoryRepository,
+  CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
   CommercialPipelineRunRepository,
   CouponRepository,
@@ -47,6 +51,10 @@ import type {
   WhatsAppDispatchRepository,
   WhatsAppGroupDirectoryRepository,
 } from './repositories';
+import {
+  CommercialAutomationPolicyService,
+  type CommercialAutomationPolicyConfig,
+} from './commercial-automation-policy-service';
 import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
 
 type DispatchQueue = {
@@ -68,6 +76,8 @@ export type ApplicationRepositories = {
   coupons: CouponRepository;
   commercialRuns: CommercialPipelineRunRepository;
   commercialDeliveryHistory: CommercialDeliveryHistoryRepository;
+  commercialAutomationSettings: CommercialAutomationSettingsRepository;
+  commercialAutomationHistory: CommercialAutomationHistoryRepository;
 };
 
 export type ApplicationServices = {
@@ -154,6 +164,31 @@ export const createCommercialPipelineConfirmationService = ({
     logger,
   });
 
+export const createCommercialAutomationPolicyService = ({
+  repositories,
+  instanceName,
+  config,
+  clock,
+}: {
+  repositories: Pick<
+    ApplicationRepositories,
+    | 'commercialAutomationSettings'
+    | 'commercialAutomationHistory'
+    | 'whatsappGroups'
+  >;
+  instanceName: string;
+  config: CommercialAutomationPolicyConfig;
+  clock?: () => Date;
+}) =>
+  new CommercialAutomationPolicyService({
+    settings: repositories.commercialAutomationSettings,
+    history: repositories.commercialAutomationHistory,
+    groups: repositories.whatsappGroups,
+    instanceName,
+    config,
+    clock,
+  });
+
 export const createSenderService = ({
   repositories,
   whatsAppProvider,
@@ -190,6 +225,11 @@ export const createPrismaRepositories = (
   coupons: new PrismaCouponRepository(prisma),
   commercialRuns: new PrismaCommercialPipelineRunRepository(prisma),
   commercialDeliveryHistory: new PrismaCommercialDeliveryHistoryRepository(
+    prisma,
+  ),
+  commercialAutomationSettings:
+    new PrismaCommercialAutomationSettingsRepository(prisma),
+  commercialAutomationHistory: new PrismaCommercialAutomationHistoryRepository(
     prisma,
   ),
 });

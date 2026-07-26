@@ -106,6 +106,8 @@ model WhatsAppDispatch {
   @@index([productId])
   @@index([destinationId])
   @@index([status])
+  @@index([status, sentAt])
+  @@index([destinationId, status, sentAt])
 }
 
 model Coupon {
@@ -167,6 +169,16 @@ model CommercialPipelineRun {
   @@index([status, mode])
   @@index([productId])
   @@index([groupDestinationId])
+  @@index([finalStatus])
+  @@index([investigationRequired])
+}
+
+model CommercialAutomationSettings {
+  id        String    @id @default("commercial-automation")
+  paused    Boolean   @default(true)
+  pausedAt  DateTime? @default(now())
+  resumedAt DateTime?
+  updatedAt DateTime  @updatedAt
 }
 
 enum WhatsAppDispatchStatus {

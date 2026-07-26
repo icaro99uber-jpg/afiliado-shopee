@@ -198,6 +198,36 @@ export interface CommercialDeliveryHistoryRepository {
   wasProductSentToGroup(productId: string, groupId: string): Promise<boolean>;
 }
 
+export type CommercialAutomationSettingsRecord = {
+  paused: boolean;
+  pausedAt: Date | null;
+  resumedAt: Date | null;
+  updatedAt: Date;
+};
+
+export interface CommercialAutomationSettingsRepository {
+  getOrCreate(now: Date): Promise<CommercialAutomationSettingsRecord>;
+  setPaused(
+    paused: boolean,
+    now: Date,
+  ): Promise<CommercialAutomationSettingsRecord>;
+}
+
+export type CommercialAutomationHistorySnapshot = {
+  globalSentToday: number;
+  groupSentToday: number;
+  lastSentAt: Date | null;
+};
+
+export interface CommercialAutomationHistoryRepository {
+  getSnapshot(input: {
+    groupId?: string;
+    dayStartsAt: Date;
+    dayEndsAt: Date;
+  }): Promise<CommercialAutomationHistorySnapshot>;
+  hasAmbiguousCommercialExecution(): Promise<boolean>;
+}
+
 export type CouponSource = 'MANUAL' | 'OFFICIAL';
 export type CouponDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 

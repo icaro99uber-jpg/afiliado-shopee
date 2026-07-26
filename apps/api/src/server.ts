@@ -43,7 +43,16 @@ const start = async () => {
       schedulerEnabled: config.SCHEDULER_ENABLED,
       maximumMessagesPerRun: config.WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN,
     },
+    commercialAutomationConfig: {
+      enabled: config.COMMERCIAL_AUTOMATION_ENABLED,
+      timezone: config.COMMERCIAL_TIMEZONE,
+      allowedStartTime: config.COMMERCIAL_ALLOWED_START_TIME,
+      allowedEndTime: config.COMMERCIAL_ALLOWED_END_TIME,
+      dailyGlobalLimit: config.COMMERCIAL_DAILY_GLOBAL_LIMIT,
+      dailyGroupLimit: config.COMMERCIAL_DAILY_GROUP_LIMIT,
+      minimumIntervalMinutes: config.COMMERCIAL_MIN_INTERVAL_MINUTES,
+    },
   });
-  await app.listen({ host: '0.0.0.0', port: config.PORT });
+  await app.listen({ host: config.HOST, port: config.PORT });
 };
 void start();

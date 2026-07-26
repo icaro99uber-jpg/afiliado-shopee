@@ -7,6 +7,65 @@ const baseEnv = {
   REDIS_URL: 'redis://localhost:6379',
 };
 
+describe('envSchema automacao comercial', () => {
+  it('usa bind local e defaults conservadores', () => {
+    const config = envSchema.parse(baseEnv);
+
+    expect(config.HOST).toBe('127.0.0.1');
+    expect(config.COMMERCIAL_AUTOMATION_ENABLED).toBe(false);
+    expect(config.COMMERCIAL_TIMEZONE).toBe('America/Sao_Paulo');
+    expect(config.COMMERCIAL_ALLOWED_START_TIME).toBe('08:00');
+    expect(config.COMMERCIAL_ALLOWED_END_TIME).toBe('20:00');
+    expect(config.COMMERCIAL_DAILY_GLOBAL_LIMIT).toBe(1);
+    expect(config.COMMERCIAL_DAILY_GROUP_LIMIT).toBe(1);
+    expect(config.COMMERCIAL_MIN_INTERVAL_MINUTES).toBe(60);
+  });
+
+  it('permite HOST explicito sem alterar o padrao', () => {
+    expect(envSchema.parse({ ...baseEnv, HOST: '0.0.0.0' }).HOST).toBe(
+      '0.0.0.0',
+    );
+  });
+
+  it.each(['8:00', '24:00', '12:60', 'invalid'])(
+    'rejeita horario comercial invalido: %s',
+    (time) => {
+      expect(
+        envSchema.safeParse({
+          ...baseEnv,
+          COMMERCIAL_ALLOWED_START_TIME: time,
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it('rejeita janela vazia e timezone invalido', () => {
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_ALLOWED_START_TIME: '08:00',
+        COMMERCIAL_ALLOWED_END_TIME: '08:00',
+      }).success,
+    ).toBe(false);
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_TIMEZONE: 'Timezone/Inexistente',
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    'COMMERCIAL_DAILY_GLOBAL_LIMIT',
+    'COMMERCIAL_DAILY_GROUP_LIMIT',
+    'COMMERCIAL_MIN_INTERVAL_MINUTES',
+  ] as const)('rejeita %s fora do intervalo seguro', (field) => {
+    expect(envSchema.safeParse({ ...baseEnv, [field]: '0' }).success).toBe(
+      false,
+    );
+  });
+});
+
 describe('envSchema WhatsApp provider', () => {
   it('usa mock por padrao sem exigir Evolution API', () => {
     const config = envSchema.parse(baseEnv);

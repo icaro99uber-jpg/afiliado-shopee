@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { COMMERCIAL_AUTOMATION_DEFAULTS } from '@shopee-auto-affiliate-ai/config';
 import {
   createPrismaClient,
   type DatabaseClient,
@@ -31,6 +32,7 @@ import {
 } from '@shopee-auto-affiliate-ai/queue';
 import {
   createApplicationServices,
+  createCommercialAutomationPolicyService,
   createCommercialPipelineConfirmationService,
   createCommercialPipelineService,
   createPrismaRepositories,
@@ -47,6 +49,10 @@ import type {
   CommercialPipelineService,
 } from './commercial-pipeline-service';
 import type { CommercialPipelineConfirmationService } from './commercial-pipeline-confirmation-service';
+import type {
+  CommercialAutomationPolicyConfig,
+  CommercialAutomationPolicyService,
+} from './commercial-automation-policy-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -101,6 +107,11 @@ type BuildAppOptions = {
     schedulerEnabled: boolean;
     maximumMessagesPerRun: number;
   };
+  commercialAutomationPolicyService?: Pick<
+    CommercialAutomationPolicyService,
+    'evaluateAutomationReadiness' | 'setPaused'
+  >;
+  commercialAutomationConfig?: CommercialAutomationPolicyConfig;
 };
 
 type PipelineJobLike = {
@@ -332,6 +343,18 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       });
     return commercialPipelineConfirmationService;
   };
+  let commercialAutomationPolicyService =
+    options.commercialAutomationPolicyService;
+  const getCommercialAutomationPolicyService = () => {
+    commercialAutomationPolicyService ??=
+      createCommercialAutomationPolicyService({
+        repositories,
+        instanceName: options.groupInstanceName ?? 'affiliate-bot',
+        config:
+          options.commercialAutomationConfig ?? COMMERCIAL_AUTOMATION_DEFAULTS,
+      });
+    return commercialAutomationPolicyService;
+  };
 
   await app.register(cors, { origin: true });
 
@@ -368,6 +391,76 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return reply.status(503).send({
         error: 'SCHEDULER_STATUS_UNAVAILABLE',
         message: 'Estado do Scheduler indisponivel',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/status', async (request, reply) => {
+    try {
+      return await getCommercialAutomationPolicyService().evaluateAutomationReadiness();
+    } catch (error) {
+      request.log.error(
+        {
+          event: 'commercial-automation.status.failed',
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        },
+        'Commercial automation status failed',
+      );
+      return reply.status(500).send({
+        error: 'COMMERCIAL_AUTOMATION_STATUS_FAILED',
+        message: 'Falha ao consultar controle da automacao comercial',
+      });
+    }
+  });
+
+  app.patch('/commercial-automation/settings', async (request, reply) => {
+    const body = request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return reply.status(400).send({
+        error: 'INVALID_COMMERCIAL_AUTOMATION_SETTINGS',
+        message: 'Configuracao da automacao comercial invalida',
+      });
+    }
+    const record = body as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const isPause = keys.length === 1 && record.paused === true;
+    const isResume =
+      keys.length === 2 &&
+      keys.includes('paused') &&
+      keys.includes('confirmation') &&
+      record.paused === false &&
+      typeof record.confirmation === 'string';
+    if (!isPause && !isResume) {
+      return reply.status(400).send({
+        error: 'INVALID_COMMERCIAL_AUTOMATION_SETTINGS',
+        message: 'Configuracao da automacao comercial invalida',
+      });
+    }
+    try {
+      return await getCommercialAutomationPolicyService().setPaused({
+        paused: record.paused as boolean,
+        confirmation:
+          typeof record.confirmation === 'string'
+            ? record.confirmation
+            : undefined,
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        return reply.status(400).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+      request.log.error(
+        {
+          event: 'commercial-automation.settings.failed',
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        },
+        'Commercial automation settings update failed',
+      );
+      return reply.status(500).send({
+        error: 'COMMERCIAL_AUTOMATION_SETTINGS_FAILED',
+        message: 'Falha ao atualizar controle da automacao comercial',
       });
     }
   });
