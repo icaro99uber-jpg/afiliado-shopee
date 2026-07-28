@@ -52,6 +52,21 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
   para os fontes dos pacotes, enquanto build/typecheck usam os contratos de
   declaracao e JavaScript compilado em `dist`.
 
+## Baseline do histórico Prisma
+
+A migration `0_legacy_baseline` representa o schema imediatamente anterior a
+`20260724000000_whatsapp_dispatch`: somente as tabelas históricas
+`ProductLead` e `GeneratedCopy`, seus índices, chaves e relacionamento. O SQL
+foi gerado com a versão Prisma fixada e as migrations posteriores não são
+alteradas.
+
+Instalações novas executam `db:migrations:verify-clean` e `db:deploy`. Um banco
+existente criado antes da baseline deve consultar `db:baseline:status`, adotar
+uma única vez com `db:baseline:adopt -- --confirm-existing-database` e então
+usar `db:deploy`. A adoção chama apenas `prisma migrate resolve --applied` para
+a baseline, não executa seu SQL e comprova que schema e contagens comerciais
+permaneceram iguais.
+
 ## Dashboard operacional
 
 O dashboard do MVP usa somente endpoints publicos existentes da API e nao acessa

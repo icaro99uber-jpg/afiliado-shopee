@@ -1,0 +1,406 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  BASELINE_CONFIRMATION,
+  BASELINE_MIGRATION,
+  DatabaseBaselineError,
+  adoptBaseline,
+  createBaselineRuntime,
+  evaluateBaselineStatus,
+  listRepositoryMigrations,
+  parseBaselineArgs,
+  type BaselineRuntime,
+  type DatabaseInspection,
+  type ProtectionSnapshot,
+} from '../src/migration-baseline';
+import { runMigrationBaselineCli } from '../src/migration-baseline-cli';
+import {
+  assertTemporaryDatabaseName,
+  parseCleanVerificationArgs,
+  runCleanMigrationVerification,
+} from '../src/migration-clean-verifier';
+
+const ROOT = resolve(import.meta.dirname, '../../..');
+const MIGRATIONS = resolve(ROOT, 'packages/database/prisma/migrations');
+const POSTERIOR_MIGRATIONS = [
+  '20260724000000_whatsapp_dispatch',
+  '20260724190000_whatsapp_group_directory',
+  '20260724230000_shopee_affiliate_foundation',
+  '20260725210000_commercial_pipeline_dry_run',
+  '20260725230000_commercial_pipeline_confirmed',
+  '20260726120000_commercial_automation_guardrails',
+  '20260726123000_commercial_automation_guardrail_indexes',
+  '20260726200000_commercial_automation_scheduler',
+  '20260728120000_commercial_dispatch_outbox',
+  '20260728160000_commercial_execution_leases',
+] as const;
+
+const HISTORICAL_HASHES: Record<string, string> = {
+  '20260724000000_whatsapp_dispatch':
+    '1ab160ded4df9a8af18d73989ee6d95bd480d0ca59294aacd559ca2495fa44e6',
+  '20260724190000_whatsapp_group_directory':
+    'ea05d2898148d470602227762024eb7dd3fdd6ed4d7586165f649d1a9f690fa2',
+  '20260724230000_shopee_affiliate_foundation':
+    'f4f050643767c1a1eabbaca749952639e959afe79c03fdd4a67b741ea409b368',
+  '20260725210000_commercial_pipeline_dry_run':
+    '99a383c7a7e9a1a8fb5260c4fab89b83b9261d476dc97e148ea14fb04d1367fa',
+  '20260725230000_commercial_pipeline_confirmed':
+    '5dbc94979e9e1a088e5546c643c5c07e8caa0174937bda776cf474ed27ccaf6e',
+  '20260726120000_commercial_automation_guardrails':
+    '5acecb56633cb596ed1cfa1120932b13054b420ddc8903b29a7b7a7b316db640',
+  '20260726123000_commercial_automation_guardrail_indexes':
+    'b9f93a7163a52c22536ffd625aefd7417712b8c7d5621013b009bf1382885485',
+  '20260726200000_commercial_automation_scheduler':
+    'a1aef61c6faf5d3fba1faa9a933a4203817229ec94f13a15d781c510f27e78d9',
+  '20260728120000_commercial_dispatch_outbox':
+    '08e10ab2a397c099ab5005ee4f614a5792379ba2a0b9950b93de075e769ba1c9',
+  '20260728160000_commercial_execution_leases':
+    '2305ac810e858a51496d3562dd0c522283b1443efdf261090c799ac0a27292e4',
+};
+
+const migration = (migrationName: string, finished = true) => ({
+  migrationName,
+  checksum: `checksum-${migrationName}`,
+  finishedAt: finished ? new Date('2026-07-28T12:00:00.000Z') : null,
+  rolledBackAt: null,
+});
+
+const inspection = (
+  overrides: Partial<DatabaseInspection> = {},
+): DatabaseInspection => ({
+  migrationRows: POSTERIOR_MIGRATIONS.map((name) => migration(name)),
+  applicationTables: ['ProductLead', 'GeneratedCopy'],
+  missingBaselineObjects: [],
+  schemaMatchesCurrent: true,
+  ...overrides,
+});
+
+const snapshot = (
+  overrides: Partial<ProtectionSnapshot> = {},
+): ProtectionSnapshot => ({
+  migrationRowCount: POSTERIOR_MIGRATIONS.length,
+  appliedMigrations: Object.fromEntries(
+    POSTERIOR_MIGRATIONS.map((name) => [name, `checksum-${name}`]),
+  ),
+  dataCounts: { ProductLead: '3', GeneratedCopy: '2' },
+  schemaFingerprint: 'schema-fingerprint',
+  ...overrides,
+});
+
+const runtime = (
+  inspections: DatabaseInspection[],
+  snapshots: ProtectionSnapshot[] = [],
+) => {
+  const markBaselineApplied = vi.fn(async () => undefined);
+  const value: BaselineRuntime = {
+    inspect: vi.fn(async () => inspections.shift() ?? inspection()),
+    captureProtectionSnapshot: vi.fn(
+      async () => snapshots.shift() ?? snapshot(),
+    ),
+    markBaselineApplied,
+    close: vi.fn(async () => undefined),
+  };
+  return { value, markBaselineApplied };
+};
+
+describe('Prisma legacy baseline', () => {
+  it('is lexicographically first and creates only the historical objects', () => {
+    const migrations = listRepositoryMigrations(MIGRATIONS);
+    expect(migrations).toEqual([BASELINE_MIGRATION, ...POSTERIOR_MIGRATIONS]);
+    const sql = readFileSync(
+      resolve(MIGRATIONS, BASELINE_MIGRATION, 'migration.sql'),
+      'utf8',
+    );
+    expect(
+      [...sql.matchAll(/CREATE TABLE "([^"]+)"/g)].map((match) => match[1]),
+    ).toEqual(['ProductLead', 'GeneratedCopy']);
+    expect(sql).not.toMatch(/WhatsApp|Coupon|Commercial|Shopee/);
+    expect(sql).not.toMatch(/IF NOT EXISTS|IF EXISTS/);
+  });
+
+  it('preserves every historical migration byte for byte', () => {
+    expect(Object.keys(HISTORICAL_HASHES).sort()).toEqual([
+      ...POSTERIOR_MIGRATIONS,
+    ]);
+    for (const [name, expectedHash] of Object.entries(HISTORICAL_HASHES)) {
+      const sql = readFileSync(
+        resolve(MIGRATIONS, name, 'migration.sql'),
+        'utf8',
+      ).replace(/\r\n/g, '\n');
+      expect(createHash('sha256').update(sql).digest('hex')).toBe(expectedHash);
+    }
+  });
+
+  it('reports an existing pre-baseline database as ready', () => {
+    expect(
+      evaluateBaselineStatus(
+        listRepositoryMigrations(MIGRATIONS),
+        inspection(),
+      ),
+    ).toMatchObject({
+      baselinePresentInRepository: true,
+      baselineRegistered: false,
+      baselinePending: true,
+      appliedMigrationCount: POSTERIOR_MIGRATIONS.length,
+      failedMigrations: [],
+      database: 'existing',
+      readyForAdoption: true,
+    });
+  });
+
+  it('adopts only the history row and proves schema and data preservation', async () => {
+    const afterInspection = inspection({
+      migrationRows: [
+        migration(BASELINE_MIGRATION),
+        ...POSTERIOR_MIGRATIONS.map((name) => migration(name)),
+      ],
+    });
+    const afterSnapshot = snapshot({
+      migrationRowCount: POSTERIOR_MIGRATIONS.length + 1,
+      appliedMigrations: {
+        [BASELINE_MIGRATION]: 'baseline-checksum',
+        ...snapshot().appliedMigrations,
+      },
+    });
+    const mocked = runtime(
+      [inspection(), afterInspection],
+      [snapshot(), afterSnapshot],
+    );
+
+    await expect(
+      adoptBaseline(listRepositoryMigrations(MIGRATIONS), mocked.value),
+    ).resolves.toEqual({
+      adopted: true,
+      alreadyRegistered: false,
+      dataPreserved: true,
+    });
+    expect(mocked.markBaselineApplied).toHaveBeenCalledOnce();
+  });
+
+  it('is idempotent when the baseline is already registered', async () => {
+    const mocked = runtime([
+      inspection({
+        migrationRows: [
+          migration(BASELINE_MIGRATION),
+          ...POSTERIOR_MIGRATIONS.map((name) => migration(name)),
+        ],
+      }),
+    ]);
+    await expect(
+      adoptBaseline(listRepositoryMigrations(MIGRATIONS), mocked.value),
+    ).resolves.toMatchObject({ adopted: false, alreadyRegistered: true });
+    expect(mocked.markBaselineApplied).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'failed migration',
+      inspection({
+        migrationRows: [migration(POSTERIOR_MIGRATIONS[0], false)],
+      }),
+    ],
+    [
+      'empty database',
+      inspection({
+        applicationTables: [],
+        missingBaselineObjects: ['table:ProductLead'],
+      }),
+    ],
+    [
+      'pending posterior migration',
+      inspection({
+        migrationRows: POSTERIOR_MIGRATIONS.slice(1).map((name) =>
+          migration(name),
+        ),
+      }),
+    ],
+    ['schema drift', inspection({ schemaMatchesCurrent: false })],
+  ])('blocks adoption for %s', async (_label, currentInspection) => {
+    const mocked = runtime([currentInspection]);
+    await expect(
+      adoptBaseline(listRepositoryMigrations(MIGRATIONS), mocked.value),
+    ).rejects.toMatchObject({ code: 'DATABASE_BASELINE_ADOPTION_BLOCKED' });
+    expect(mocked.markBaselineApplied).not.toHaveBeenCalled();
+  });
+
+  it('blocks an inconsistent database even when the baseline is registered', async () => {
+    const mocked = runtime([
+      inspection({
+        migrationRows: [
+          migration(BASELINE_MIGRATION),
+          migration(BASELINE_MIGRATION, false),
+          ...POSTERIOR_MIGRATIONS.map((name) => migration(name)),
+        ],
+      }),
+    ]);
+    await expect(
+      adoptBaseline(listRepositoryMigrations(MIGRATIONS), mocked.value),
+    ).rejects.toMatchObject({ code: 'DATABASE_BASELINE_ADOPTION_BLOCKED' });
+    expect(mocked.markBaselineApplied).not.toHaveBeenCalled();
+  });
+
+  it('accepts only the exact adoption confirmation', () => {
+    expect(parseBaselineArgs(['status'])).toEqual({ command: 'status' });
+    expect(parseBaselineArgs(['adopt', '--', BASELINE_CONFIRMATION])).toEqual({
+      command: 'adopt',
+    });
+    for (const args of [
+      ['adopt'],
+      ['adopt', '--confirm'],
+      ['adopt', BASELINE_CONFIRMATION, '--extra'],
+      ['adopt', '--', '--', BASELINE_CONFIRMATION],
+    ]) {
+      expect(() => parseBaselineArgs(args)).toThrow(DatabaseBaselineError);
+    }
+  });
+
+  it('uses only prisma migrate resolve for adoption', async () => {
+    const commandRunner = vi.fn(async () => ({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }));
+    const baselineRuntime = createBaselineRuntime({
+      root: ROOT,
+      environment: {
+        DATABASE_URL: 'postgresql://user:secret@127.0.0.1:1/not-used',
+      },
+      commandRunner,
+    });
+    await baselineRuntime.markBaselineApplied();
+    await baselineRuntime.close();
+    const args = commandRunner.mock.calls[0]?.[1] as string[];
+    expect(args).toContain('resolve');
+    expect(args).toContain('--applied');
+    expect(args).toContain(BASELINE_MIGRATION);
+    expect(args).not.toContain('deploy');
+    expect(args).not.toContain('db');
+  });
+
+  it('keeps credentials out of status output', async () => {
+    const logs: unknown[] = [];
+    const mocked = runtime([inspection()]);
+    const result = await runMigrationBaselineCli({
+      args: ['status'],
+      environment: {
+        DATABASE_URL:
+          'postgresql://sensitive-user:sensitive-password@127.0.0.1:5432/app',
+      },
+      root: ROOT,
+      migrationsDirectory: MIGRATIONS,
+      logger: {
+        info: (data) => logs.push(data),
+        error: (data) => logs.push(data),
+      },
+      runtimeFactory: () => mocked.value,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.stringify(logs)).not.toMatch(
+      /sensitive-user|sensitive-password|postgresql:\/\//,
+    );
+  });
+
+  it('sanitizes a connection close failure', async () => {
+    const logs: unknown[] = [];
+    const mocked = runtime([inspection()]);
+    mocked.value.close = vi.fn(async () => {
+      throw new Error(
+        'postgresql://sensitive-user:sensitive-password@127.0.0.1/app',
+      );
+    });
+    const result = await runMigrationBaselineCli({
+      args: ['status'],
+      environment: {
+        DATABASE_URL:
+          'postgresql://sensitive-user:sensitive-password@127.0.0.1:5432/app',
+      },
+      root: ROOT,
+      migrationsDirectory: MIGRATIONS,
+      logger: {
+        info: (data) => logs.push(data),
+        error: (data) => logs.push(data),
+      },
+      runtimeFactory: () => mocked.value,
+    });
+    expect(result).toMatchObject({
+      exitCode: 1,
+      result: { code: 'DATABASE_BASELINE_CLOSE_FAILED' },
+    });
+    expect(JSON.stringify(logs)).not.toMatch(
+      /sensitive-user|sensitive-password|postgresql:\/\//,
+    );
+  });
+
+  it('rejects clean verification arguments and unsafe database names', () => {
+    expect(() => parseCleanVerificationArgs([])).not.toThrow();
+    expect(() => parseCleanVerificationArgs(['--extra'])).toThrow(
+      DatabaseBaselineError,
+    );
+    expect(() =>
+      assertTemporaryDatabaseName(
+        'shopee_migration_verify_00000000000000000000000000000000',
+      ),
+    ).not.toThrow();
+    expect(() => assertTemporaryDatabaseName('production')).toThrow(
+      DatabaseBaselineError,
+    );
+  });
+
+  it('drops the temporary database after a deploy failure', async () => {
+    const databaseName =
+      'shopee_migration_verify_00000000000000000000000000000000';
+    const adminQueries: string[] = [];
+    const admin = {
+      async $executeRawUnsafe(query: string) {
+        adminQueries.push(query);
+        return 0;
+      },
+      async $queryRawUnsafe<T>(query: string): Promise<T> {
+        adminQueries.push(query);
+        return [] as T;
+      },
+      async $disconnect() {},
+    };
+    const temporary = {
+      async $executeRawUnsafe() {
+        return 0;
+      },
+      async $queryRawUnsafe<T>(): Promise<T> {
+        return [{ count: 0n }] as T;
+      },
+      async $disconnect() {},
+    };
+    const commandRunner = vi.fn(async () => ({
+      code: 1,
+      stdout: '',
+      stderr: 'sensitive-password',
+    }));
+    const result = await runCleanMigrationVerification({
+      args: [],
+      environment: {
+        DATABASE_URL:
+          'postgresql://sensitive-user:sensitive-password@127.0.0.1:5432/app',
+      },
+      root: ROOT,
+      migrationsDirectory: MIGRATIONS,
+      logger: { info: vi.fn(), error: vi.fn() },
+      databaseNameFactory: () => databaseName,
+      clientFactory: vi
+        .fn()
+        .mockReturnValueOnce(admin)
+        .mockReturnValueOnce(temporary),
+      commandRunner,
+    });
+    expect(result).toMatchObject({
+      exitCode: 1,
+      result: { code: 'CLEAN_DATABASE_DEPLOY_FAILED' },
+    });
+    expect(adminQueries).toContain(
+      `CREATE DATABASE "${databaseName}" TEMPLATE template0`,
+    );
+    expect(adminQueries).toContain(`DROP DATABASE "${databaseName}"`);
+  });
+});

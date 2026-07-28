@@ -15,6 +15,18 @@ Este documento descreve os agentes e componentes de orquestracao atuais do proje
 
 Regra: agentes e servicos de aplicacao nao dependem diretamente do Prisma Client. Prisma fica restrito aos adaptadores concretos.
 
+## Historico Prisma e baseline legada
+
+- `0_legacy_baseline` reconstrói somente `ProductLead` e `GeneratedCopy` como
+  existiam antes da primeira migration versionada; migrations posteriores
+  permanecem byte a byte inalteradas.
+- Instalacoes novas validam o histórico com `db:migrations:verify-clean` e usam
+  `db:deploy` normalmente.
+- Bancos criados antes da baseline consultam `db:baseline:status` e executam
+  uma unica vez `db:baseline:adopt -- --confirm-existing-database` antes do
+  deploy. A adoção registra apenas o histórico Prisma e não executa SQL
+  estrutural nem modifica tabelas comerciais.
+
 ## Shopee Affiliate Offers
 
 Responsabilidade:

@@ -195,7 +195,7 @@ model CommercialAutomationSettings {
   paused    Boolean   @default(true)
   pausedAt  DateTime? @default(now())
   resumedAt DateTime?
-  updatedAt DateTime  @updatedAt
+  updatedAt DateTime  @default(now()) @updatedAt
 }
 
 model CommercialAutomationExecution {

@@ -27,6 +27,27 @@ Monorepo com pnpm workspaces e Turborepo para automatizar um pipeline afiliado m
 
 ## Como executar
 
+### Migrations Prisma
+
+Instalação nova:
+
+```powershell
+corepack pnpm db:migrations:verify-clean
+corepack pnpm db:deploy
+```
+
+Banco existente criado antes da baseline:
+
+```powershell
+corepack pnpm db:baseline:status
+corepack pnpm db:baseline:adopt -- --confirm-existing-database
+corepack pnpm db:deploy
+```
+
+`db:baseline:adopt` é uma operação única de histórico: registra a baseline
+como aplicada depois de validar o banco existente e não modifica tabelas ou
+dados comerciais.
+
 ```bash
 cp .env.example .env
 pnpm install
