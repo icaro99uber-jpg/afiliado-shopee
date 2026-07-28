@@ -100,6 +100,34 @@ const getWindowsProcessTree = async (rootPid: number) => {
   return pids.includes(rootPid) ? pids : [rootPid, ...pids];
 };
 
+const getPosixProcessTree = async (rootPid: number) => {
+  const result = await runCommand({
+    command: 'ps',
+    args: ['-eo', 'pid=', '-o', 'ppid='],
+    cwd: process.cwd(),
+  });
+  if (result.code !== 0) return [rootPid];
+  const relationships = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(
+      (values): values is [number, number] =>
+        values.length === 2 && values.every(Number.isInteger),
+    );
+  const tree = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [pid, parentPid] of relationships) {
+      if (tree.has(parentPid) && !tree.has(pid)) {
+        tree.add(pid);
+        changed = true;
+      }
+    }
+  }
+  return [...tree];
+};
+
 const inspectWindowsProcess = async (
   pid: number,
   marker: string,
@@ -130,9 +158,7 @@ const inspectWindowsProcess = async (
     running: true,
     identityMatches:
       processStartedAtMatches(expectedStartedAt, startedAt) &&
-      (Boolean(
-        normalizedMarkerMatches(parsed.CommandLine, marker),
-      ) ||
+      (Boolean(normalizedMarkerMatches(parsed.CommandLine, marker)) ||
         (!parsed.CommandLine && parsed.Name?.toLowerCase() === 'node')),
     command: parsed.CommandLine,
     startedAt,
@@ -315,6 +341,13 @@ export const createSystemDependencies = (): SystemDependencies => ({
     const pid = Number(/^p(\d+)$/m.exec(result.stdout)?.[1]);
     const processName = /^c(.+)$/m.exec(result.stdout)?.[1] ?? 'unknown';
     return { ...(Number.isInteger(pid) ? { pid } : {}), processName };
+  },
+  isProcessInTree: async (rootPid, candidatePid) => {
+    const tree =
+      process.platform === 'win32'
+        ? await getWindowsProcessTree(rootPid)
+        : await getPosixProcessTree(rootPid);
+    return tree.includes(candidatePid);
   },
   request: async (url, options = {}) => {
     const controller = new AbortController();

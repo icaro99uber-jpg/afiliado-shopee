@@ -735,3 +735,17 @@ aceitam somente nomes logicos predefinidos e de 1 a 1000 linhas.
 O snapshot tambem informa `operationLock` (`unlocked`, `active`, `stale`,
 `invalid` ou `unavailable`) e, para registros validos, operacao, PID e horario
 de aquisicao, sem owner token e sem alterar o lock.
+
+O comando confirmado abaixo executa uma validação local prolongada com
+Scheduler comercial a cada minuto e provider Shopee mock:
+
+`corepack pnpm system:stability:preview -- --confirm-local-preview-stability-test`
+
+Ele comprova
+recuperação do worker, API, Redis e PostgreSQL, preserva volumes e bloqueia
+dispatch, outbox, filas de envio, estados stale/ambíguos e qualquer modo send.
+O único grupo já autorizado fornece a instância somente aos processos filhos;
+nenhum grupo ou `.env` é alterado.
+O relatório sanitizado fica em
+`.runtime/local-system/preview-stability-report.json`; o cleanup restaura a
+pausa, remove o Scheduler comercial conhecido e deixa o sistema parado.

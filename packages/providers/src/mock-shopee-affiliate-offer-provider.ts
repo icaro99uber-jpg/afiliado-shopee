@@ -6,7 +6,32 @@ import type {
 
 const categories = ['100001', '100002', '100003'];
 
-const mockOffers: ShopeeProductOffer[] = Array.from(
+const stabilityPreviewOffer: ShopeeProductOffer = {
+  source: 'MOCK',
+  providerProductId: 'mock-affiliate-000',
+  productName: 'Produto ficticio estabilidade preview',
+  shopId: 'mock-shop-stability',
+  shopName: 'Loja ficticia estabilidade',
+  categoryIds: ['100001'],
+  price: '39.90',
+  priceMin: '39.90',
+  priceMax: '39.90',
+  discountRate: 55,
+  rating: 5,
+  sales: 20000,
+  commissionRate: 25,
+  commissionAmount: '9.98',
+  sellerCommissionRate: 10,
+  shopeeCommissionRate: 15,
+  imageUrl: 'https://example.invalid/images/product-stability.jpg',
+  productLink: 'https://example.invalid/products/stability',
+  affiliateLink: 'https://example.invalid/affiliate/stability',
+  offerStartsAt: new Date('2026-01-01T00:00:00.000Z'),
+  offerEndsAt: new Date('2099-12-31T23:59:59.000Z'),
+  fetchedAt: new Date('2026-01-01T00:00:00.000Z'),
+};
+
+const regularMockOffers: ShopeeProductOffer[] = Array.from(
   { length: 24 },
   (_, index) => {
     const number = index + 1;
@@ -42,6 +67,11 @@ const mockOffers: ShopeeProductOffer[] = Array.from(
     };
   },
 );
+
+const mockOffers: ShopeeProductOffer[] = [
+  stabilityPreviewOffer,
+  ...regularMockOffers,
+];
 
 const decimal = (value: string) => Number(value);
 

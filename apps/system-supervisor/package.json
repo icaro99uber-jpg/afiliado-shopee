@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@shopee-auto-affiliate-ai/config": "workspace:*",
+    "@shopee-auto-affiliate-ai/database": "workspace:*",
+    "@shopee-auto-affiliate-ai/queue": "workspace:*",
     "@shopee-auto-affiliate-ai/providers": "workspace:*"
   },
   "devDependencies": {

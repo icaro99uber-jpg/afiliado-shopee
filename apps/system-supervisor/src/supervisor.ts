@@ -25,7 +25,12 @@ import type {
   ServiceName,
   SystemDependencies,
 } from './types';
-import { LocalSystemError, SERVICE_NAMES } from './types';
+
+import {
+  LocalSystemError,
+  PREVIEW_STABILITY_PRISMA_VALIDATION,
+  SERVICE_NAMES,
+} from './types';
 
 type ServiceSpec = {
   name: ServiceName;
@@ -63,7 +68,7 @@ const evolutionComposeArguments = [
   'infra/evolution/docker-compose.yml',
 ];
 
-const parseComposeStatuses = (stdout: string): ComposeServiceStatus[] =>
+export const parseComposeStatuses = (stdout: string): ComposeServiceStatus[] =>
   stdout
     .split(/\r?\n/)
     .filter(Boolean)
@@ -273,6 +278,14 @@ const assertPortAvailable = async (
   const occupant = await deps.getPortOccupant(port);
   if (!occupant || (ownedPid !== undefined && occupant.pid === ownedPid))
     return;
+  if (
+    ownedPid !== undefined &&
+    occupant.pid !== undefined &&
+    deps.isProcessInTree &&
+    (await deps.isProcessInTree(ownedPid, occupant.pid))
+  ) {
+    return;
+  }
   throw new LocalSystemError(
     `A porta ${port} esta ocupada por ${occupant.processName}; nenhum processo sera encerrado`,
     'SYSTEM_PORT_OCCUPIED',
@@ -581,7 +594,17 @@ export class LocalSystemSupervisor {
         runtimeEnv,
       ),
     ]);
-    if (!inspected.valid.api) {
+    const validatedPreviewClient =
+      runtimeEnv[PREVIEW_STABILITY_PRISMA_VALIDATION] === 'true' &&
+      loaded.mode === 'preview' &&
+      runtimeEnv.SCHEDULER_ENABLED === 'false' &&
+      runtimeEnv.WHATSAPP_GROUP_SEND_ENABLED === 'false' &&
+      runtimeEnv.SHOPEE_AFFILIATE_PROVIDER === 'mock';
+    if (
+      !validatedPreviewClient &&
+      !inspected.valid.api &&
+      Object.keys(inspected.valid).length === 0
+    ) {
       await runRequired(
         this.deps,
         corepackSpec(
