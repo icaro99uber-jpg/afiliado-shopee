@@ -6,14 +6,14 @@ import { isCommercialAuthorizedGroup } from './commercial-group-selection';
 import { commercialProductRejections } from './commercial-pipeline-service';
 import type {
   CommercialDeliveryHistoryRepository,
+  CommercialDispatchOutboxRepository,
   CommercialPipelineRunRecord,
   CommercialPipelineRunRepository,
-  GeneratedCopyRepository,
   ShopeeOfferRepository,
-  WhatsAppDispatchRepository,
   WhatsAppGroupDirectoryRepository,
   WhatsAppGroupRecord,
 } from './repositories';
+import type { CommercialDispatchOutboxPublisher } from './commercial-dispatch-outbox-publisher';
 
 export const COMMERCIAL_CONFIRMATION_TOKEN = 'CONFIRMAR_ENVIO_COMERCIAL';
 
@@ -21,12 +21,8 @@ export const commercialConfirmationIds = (dryRunId: string) => ({
   copyId: `commercial-${dryRunId}-copy`,
   dispatchId: `commercial-${dryRunId}-dispatch`,
   jobId: `commercial-${dryRunId}-job`,
+  outboxId: `commercial-${dryRunId}-outbox`,
 });
-
-export type CommercialConfirmationQueue = {
-  hasJob(jobId: string): Promise<boolean>;
-  enqueue(dispatchId: string, jobId: string): Promise<void>;
-};
 
 export type CommercialConfirmationEnvironment = {
   groupSendEnabled: boolean;
@@ -55,11 +51,10 @@ export type CommercialPipelineConfirmationServiceOptions = {
   runs: CommercialPipelineRunRepository;
   offers: ShopeeOfferRepository;
   groups: WhatsAppGroupDirectoryRepository;
-  generatedCopies: GeneratedCopyRepository;
-  dispatches: WhatsAppDispatchRepository;
+  outboxes: CommercialDispatchOutboxRepository;
   deliveryHistory: CommercialDeliveryHistoryRepository;
   copy: CommercialCopyGenerator;
-  queue: CommercialConfirmationQueue;
+  publisher: Pick<CommercialDispatchOutboxPublisher, 'publish'>;
   instanceName: string;
   environment: CommercialConfirmationEnvironment;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
@@ -165,32 +160,7 @@ export class CommercialPipelineConfirmationService {
 
     const initial = assertReadyRun(await this.options.runs.findById(dryRunId));
     const ids = commercialConfirmationIds(dryRunId);
-    const [existingCopy, existingDispatch, existingJob] = await Promise.all([
-      this.options.generatedCopies.findById(ids.copyId),
-      this.options.dispatches.findByIdWithDetails(ids.dispatchId),
-      this.options.queue.hasJob(ids.jobId),
-    ]);
-    if (existingCopy || existingDispatch || existingJob) {
-      changed(
-        'Existe estado anterior para este dry-run',
-        'COMMERCIAL_RUN_ALREADY_CONFIRMED',
-      );
-    }
-
     const confirmedAt = this.clock();
-    const claimed = await this.options.runs.claimConfirmation(
-      initial.id,
-      confirmedAt,
-    );
-    if (!claimed) {
-      return changed(
-        'Dry-run comercial ja foi confirmado',
-        'COMMERCIAL_RUN_ALREADY_CONFIRMED',
-      );
-    }
-
-    let dispatchCreated = false;
-    let queueAttempted = false;
     try {
       const run = initial;
       const product = await this.options.offers.findOfferById(run.productId);
@@ -255,39 +225,33 @@ export class CommercialPipelineConfirmationService {
         );
       }
 
-      await this.options.generatedCopies.create({
-        id: ids.copyId,
-        productId: run.productId,
-        titulo: '',
-        mensagem: run.copyPreview,
-        cta: '',
-        hashtags: '',
+      const outbox = await this.options.outboxes.createPendingConfirmation({
+        outboxId: ids.outboxId,
+        runId: run.id,
+        confirmedAt,
+        copy: {
+          id: ids.copyId,
+          productId: run.productId,
+          titulo: '',
+          mensagem: run.copyPreview,
+          cta: '',
+          hashtags: '',
+        },
+        dispatch: {
+          id: ids.dispatchId,
+          productId: run.productId,
+          generatedCopyId: ids.copyId,
+          destinationId: group.id,
+        },
+        jobId: ids.jobId,
       });
-      const dispatch = await this.options.dispatches.createPending({
-        id: ids.dispatchId,
-        productId: run.productId,
-        generatedCopyId: ids.copyId,
-        destinationId: group.id,
-      });
-      if (!dispatch) {
+      if (!outbox) {
         return changed(
-          'Dispatch comercial nao pode ser criado',
-          'COMMERCIAL_DISPATCH_FAILED',
+          'Dry-run comercial ja foi confirmado',
+          'COMMERCIAL_RUN_ALREADY_CONFIRMED',
         );
       }
-      dispatchCreated = true;
-      await this.options.runs.update(run.id, {
-        dispatchId: ids.dispatchId,
-        finalStatus: 'PENDING',
-      });
-
-      queueAttempted = true;
-      await this.options.queue.enqueue(ids.dispatchId, ids.jobId);
-      await this.options.runs.update(run.id, {
-        jobId: ids.jobId,
-        finalStatus: 'PENDING',
-        investigationRequired: false,
-      });
+      await this.options.publisher.publish(outbox.id);
       this.options.logger.info(
         {
           event: 'commercial-pipeline.confirmed.queued',
@@ -316,29 +280,21 @@ export class CommercialPipelineConfirmationService {
       };
     } catch (error) {
       const safeCode =
-        error instanceof AppError &&
-        [
-          'COMMERCIAL_PRODUCT_CHANGED',
-          'COMMERCIAL_GROUP_CHANGED',
-          'PRODUCT_ALREADY_SENT',
-          'COMMERCIAL_DISPATCH_FAILED',
-        ].includes(error.code)
-          ? error.code
-          : 'COMMERCIAL_DISPATCH_FAILED';
-      const investigationRequired = dispatchCreated || queueAttempted;
-      await this.options.runs.update(initial.id, {
-        status: 'FAILED',
-        failureCode: safeCode,
-        finalStatus: investigationRequired ? 'AMBIGUOUS' : null,
-        investigationRequired,
-        completedAt: this.clock(),
-      });
+        error instanceof AppError ? error.code : 'COMMERCIAL_DISPATCH_FAILED';
+      if (safeCode === 'COMMERCIAL_OUTBOX_INCONSISTENT') {
+        await this.options.runs.update(initial.id, {
+          status: 'FAILED',
+          finalStatus: 'AMBIGUOUS',
+          investigationRequired: true,
+          failureCode: safeCode,
+          completedAt: this.clock(),
+        });
+      }
       this.options.logger.error(
         {
           event: 'commercial-pipeline.confirmed.failed',
           runId: initial.id,
           code: safeCode,
-          investigationRequired,
         },
         'Commercial pipeline confirmation failed',
       );
@@ -351,14 +307,10 @@ export class CommercialPipelineConfirmationService {
   }
 
   async markInvestigationRequired(runId: string) {
-    const run = await this.options.runs.findById(runId);
-    if (!run || run.mode !== 'CONFIRMED') return;
-    await this.options.runs.update(runId, {
-      status: 'FAILED',
-      finalStatus: 'AMBIGUOUS',
-      failureCode: 'COMMERCIAL_DISPATCH_FAILED',
-      investigationRequired: true,
-      completedAt: this.clock(),
-    });
+    await this.options.outboxes.markAmbiguous(
+      commercialConfirmationIds(runId).outboxId,
+      'COMMERCIAL_DISPATCH_FAILED',
+      this.clock(),
+    );
   }
 }

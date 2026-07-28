@@ -12,6 +12,8 @@
     "commercial:confirm": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-confirm.ts",
     "commercial:automation:preview": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-automation-preview.ts",
     "commercial:automation:worker": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-automation-worker.ts",
+    "commercial:outbox:status": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-outbox-cli.ts status",
+    "commercial:outbox:reconcile": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-outbox-cli.ts reconcile",
     "whatsapp:dispatch:worker": "tsx --tsconfig ../../tsconfig.runtime.json src/whatsapp-dispatch-runtime.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",

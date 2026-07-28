@@ -646,8 +646,11 @@ Responsabilidade:
 Idempotencia e seguranca:
 
 - Copy, dispatch e job usam IDs deterministicos derivados do `dryRunId`.
-- A reivindicacao do run e atomica; modo confirmado, dispatch, job ou qualquer
-  estado parcial bloqueiam definitivamente nova execucao.
+- `GeneratedCopy`, `WhatsAppDispatch`, atualizacao do run e
+  `CommercialDispatchOutbox` `PENDING` sao persistidos na mesma transacao.
+- O publicador independente verifica o job deterministico: job existente e
+  somente reconhecido, job ausente e criado uma vez. Incerteza vira
+  `AMBIGUOUS` e exige investigacao manual, sem retry automatico.
 - O job `whatsapp-dispatch` usa `attempts: 1`, sem backoff e sem remocao.
 - Timeout, falha ou resultado ambiguo registram `investigationRequired=true` e
   nunca autorizam retry ou limpeza de historico.
@@ -666,6 +669,12 @@ Operacao:
 - O dashboard exige a mesma frase em modal, remove a acao depois de qualquer
   tentativa e exibe apenas fingerprint, status, tentativas e existencia de ID
   externo.
+- `commercial:outbox:status` consulta evidencia sanitizada. O reconcile exige
+  somente `--outbox-id` e `--confirm-safe-publication`, modo preview, ambos os
+  Schedulers desligados e ausencia de worker de dispatch.
+- `GET /commercial-automation/outbox` e
+  `GET /commercial-automation/outbox/:id` sao somente leitura; nao existe rota
+  HTTP de publicacao.
 
 ## Commercial Automation Guardrails
 

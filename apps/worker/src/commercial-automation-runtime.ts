@@ -12,7 +12,7 @@ import {
   createPrismaRepositories,
 } from '../../api/src/application-services';
 import { CommercialAutomationOrchestrator } from '../../api/src/commercial-automation-orchestrator';
-import type { CommercialConfirmationQueue } from '../../api/src/commercial-pipeline-confirmation-service';
+import type { CommercialDispatchOutboxQueue } from '../../api/src/commercial-dispatch-outbox-publisher';
 import { ScoreService } from '../../api/src/score-service';
 import { ShopeeOfferSyncService } from '../../api/src/shopee-offer-sync-service';
 
@@ -45,7 +45,7 @@ export const createCommercialAutomationOrchestratorRuntime = (
   options: {
     prisma?: ReturnType<typeof createPrismaClient>;
     logger?: CommercialAutomationRuntimeLogger;
-    confirmationQueue?: CommercialConfirmationQueue;
+    confirmationQueue?: CommercialDispatchOutboxQueue;
   } = {},
 ) => {
   const prisma = options.prisma ?? createPrismaClient();
