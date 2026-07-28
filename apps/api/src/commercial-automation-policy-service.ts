@@ -13,6 +13,8 @@ export const COMMERCIAL_AUTOMATION_RESUME_CONFIRMATION =
 
 export const COMMERCIAL_EXECUTION_IN_PROGRESS =
   'COMMERCIAL_EXECUTION_IN_PROGRESS';
+export const STALE_COMMERCIAL_EXECUTION_EXISTS =
+  'STALE_COMMERCIAL_EXECUTION_EXISTS';
 
 export const COMMERCIAL_AUTOMATION_REASONS = [
   'AUTOMATION_DISABLED',
@@ -25,6 +27,7 @@ export const COMMERCIAL_AUTOMATION_REASONS = [
   'MULTIPLE_AUTHORIZED_GROUPS',
   'AMBIGUOUS_COMMERCIAL_RUN_EXISTS',
   COMMERCIAL_EXECUTION_IN_PROGRESS,
+  STALE_COMMERCIAL_EXECUTION_EXISTS,
 ] as const;
 
 export type CommercialAutomationReason =
@@ -187,6 +190,7 @@ const HARD_BLOCKING_REASONS = new Set<CommercialAutomationReason>([
   'MULTIPLE_AUTHORIZED_GROUPS',
   'AMBIGUOUS_COMMERCIAL_RUN_EXISTS',
   COMMERCIAL_EXECUTION_IN_PROGRESS,
+  STALE_COMMERCIAL_EXECUTION_EXISTS,
 ]);
 
 export class CommercialAutomationPolicyService {
@@ -201,26 +205,36 @@ export class CommercialAutomationPolicyService {
     },
   ) {}
 
-  async evaluateAutomationReadiness(): Promise<CommercialAutomationStatus> {
+  async evaluateAutomationReadiness(input?: {
+    excludedExecutionId?: string;
+  }): Promise<CommercialAutomationStatus> {
     const now = (this.dependencies.clock ?? (() => new Date()))();
     const [settings, context] = await Promise.all([
       this.dependencies.settings.getOrCreate(now),
-      this.loadOperationalContext(now),
+      this.loadOperationalContext(now, input?.excludedExecutionId),
     ]);
 
     return this.buildStatus({ now, settings, ...context });
   }
 
-  private async loadOperationalContext(now: Date) {
+  private async loadOperationalContext(
+    now: Date,
+    excludedExecutionId?: string,
+  ) {
     const dayRange = getLocalDayRange(now, this.dependencies.config.timezone);
-    const [groups, ambiguousExecution, activeExecution] = await Promise.all([
-      this.dependencies.groups.list(this.dependencies.instanceName, {
-        active: true,
-        available: true,
-      }),
-      this.dependencies.history.hasAmbiguousCommercialExecution(),
-      this.dependencies.history.hasActiveCommercialExecution(),
-    ]);
+    const [groups, ambiguousExecution, activeExecution, staleExecution] =
+      await Promise.all([
+        this.dependencies.groups.list(this.dependencies.instanceName, {
+          active: true,
+          available: true,
+        }),
+        this.dependencies.history.hasAmbiguousCommercialExecution(),
+        this.dependencies.history.hasActiveCommercialExecution(
+          now,
+          excludedExecutionId,
+        ),
+        this.dependencies.history.hasStaleCommercialExecution(now),
+      ]);
     const authorizedGroups = groups.filter((group) =>
       isCommercialAuthorizedGroup(group, this.dependencies.instanceName),
     );
@@ -234,6 +248,7 @@ export class CommercialAutomationPolicyService {
       authorizedGroupCount: authorizedGroups.length,
       ambiguousExecution,
       activeExecution,
+      staleExecution,
       history,
       dayEndsAt: dayRange.dayEndsAt,
     };
@@ -267,6 +282,7 @@ export class CommercialAutomationPolicyService {
     authorizedGroupCount,
     ambiguousExecution,
     activeExecution,
+    staleExecution,
     history,
     dayEndsAt,
   }: {
@@ -275,6 +291,7 @@ export class CommercialAutomationPolicyService {
     authorizedGroupCount: number;
     ambiguousExecution: boolean;
     activeExecution: boolean;
+    staleExecution: boolean;
     history: {
       globalSentToday: number;
       groupSentToday: number;
@@ -312,6 +329,7 @@ export class CommercialAutomationPolicyService {
     if (authorizedGroupCount > 1) reasons.push('MULTIPLE_AUTHORIZED_GROUPS');
     if (ambiguousExecution) reasons.push('AMBIGUOUS_COMMERCIAL_RUN_EXISTS');
     if (activeExecution) reasons.push('COMMERCIAL_EXECUTION_IN_PROGRESS');
+    if (staleExecution) reasons.push(STALE_COMMERCIAL_EXECUTION_EXISTS);
 
     let nextAllowedAt: Date | null = null;
     if (

@@ -268,6 +268,7 @@ export type CommercialAutomationSettingsRecord = {
 };
 
 export interface CommercialAutomationSettingsRepository {
+  get(): Promise<CommercialAutomationSettingsRecord | null>;
   getOrCreate(now: Date): Promise<CommercialAutomationSettingsRecord>;
   setPaused(
     paused: boolean,
@@ -288,7 +289,11 @@ export interface CommercialAutomationHistoryRepository {
     dayEndsAt: Date;
   }): Promise<CommercialAutomationHistorySnapshot>;
   hasAmbiguousCommercialExecution(): Promise<boolean>;
-  hasActiveCommercialExecution(): Promise<boolean>;
+  hasActiveCommercialExecution(
+    now: Date,
+    excludedExecutionId?: string,
+  ): Promise<boolean>;
+  hasStaleCommercialExecution(now: Date): Promise<boolean>;
 }
 
 export type CommercialAutomationExecutionMode = 'PREVIEW' | 'SEND';
@@ -299,6 +304,10 @@ export type CommercialAutomationExecutionRecord = {
   id: string;
   schedulerJobId: string;
   bullMqJobId: string | null;
+  activeKey: string | null;
+  ownerId: string | null;
+  heartbeatAt: Date | null;
+  leaseExpiresAt: Date | null;
   mode: CommercialAutomationExecutionMode;
   status: CommercialAutomationExecutionStatus;
   reasons: string[];
@@ -308,10 +317,40 @@ export type CommercialAutomationExecutionRecord = {
   completedAt: Date | null;
 };
 
+export type CommercialAutomationExecutionOwnership = {
+  executionId: string;
+  ownerId: string;
+};
+
+export type CommercialAutomationExecutionRecoveryContext = {
+  execution: CommercialAutomationExecutionRecord;
+  run:
+    | (Pick<
+        CommercialPipelineRunRecord,
+        | 'id'
+        | 'mode'
+        | 'dispatchId'
+        | 'jobId'
+        | 'finalStatus'
+        | 'investigationRequired'
+      > & {
+        dispatch: Pick<
+          WhatsAppDispatchRecord,
+          'id' | 'status' | 'attemptCount'
+        > | null;
+        outbox: CommercialDispatchOutboxRecord | null;
+      })
+    | null;
+};
+
 export type StartCommercialAutomationExecutionResult =
-  | { outcome: 'created'; execution: CommercialAutomationExecutionRecord }
+  | {
+      outcome: 'created';
+      execution: CommercialAutomationExecutionRecord;
+      ownership: CommercialAutomationExecutionOwnership;
+    }
   | { outcome: 'existing'; execution: CommercialAutomationExecutionRecord }
-  | { outcome: 'concurrent' };
+  | { outcome: 'concurrent'; stale: boolean };
 
 export interface CommercialAutomationExecutionRepository {
   start(input: {
@@ -319,6 +358,9 @@ export interface CommercialAutomationExecutionRepository {
     bullMqJobId?: string;
     mode: CommercialAutomationExecutionMode;
     startedAt: Date;
+    ownerId: string;
+    heartbeatAt: Date;
+    leaseExpiresAt: Date;
   }): Promise<StartCommercialAutomationExecutionResult>;
   createBlocked(input: {
     schedulerJobId: string;
@@ -327,12 +369,27 @@ export interface CommercialAutomationExecutionRepository {
     reasons: string[];
     completedAt: Date;
   }): Promise<CommercialAutomationExecutionRecord>;
+  heartbeat(
+    ownership: CommercialAutomationExecutionOwnership,
+    input: { heartbeatAt: Date; leaseExpiresAt: Date },
+  ): Promise<void>;
   finish(
-    id: string,
+    ownership: CommercialAutomationExecutionOwnership,
     input: {
       status: Exclude<CommercialAutomationExecutionStatus, 'STARTED'>;
       reasons?: string[];
       commercialRunId?: string;
+      failureCode?: string;
+      completedAt: Date;
+    },
+  ): Promise<CommercialAutomationExecutionRecord>;
+  findRecoveryContext(
+    id: string,
+  ): Promise<CommercialAutomationExecutionRecoveryContext | null>;
+  recoverStale(
+    id: string,
+    input: {
+      status: 'QUEUED' | 'FAILED' | 'AMBIGUOUS';
       failureCode?: string;
       completedAt: Date;
     },

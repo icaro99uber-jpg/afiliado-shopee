@@ -1,21 +1,28 @@
 import type {
+  CommercialAutomationExecutionRecord,
   CommercialAutomationExecutionMode,
   CommercialAutomationExecutionStatus,
 } from './repositories';
 
+export const COMMERCIAL_EXECUTION_OWNERSHIP_LOST =
+  'COMMERCIAL_EXECUTION_OWNERSHIP_LOST';
+
+export const isCommercialAutomationExecutionStale = (
+  execution: CommercialAutomationExecutionRecord,
+  now: Date,
+) =>
+  execution.status === 'STARTED' &&
+  (!execution.activeKey ||
+    !execution.ownerId ||
+    !execution.heartbeatAt ||
+    !execution.leaseExpiresAt ||
+    execution.leaseExpiresAt.getTime() <= now.getTime());
+
 export type CommercialAutomationMode = 'preview' | 'send';
 export type CommercialAutomationProvider = 'mock' | 'manual' | 'official';
-export type CommercialAutomationProviderSource =
-  | 'MOCK'
-  | 'MANUAL'
-  | 'OFFICIAL';
+export type CommercialAutomationProviderSource = 'MOCK' | 'MANUAL' | 'OFFICIAL';
 export type CommercialAutomationPublicStatus =
-  | 'started'
-  | 'blocked'
-  | 'preview-ready'
-  | 'queued'
-  | 'failed'
-  | 'ambiguous';
+  'started' | 'blocked' | 'preview-ready' | 'queued' | 'failed' | 'ambiguous';
 
 const PERSISTED_MODE_BY_PUBLIC = {
   preview: 'PREVIEW',

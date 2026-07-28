@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import {
@@ -6,10 +7,13 @@ import {
 } from './commercial-pipeline-confirmation-service';
 import {
   COMMERCIAL_EXECUTION_IN_PROGRESS,
+  STALE_COMMERCIAL_EXECUTION_EXISTS,
   type CommercialAutomationPolicyService,
 } from './commercial-automation-policy-service';
 import {
   toCommercialAutomationProviderSource,
+  COMMERCIAL_EXECUTION_OWNERSHIP_LOST,
+  isCommercialAutomationExecutionStale,
   toPersistedCommercialAutomationMode,
   toPublicCommercialAutomationMode,
   toPublicCommercialAutomationStatus,
@@ -20,6 +24,7 @@ import {
 import type { CommercialPipelineService } from './commercial-pipeline-service';
 import type {
   CommercialAutomationExecutionRecord,
+  CommercialAutomationExecutionOwnership,
   CommercialAutomationExecutionRepository,
   CommercialPipelineRunRepository,
 } from './repositories';
@@ -61,6 +66,63 @@ const publicResult = (
 const safeFailureCode = (error: unknown) =>
   error instanceof AppError ? error.code : 'COMMERCIAL_AUTOMATION_TICK_FAILED';
 
+const isOwnershipLost = (error: unknown) =>
+  error instanceof AppError &&
+  error.code === COMMERCIAL_EXECUTION_OWNERSHIP_LOST;
+
+const addMilliseconds = (date: Date, milliseconds: number) =>
+  new Date(date.getTime() + milliseconds);
+
+const createHeartbeatController = (input: {
+  executions: CommercialAutomationExecutionRepository;
+  ownership: CommercialAutomationExecutionOwnership;
+  clock: () => Date;
+  leaseMilliseconds: number;
+  heartbeatMilliseconds: number;
+}) => {
+  let stopped = false;
+  let ownershipError: unknown;
+  let pending: Promise<void> | undefined;
+
+  const renew = async () => {
+    if (stopped || ownershipError) return;
+    const heartbeatAt = input.clock();
+    try {
+      await input.executions.heartbeat(input.ownership, {
+        heartbeatAt,
+        leaseExpiresAt: addMilliseconds(heartbeatAt, input.leaseMilliseconds),
+      });
+    } catch (error) {
+      ownershipError = error;
+      stopped = true;
+      clearInterval(timer);
+    }
+  };
+  const queueRenewal = () => {
+    if (pending) return pending;
+    pending = renew().finally(() => {
+      pending = undefined;
+    });
+    return pending;
+  };
+  const timer = setInterval(
+    () => void queueRenewal(),
+    input.heartbeatMilliseconds,
+  );
+
+  return {
+    async checkpoint() {
+      await queueRenewal();
+      if (ownershipError) throw ownershipError;
+    },
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      await pending;
+    },
+  };
+};
+
 export class CommercialAutomationOrchestrator {
   private readonly clock: () => Date;
 
@@ -77,6 +139,9 @@ export class CommercialAutomationOrchestrator {
       executions: CommercialAutomationExecutionRepository;
       logger: CommercialAutomationLogger;
       clock?: () => Date;
+      leaseSeconds: number;
+      heartbeatSeconds: number;
+      ownerIdFactory?: () => string;
     },
   ) {
     this.clock = dependencies.clock ?? (() => new Date());
@@ -89,17 +154,33 @@ export class CommercialAutomationOrchestrator {
     provider: CommercialAutomationProvider;
   }): Promise<CommercialAutomationTickResult> {
     const mode = toPersistedCommercialAutomationMode(input.mode);
+    const startedAt = this.clock();
+    const ownerId = (this.dependencies.ownerIdFactory ?? randomUUID)();
     const started = await this.dependencies.executions.start({
       schedulerJobId: input.schedulerJobId,
       bullMqJobId: input.bullMqJobId,
       mode,
-      startedAt: this.clock(),
+      startedAt,
+      ownerId,
+      heartbeatAt: startedAt,
+      leaseExpiresAt: addMilliseconds(
+        startedAt,
+        this.dependencies.leaseSeconds * 1000,
+      ),
     });
     if (started.outcome === 'existing') {
       if (started.execution.status === 'STARTED') {
+        const stale = isCommercialAutomationExecutionStale(
+          started.execution,
+          startedAt,
+        );
         throw new AppError(
-          'Execucao comercial anterior permanece em andamento',
-          COMMERCIAL_EXECUTION_IN_PROGRESS,
+          stale
+            ? 'Execucao comercial anterior exige recuperacao manual'
+            : 'Execucao comercial anterior permanece em andamento',
+          stale
+            ? STALE_COMMERCIAL_EXECUTION_EXISTS
+            : COMMERCIAL_EXECUTION_IN_PROGRESS,
         );
       }
       return publicResult(started.execution);
@@ -110,21 +191,41 @@ export class CommercialAutomationOrchestrator {
           schedulerJobId: input.schedulerJobId,
           bullMqJobId: input.bullMqJobId,
           mode,
-          reasons: [COMMERCIAL_EXECUTION_IN_PROGRESS],
+          reasons: [
+            started.stale
+              ? STALE_COMMERCIAL_EXECUTION_EXISTS
+              : COMMERCIAL_EXECUTION_IN_PROGRESS,
+          ],
           completedAt: this.clock(),
         }),
       );
     }
 
     const execution = started.execution;
+    const ownership = started.ownership;
+    const heartbeat = createHeartbeatController({
+      executions: this.dependencies.executions,
+      ownership,
+      clock: this.clock,
+      leaseMilliseconds: this.dependencies.leaseSeconds * 1000,
+      heartbeatMilliseconds: this.dependencies.heartbeatSeconds * 1000,
+    });
+    const finish = async (
+      data: Parameters<CommercialAutomationExecutionRepository['finish']>[1],
+    ) => {
+      await heartbeat.stop();
+      return this.dependencies.executions.finish(ownership, data);
+    };
     let commercialRunId: string | undefined;
     let confirmationAttempted = false;
     try {
       const readiness =
-        await this.dependencies.policy.evaluateAutomationReadiness();
+        await this.dependencies.policy.evaluateAutomationReadiness({
+          excludedExecutionId: execution.id,
+        });
       if (!readiness.allowed) {
         return publicResult(
-          await this.dependencies.executions.finish(execution.id, {
+          await finish({
             status: 'BLOCKED',
             reasons: readiness.reasons,
             completedAt: this.clock(),
@@ -133,7 +234,7 @@ export class CommercialAutomationOrchestrator {
       }
       if (input.mode === 'send' && input.provider !== 'official') {
         return publicResult(
-          await this.dependencies.executions.finish(execution.id, {
+          await finish({
             status: 'BLOCKED',
             reasons: [COMMERCIAL_AUTOMATION_OFFICIAL_PROVIDER_REQUIRED],
             failureCode: COMMERCIAL_AUTOMATION_OFFICIAL_PROVIDER_REQUIRED,
@@ -142,7 +243,9 @@ export class CommercialAutomationOrchestrator {
         );
       }
 
+      await heartbeat.checkpoint();
       await this.dependencies.syncOffers.run();
+      await heartbeat.checkpoint();
       const dryRun = await this.dependencies.pipeline.dryRun({
         source: toCommercialAutomationProviderSource(input.provider),
         campaign: 'commercial-automation',
@@ -150,7 +253,7 @@ export class CommercialAutomationOrchestrator {
       commercialRunId = dryRun.runId;
       if (input.mode === 'preview') {
         return publicResult(
-          await this.dependencies.executions.finish(execution.id, {
+          await finish({
             status: 'PREVIEW_READY',
             commercialRunId,
             completedAt: this.clock(),
@@ -159,10 +262,12 @@ export class CommercialAutomationOrchestrator {
       }
 
       const confirmationReadiness =
-        await this.dependencies.policy.evaluateAutomationReadiness();
+        await this.dependencies.policy.evaluateAutomationReadiness({
+          excludedExecutionId: execution.id,
+        });
       if (!confirmationReadiness.allowed) {
         return publicResult(
-          await this.dependencies.executions.finish(execution.id, {
+          await finish({
             status: 'BLOCKED',
             reasons: confirmationReadiness.reasons,
             commercialRunId,
@@ -171,19 +276,21 @@ export class CommercialAutomationOrchestrator {
         );
       }
 
+      await heartbeat.checkpoint();
       confirmationAttempted = true;
       await this.dependencies.confirmation.confirm(
         commercialRunId,
         COMMERCIAL_CONFIRMATION_TOKEN,
       );
       return publicResult(
-        await this.dependencies.executions.finish(execution.id, {
+        await finish({
           status: 'QUEUED',
           commercialRunId,
           completedAt: this.clock(),
         }),
       );
     } catch (error) {
+      if (isOwnershipLost(error)) throw error;
       const failureCode = safeFailureCode(error);
       let status: 'FAILED' | 'AMBIGUOUS' = 'FAILED';
       if (confirmationAttempted && commercialRunId) {
@@ -212,7 +319,7 @@ export class CommercialAutomationOrchestrator {
         'Commercial automation tick failed',
       );
       return publicResult(
-        await this.dependencies.executions.finish(execution.id, {
+        await finish({
           status,
           commercialRunId,
           failureCode,
@@ -220,6 +327,7 @@ export class CommercialAutomationOrchestrator {
         }),
       );
     } finally {
+      await heartbeat.stop();
       this.dependencies.logger.info(
         {
           event: 'commercial-automation.tick.finished',

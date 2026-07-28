@@ -136,6 +136,11 @@ export const COMMERCIAL_SCHEDULER_DEFAULTS = {
   mode: 'preview',
 } as const;
 
+export const COMMERCIAL_EXECUTION_LEASE_DEFAULTS = {
+  leaseSeconds: 120,
+  heartbeatSeconds: 30,
+} as const;
+
 export const envSchema = z
   .object({
     NODE_ENV: z
@@ -194,6 +199,12 @@ export const envSchema = z
     COMMERCIAL_AUTOMATION_MODE: z
       .enum(['preview', 'send'])
       .default(COMMERCIAL_SCHEDULER_DEFAULTS.mode),
+    COMMERCIAL_EXECUTION_LEASE_SECONDS: positiveIntegerFromEnv.default(
+      COMMERCIAL_EXECUTION_LEASE_DEFAULTS.leaseSeconds,
+    ),
+    COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS: positiveIntegerFromEnv.default(
+      COMMERCIAL_EXECUTION_LEASE_DEFAULTS.heartbeatSeconds,
+    ),
     WHATSAPP_PROVIDER: z.enum(['mock', 'evolution']).default('mock'),
     EVOLUTION_API_URL: z
       .string()
@@ -240,6 +251,17 @@ export const envSchema = z
         path: ['COMMERCIAL_SCHEDULER_TIMEZONE'],
         message:
           'COMMERCIAL_SCHEDULER_TIMEZONE deve ser um timezone IANA valido',
+      });
+    }
+    if (
+      env.COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS * 2 >=
+      env.COMMERCIAL_EXECUTION_LEASE_SECONDS
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS'],
+        message:
+          'COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS deve ser menor que metade de COMMERCIAL_EXECUTION_LEASE_SECONDS',
       });
     }
     if (env.COMMERCIAL_AUTOMATION_MODE === 'send') {

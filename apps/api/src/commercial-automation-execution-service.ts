@@ -5,12 +5,14 @@ import type {
   CommercialAutomationExecutionRepository,
 } from './repositories';
 import {
+  isCommercialAutomationExecutionStale,
   toPublicCommercialAutomationMode,
   toPublicCommercialAutomationStatus,
 } from './commercial-automation-execution-domain';
 
 export const sanitizeCommercialAutomationExecution = (
   execution: CommercialAutomationExecutionRecord,
+  now = new Date(),
 ) => ({
   id: execution.id,
   schedulerJobId: execution.schedulerJobId,
@@ -20,19 +22,30 @@ export const sanitizeCommercialAutomationExecution = (
   reasons: execution.reasons,
   commercialRunId: execution.commercialRunId,
   failureCode: execution.failureCode,
+  stale: isCommercialAutomationExecutionStale(execution, now),
+  heartbeatAt: execution.heartbeatAt?.toISOString() ?? null,
+  leaseExpiresAt: execution.leaseExpiresAt?.toISOString() ?? null,
   startedAt: execution.startedAt.toISOString(),
   completedAt: execution.completedAt?.toISOString() ?? null,
 });
 
 export class CommercialAutomationExecutionService {
+  private readonly clock: () => Date;
+
   constructor(
     private readonly executions: CommercialAutomationExecutionRepository,
-  ) {}
+    clock: () => Date = () => new Date(),
+  ) {
+    this.clock = clock;
+  }
 
   async list(input: { page: number; limit: number }) {
     const result = await this.executions.list(input);
+    const now = this.clock();
     return {
-      items: result.items.map(sanitizeCommercialAutomationExecution),
+      items: result.items.map((execution) =>
+        sanitizeCommercialAutomationExecution(execution, now),
+      ),
       page: input.page,
       limit: input.limit,
       total: result.total,
@@ -48,6 +61,6 @@ export class CommercialAutomationExecutionService {
         'COMMERCIAL_AUTOMATION_EXECUTION_NOT_FOUND',
       );
     }
-    return sanitizeCommercialAutomationExecution(execution);
+    return sanitizeCommercialAutomationExecution(execution, this.clock());
   }
 }

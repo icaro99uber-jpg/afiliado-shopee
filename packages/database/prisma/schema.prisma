@@ -203,6 +203,9 @@ model CommercialAutomationExecution {
   schedulerJobId  String
   bullMqJobId     String?                             @unique
   activeKey       String?                             @unique
+  ownerId         String?
+  heartbeatAt     DateTime?
+  leaseExpiresAt  DateTime?
   mode            CommercialAutomationExecutionMode
   status          CommercialAutomationExecutionStatus
   reasons         Json
@@ -213,6 +216,7 @@ model CommercialAutomationExecution {
 
   @@index([startedAt])
   @@index([status])
+  @@index([status, leaseExpiresAt])
   @@index([commercialRunId])
 }
 

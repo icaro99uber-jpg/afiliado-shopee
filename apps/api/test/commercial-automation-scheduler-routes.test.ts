@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../src/app';
+import { sanitizeCommercialAutomationExecution } from '../src/commercial-automation-execution-service';
 
 const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
 
@@ -25,6 +26,9 @@ const execution = {
   reasons: [] as string[],
   commercialRunId: 'run-1',
   failureCode: null,
+  stale: false,
+  heartbeatAt: '2026-07-26T15:00:00.500Z',
+  leaseExpiresAt: '2026-07-26T15:02:00.000Z',
   startedAt: '2026-07-26T15:00:00.000Z',
   completedAt: '2026-07-26T15:00:01.000Z',
 };
@@ -54,6 +58,35 @@ afterEach(async () => {
 });
 
 describe('commercial automation scheduler read-only routes', () => {
+  it('sanitiza lease e stale sem expor ownerId', () => {
+    const result = sanitizeCommercialAutomationExecution(
+      {
+        id: 'execution-legacy',
+        schedulerJobId: 'scheduler',
+        bullMqJobId: null,
+        activeKey: 'commercial-automation',
+        ownerId: null,
+        heartbeatAt: null,
+        leaseExpiresAt: null,
+        mode: 'PREVIEW',
+        status: 'STARTED',
+        reasons: [],
+        commercialRunId: null,
+        failureCode: null,
+        startedAt: new Date('2026-07-26T15:00:00.000Z'),
+        completedAt: null,
+      },
+      new Date('2026-07-26T15:01:00.000Z'),
+    );
+
+    expect(result).toMatchObject({
+      stale: true,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
+    });
+    expect(result).not.toHaveProperty('ownerId');
+    expect(result).not.toHaveProperty('activeKey');
+  });
   it('retorna o Scheduler comercial sanitizado sem registrar ou disparar tick', async () => {
     const subject = await createApp();
     const response = await subject.app.inject({
