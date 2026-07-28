@@ -21,14 +21,18 @@ import { CommercialPipelineService } from './commercial-pipeline-service';
 import {
   CommercialPipelineConfirmationService,
   type CommercialConfirmationEnvironment,
-  type CommercialConfirmationQueue,
 } from './commercial-pipeline-confirmation-service';
+import {
+  CommercialDispatchOutboxPublisher,
+  type CommercialDispatchOutboxQueue,
+} from './commercial-dispatch-outbox-publisher';
 import {
   PrismaCommercialAutomationHistoryRepository,
   PrismaCommercialAutomationExecutionRepository,
   PrismaCommercialAutomationSettingsRepository,
   PrismaAnalyticsRepository,
   PrismaCommercialDeliveryHistoryRepository,
+  PrismaCommercialDispatchOutboxRepository,
   PrismaCommercialPipelineRunRepository,
   PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
@@ -44,6 +48,7 @@ import type {
   CommercialAutomationExecutionRepository,
   CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
+  CommercialDispatchOutboxRepository,
   CommercialPipelineRunRepository,
   CouponRepository,
   GeneratedCopyRepository,
@@ -78,6 +83,7 @@ export type ApplicationRepositories = {
   coupons: CouponRepository;
   commercialRuns: CommercialPipelineRunRepository;
   commercialDeliveryHistory: CommercialDeliveryHistoryRepository;
+  commercialDispatchOutboxes: CommercialDispatchOutboxRepository;
   commercialAutomationSettings: CommercialAutomationSettingsRepository;
   commercialAutomationHistory: CommercialAutomationHistoryRepository;
   commercialAutomationExecutions: CommercialAutomationExecutionRepository;
@@ -142,12 +148,11 @@ export const createCommercialPipelineConfirmationService = ({
     ApplicationRepositories,
     | 'shopeeOffers'
     | 'whatsappGroups'
-    | 'generatedCopies'
-    | 'whatsappDispatches'
     | 'commercialRuns'
     | 'commercialDeliveryHistory'
+    | 'commercialDispatchOutboxes'
   >;
-  queue: CommercialConfirmationQueue;
+  queue: CommercialDispatchOutboxQueue;
   instanceName: string;
   maximumCopyLength: number;
   environment: CommercialConfirmationEnvironment;
@@ -156,12 +161,15 @@ export const createCommercialPipelineConfirmationService = ({
   new CommercialPipelineConfirmationService({
     offers: repositories.shopeeOffers,
     groups: repositories.whatsappGroups,
-    generatedCopies: repositories.generatedCopies,
-    dispatches: repositories.whatsappDispatches,
+    outboxes: repositories.commercialDispatchOutboxes,
     runs: repositories.commercialRuns,
     deliveryHistory: repositories.commercialDeliveryHistory,
     copy: new CommercialCopyService(maximumCopyLength),
-    queue,
+    publisher: new CommercialDispatchOutboxPublisher({
+      outboxes: repositories.commercialDispatchOutboxes,
+      queue,
+      logger,
+    }),
     instanceName,
     environment,
     logger,
@@ -228,6 +236,9 @@ export const createPrismaRepositories = (
   coupons: new PrismaCouponRepository(prisma),
   commercialRuns: new PrismaCommercialPipelineRunRepository(prisma),
   commercialDeliveryHistory: new PrismaCommercialDeliveryHistoryRepository(
+    prisma,
+  ),
+  commercialDispatchOutboxes: new PrismaCommercialDispatchOutboxRepository(
     prisma,
   ),
   commercialAutomationSettings:

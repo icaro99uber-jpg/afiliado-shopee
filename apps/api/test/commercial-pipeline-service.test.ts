@@ -99,18 +99,6 @@ class MemoryRuns implements CommercialPipelineRunRepository {
       this.records.find((record) => record.dispatchId === dispatchId) ?? null
     );
   }
-
-  async claimConfirmation(id: string, confirmedAt: Date) {
-    const record = await this.findById(id);
-    if (!record || record.mode !== 'DRY_RUN' || record.status !== 'COMPLETED')
-      return null;
-    return this.update(id, {
-      mode: 'CONFIRMED',
-      status: 'STARTED',
-      confirmedAt,
-      completedAt: null,
-    });
-  }
 }
 
 const build = ({

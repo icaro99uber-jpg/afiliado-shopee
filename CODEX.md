@@ -558,10 +558,18 @@ A Task 16.2 preserva o endpoint de dry-run e adiciona a confirmacao separada
 `CONFIRMED`, preserva seus snapshots e nao recalcula ranking, produto, grupo ou
 copy.
 
-IDs de copy tecnica, dispatch e job sao derivados do `dryRunId`. A transicao do
-run e atomica e qualquer run confirmado, dispatch, job ou estado parcial
-impede repeticao. O job controlado usa uma tentativa, sem backoff, sem remocao e
-sem alterar a politica de tres tentativas dos jobs normais.
+IDs de copy tecnica, dispatch, job e outbox sao derivados do `dryRunId`.
+`GeneratedCopy`, `WhatsAppDispatch` `PENDING`, atualizacao do run e
+`CommercialDispatchOutbox` `PENDING` sao gravados na mesma transacao. O
+publicador separado reconhece um job deterministico existente ou o cria uma
+vez; falha de enqueue so termina em `PUBLISHED` quando uma releitura comprova o
+job. Qualquer incerteza ou inconsistencia fica `AMBIGUOUS`, sem retry.
+
+`commercial:outbox:status` consulta a evidencia persistida. O reconcile aceita
+somente um `outbox-id` e a confirmacao segura, exige modo preview, ambos os
+Schedulers desligados e ausencia de worker. Ele nao compoe provider ou
+consumer. As rotas `GET /commercial-automation/outbox` e
+`GET /commercial-automation/outbox/:id` sao sanitizadas e somente leitura.
 
 O worker `whatsapp-dispatch` existente finaliza o run como `SENT`, `FAILED` ou
 `AMBIGUOUS`. Bloqueios comprovadamente anteriores ao request podem terminar em

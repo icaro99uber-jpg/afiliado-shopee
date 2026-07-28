@@ -1,19 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
+import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
+import { CommercialDispatchOutboxPublisher } from '../src/commercial-dispatch-outbox-publisher';
 import {
   COMMERCIAL_CONFIRMATION_TOKEN,
   CommercialPipelineConfirmationService,
   commercialConfirmationIds,
 } from '../src/commercial-pipeline-confirmation-service';
 import type {
+  CommercialConfirmationPersistenceInput,
+  CommercialDispatchOutboxRecord,
+  CommercialDispatchOutboxRepository,
   CommercialPipelineRunData,
   CommercialPipelineRunRecord,
   CommercialPipelineRunRepository,
-  GeneratedCopyData,
   GeneratedCopyRecord,
   ShopeeOfferRecord,
-  WhatsAppDispatchDetails,
-  WhatsAppDispatchCreateData,
+  WhatsAppDispatchRecord,
   WhatsAppGroupRecord,
 } from '../src/repositories';
 
@@ -122,22 +125,96 @@ class MemoryRuns implements CommercialPipelineRunRepository {
       this.records.find((record) => record.dispatchId === dispatchId) ?? null
     );
   }
+}
 
-  async claimConfirmation(id: string, confirmedAt: Date) {
-    const current = await this.findById(id);
-    if (
-      !current ||
-      current.mode !== 'DRY_RUN' ||
-      current.status !== 'COMPLETED'
-    )
+class MemoryOutboxes implements CommercialDispatchOutboxRepository {
+  records: CommercialDispatchOutboxRecord[] = [];
+  copies: GeneratedCopyRecord[] = [];
+  dispatches: WhatsAppDispatchRecord[] = [];
+
+  constructor(private readonly runs: MemoryRuns) {}
+
+  async createPendingConfirmation(
+    input: CommercialConfirmationPersistenceInput,
+  ) {
+    const run = this.runs.records.find((record) => record.id === input.runId);
+    if (!run || run.mode !== 'DRY_RUN' || run.status !== 'COMPLETED')
       return null;
-    return this.update(id, {
+    run.mode = 'CONFIRMED';
+    run.status = 'STARTED';
+    const record: CommercialDispatchOutboxRecord = {
+      id: input.outboxId,
+      commercialRunId: input.runId,
+      dispatchId: input.dispatch.id,
+      jobId: input.jobId,
+      status: 'PENDING',
+      failureCode: null,
+      createdAt: input.confirmedAt,
+      publishedAt: null,
+    };
+    this.copies.push({ ...input.copy, createdAt: input.confirmedAt });
+    this.dispatches.push({
+      ...input.dispatch,
+      status: 'PENDING',
+      attemptCount: 0,
+    });
+    this.records.push(record);
+    await this.runs.update(input.runId, {
       mode: 'CONFIRMED',
       status: 'STARTED',
-      confirmedAt,
-      completedAt: null,
+      confirmedAt: input.confirmedAt,
+      dispatchId: input.dispatch.id,
+      jobId: null,
+      finalStatus: 'PENDING',
       investigationRequired: false,
+      failureCode: null,
+      completedAt: null,
     });
+    return record;
+  }
+
+  async list() {
+    return { items: this.records, total: this.records.length };
+  }
+
+  async findById(id: string) {
+    return this.records.find((record) => record.id === id) ?? null;
+  }
+
+  async findPublicationContext(id: string) {
+    const outbox = await this.findById(id);
+    if (!outbox) return null;
+    const run = await this.runs.findById(outbox.commercialRunId);
+    const dispatch = this.dispatches.find(
+      (item) => item.id === outbox.dispatchId,
+    );
+    if (!run || !dispatch) return null;
+    return { outbox, run, dispatch };
+  }
+
+  async markPublished(id: string, publishedAt: Date) {
+    const record = await this.findById(id);
+    if (!record || record.status === 'AMBIGUOUS') return null;
+    record.status = 'PUBLISHED';
+    record.publishedAt = publishedAt;
+    record.failureCode = null;
+    await this.runs.update(record.commercialRunId, { jobId: record.jobId });
+    return record;
+  }
+
+  async markAmbiguous(id: string, failureCode: string, completedAt: Date) {
+    const record = await this.findById(id);
+    if (!record) return null;
+    record.status = 'AMBIGUOUS';
+    record.failureCode = failureCode;
+    await this.runs.update(record.commercialRunId, {
+      status: 'FAILED',
+      finalStatus: 'AMBIGUOUS',
+      investigationRequired: true,
+      failureCode,
+      completedAt,
+    });
+    return record;
   }
 }
 
@@ -147,8 +224,6 @@ const build = ({
   groups = [group()],
   alreadySent = false,
   environment = {},
-  existingJob = false,
-  queueFailure = false,
 }: {
   run?: CommercialPipelineRunRecord;
   currentOffer?: ShopeeOfferRecord | null;
@@ -160,57 +235,28 @@ const build = ({
     schedulerEnabled: boolean;
     maximumMessagesPerRun: number;
   }>;
-  existingJob?: boolean;
-  queueFailure?: boolean;
 } = {}) => {
   const runs = new MemoryRuns(run);
-  const copies: GeneratedCopyRecord[] = [];
-  const dispatches: WhatsAppDispatchDetails[] = [];
-  const enqueue = vi.fn(async () => {
-    if (queueFailure) throw new Error('redis unavailable');
+  const outboxes = new MemoryOutboxes(runs);
+  const jobs = new Set<string>();
+  const enqueue = vi.fn(async (_dispatchId: string, jobId: string) => {
+    jobs.add(jobId);
+  });
+  const publisher = new CommercialDispatchOutboxPublisher({
+    outboxes,
+    queue: { hasJob: async (jobId) => jobs.has(jobId), enqueue },
+    logger: { info: vi.fn(), error: vi.fn() },
+    clock: () => now,
   });
   const generate = vi.fn(() => preview);
   const service = new CommercialPipelineConfirmationService({
     runs,
     offers: { findOfferById: async () => currentOffer } as never,
     groups: { list: async () => groups } as never,
-    generatedCopies: {
-      create: async (data: GeneratedCopyData) => {
-        const record = { ...data, id: data.id ?? 'copy', createdAt: now };
-        copies.push(record);
-        return record;
-      },
-      findById: async (id: string) =>
-        copies.find((copy) => copy.id === id) ?? null,
-    },
-    dispatches: {
-      createPending: async (data: WhatsAppDispatchCreateData) => {
-        if (dispatches.some((dispatch) => dispatch.id === data.id)) return null;
-        const record = {
-          ...data,
-          id: data.id ?? 'dispatch',
-          status: 'PENDING',
-          attemptCount: 0,
-          generatedCopy: {
-            titulo: '',
-            mensagem: preview,
-            cta: '',
-            hashtags: '',
-          },
-          destination: group(),
-        } as WhatsAppDispatchDetails;
-        dispatches.push(record);
-        return record;
-      },
-      findByIdWithDetails: async (id: string) =>
-        dispatches.find((dispatch) => dispatch.id === id) ?? null,
-    } as never,
+    outboxes,
     deliveryHistory: { wasProductSentToGroup: async () => alreadySent },
     copy: { generate },
-    queue: {
-      hasJob: async () => existingJob,
-      enqueue,
-    },
+    publisher,
     instanceName: 'affiliate-bot',
     environment: {
       groupSendEnabled: true,
@@ -222,111 +268,105 @@ const build = ({
     logger: { info: vi.fn(), error: vi.fn() },
     clock: () => now,
   });
-  return { service, runs, copies, dispatches, enqueue, generate };
+  return { service, runs, outboxes, publisher, enqueue, generate };
 };
 
 describe('CommercialPipelineConfirmationService', () => {
-  it('confirma uma vez com copy, dispatch e job deterministicos', async () => {
+  it('persiste copy, dispatch, run e outbox antes de publicar o job', async () => {
     const state = build();
     const result = await state.service.confirm(
       'dry-run-id',
       COMMERCIAL_CONFIRMATION_TOKEN,
     );
     const ids = commercialConfirmationIds('dry-run-id');
-    expect(result).toMatchObject({
-      status: 'queued',
-      dispatchWasCreated: true,
-      jobWasCreated: true,
-      messageWasSent: false,
+
+    expect(result).toMatchObject({ status: 'queued', messageWasSent: false });
+    expect(state.outboxes.copies[0]).toMatchObject({
+      id: ids.copyId,
+      mensagem: preview,
+    });
+    expect(state.outboxes.dispatches[0]).toMatchObject({
+      id: ids.dispatchId,
+      status: 'PENDING',
       attemptCount: 0,
     });
-    expect(state.copies).toEqual([
-      expect.objectContaining({
-        id: ids.copyId,
-        mensagem: preview,
-        titulo: '',
-        cta: '',
-        hashtags: '',
-      }),
-    ]);
-    expect(state.dispatches[0]).toMatchObject({ id: ids.dispatchId });
-    expect(state.enqueue).toHaveBeenCalledTimes(1);
-    expect(state.enqueue).toHaveBeenCalledWith(ids.dispatchId, ids.jobId);
+    expect(state.outboxes.records[0]).toMatchObject({
+      id: ids.outboxId,
+      jobId: ids.jobId,
+      status: 'PUBLISHED',
+    });
     expect(state.runs.records[0]).toMatchObject({
       mode: 'CONFIRMED',
-      status: 'STARTED',
       dispatchId: ids.dispatchId,
       jobId: ids.jobId,
       finalStatus: 'PENDING',
     });
+    expect(state.enqueue).toHaveBeenCalledOnce();
   });
 
-  it('rejeita token invalido sem criar estado', async () => {
+  it('deixa outbox PENDING quando ocorre crash depois do commit e antes do publisher', async () => {
     const state = build();
+    const publish = vi
+      .spyOn(state.publisher, 'publish')
+      .mockRejectedValueOnce(new Error('crash'));
+
     await expect(
-      state.service.confirm('dry-run-id', 'CONFIRMAR'),
-    ).rejects.toMatchObject({
-      code: 'COMMERCIAL_CONFIRMATION_INVALID',
+      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_DISPATCH_FAILED' });
+    expect(publish).toHaveBeenCalledOnce();
+    expect(state.outboxes.records[0].status).toBe('PENDING');
+    expect(state.runs.records[0]).toMatchObject({
+      mode: 'CONFIRMED',
+      investigationRequired: false,
     });
-    expect(state.copies).toHaveLength(0);
-    expect(state.enqueue).not.toHaveBeenCalled();
   });
 
-  it('rejeita run inexistente', async () => {
-    const state = build();
+  it.each([
+    ['token', 'INVALID', 'COMMERCIAL_CONFIRMATION_INVALID'],
+    ['run', COMMERCIAL_CONFIRMATION_TOKEN, 'COMMERCIAL_RUN_NOT_READY'],
+  ])('bloqueia %s invalido sem outbox', async (kind, token, code) => {
+    const state = build({
+      run: kind === 'run' ? readyRun({ status: 'FAILED' }) : readyRun(),
+    });
     await expect(
-      state.service.confirm('missing', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_NOT_READY' });
+      state.service.confirm('dry-run-id', token),
+    ).rejects.toMatchObject({
+      code,
+    });
+    expect(state.outboxes.records).toHaveLength(0);
   });
 
-  it.each(['BLOCKED', 'FAILED', 'STARTED'] as const)(
-    'rejeita run %s',
-    async (status) => {
-      const state = build({ run: readyRun({ status }) });
+  it.each([
+    [
+      'produto',
+      offer({ productName: 'Produto alterado' }),
+      [group()],
+      false,
+      'COMMERCIAL_PRODUCT_CHANGED',
+    ],
+    [
+      'grupo',
+      offer(),
+      [group({ fingerprint: 'grp_changed0000' })],
+      false,
+      'COMMERCIAL_GROUP_CHANGED',
+    ],
+    ['historico', offer(), [group()], true, 'PRODUCT_ALREADY_SENT'],
+  ] as const)(
+    'revalida %s antes da transacao',
+    async (_name, product, groups, sent, code) => {
+      const state = build({
+        currentOffer: product,
+        groups: [...groups],
+        alreadySent: sent,
+      });
       await expect(
         state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-      ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_NOT_READY' });
+      ).rejects.toMatchObject({ code });
+      expect(state.outboxes.records).toHaveLength(0);
+      expect(state.runs.records[0].mode).toBe('DRY_RUN');
     },
   );
-
-  it('bloqueia run ja confirmado em qualquer estado', async () => {
-    const state = build({
-      run: readyRun({ mode: 'CONFIRMED', status: 'FAILED' }),
-    });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_ALREADY_CONFIRMED' });
-  });
-
-  it.each([
-    ['nome', offer({ productName: 'Produto alterado' })],
-    ['link', offer({ affiliateLink: 'https://example.invalid/other' })],
-    ['expiracao', offer({ offerEndsAt: new Date(now.getTime() - 1) })],
-  ])('bloqueia produto alterado por %s', async (_label, currentOffer) => {
-    const state = build({ currentOffer });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_PRODUCT_CHANGED' });
-    expect(state.dispatches).toHaveLength(0);
-  });
-
-  it.each([
-    [[] as WhatsAppGroupRecord[]],
-    [[group({ fingerprint: 'grp_aaaaaaaaaaaa' })]],
-    [[group(), group({ id: 'second', fingerprint: 'grp_bbbbbbbbbbbb' })]],
-  ])('bloqueia grupo alterado ou ambiguo', async (groups) => {
-    const state = build({ groups });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_GROUP_CHANGED' });
-  });
-
-  it('bloqueia produto ja enviado ao mesmo grupo', async () => {
-    const state = build({ alreadySent: true });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'PRODUCT_ALREADY_SENT' });
-  });
 
   it.each([
     [{ groupSendEnabled: false }, 'GROUP_SEND_DISABLED'],
@@ -338,62 +378,10 @@ describe('CommercialPipelineConfirmationService', () => {
     await expect(
       state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
     ).rejects.toMatchObject({ code });
-    expect(state.runs.records[0].mode).toBe('DRY_RUN');
+    expect(state.outboxes.records).toHaveLength(0);
   });
 
-  it('bloqueia job anterior antes de reivindicar o run', async () => {
-    const state = build({ existingJob: true });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_ALREADY_CONFIRMED' });
-    expect(state.runs.records[0].mode).toBe('DRY_RUN');
-  });
-
-  it.each(['PENDING', 'PROCESSING', 'SENT', 'FAILED'] as const)(
-    'bloqueia dispatch anterior em estado %s',
-    async (status) => {
-      const state = build();
-      state.dispatches.push({
-        id: commercialConfirmationIds('dry-run-id').dispatchId,
-        productId: 'product-id',
-        generatedCopyId: 'copy-id',
-        destinationId: 'group-id',
-        status,
-        attemptCount: status === 'PENDING' ? 0 : 1,
-        generatedCopy: {
-          titulo: '',
-          mensagem: preview,
-          cta: '',
-          hashtags: '',
-        },
-        destination: group(),
-      });
-      await expect(
-        state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-      ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_ALREADY_CONFIRMED' });
-      expect(state.enqueue).not.toHaveBeenCalled();
-    },
-  );
-
-  it('nao repete quando o enfileiramento falha ou fica ambiguo', async () => {
-    const state = build({ queueFailure: true });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_DISPATCH_FAILED' });
-    expect(state.enqueue).toHaveBeenCalledTimes(1);
-    expect(state.runs.records[0]).toMatchObject({
-      mode: 'CONFIRMED',
-      status: 'FAILED',
-      finalStatus: 'AMBIGUOUS',
-      investigationRequired: true,
-    });
-    await expect(
-      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
-    ).rejects.toMatchObject({ code: 'COMMERCIAL_RUN_ALREADY_CONFIRMED' });
-    expect(state.enqueue).toHaveBeenCalledTimes(1);
-  });
-
-  it('uma corrida concorrente cria somente um dispatch e um job', async () => {
+  it('uma corrida concorrente confirma e publica somente uma vez', async () => {
     const state = build();
     const results = await Promise.allSettled([
       state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
@@ -402,14 +390,35 @@ describe('CommercialPipelineConfirmationService', () => {
     expect(
       results.filter((result) => result.status === 'fulfilled'),
     ).toHaveLength(1);
-    expect(state.dispatches).toHaveLength(1);
-    expect(state.enqueue).toHaveBeenCalledTimes(1);
+    expect(state.outboxes.records).toHaveLength(1);
+    expect(state.enqueue).toHaveBeenCalledOnce();
   });
 
-  it('valida o estado atual sem substituir a copy aprovada', async () => {
+  it('bloqueia colisao persistida como AMBIGUOUS sem publicar', async () => {
+    const state = build();
+    vi.spyOn(state.outboxes, 'createPendingConfirmation').mockRejectedValueOnce(
+      new AppError(
+        'Estado persistido inconsistente',
+        'COMMERCIAL_OUTBOX_INCONSISTENT',
+      ),
+    );
+
+    await expect(
+      state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_OUTBOX_INCONSISTENT' });
+    expect(state.enqueue).not.toHaveBeenCalled();
+    expect(state.runs.records[0]).toMatchObject({
+      status: 'FAILED',
+      finalStatus: 'AMBIGUOUS',
+      investigationRequired: true,
+      failureCode: 'COMMERCIAL_OUTBOX_INCONSISTENT',
+    });
+  });
+
+  it('preserva a copy aprovada e nunca chama provider', async () => {
     const state = build();
     await state.service.confirm('dry-run-id', COMMERCIAL_CONFIRMATION_TOKEN);
-    expect(state.generate).toHaveBeenCalledTimes(1);
-    expect(state.copies[0].mensagem).toBe(preview);
+    expect(state.generate).toHaveBeenCalledOnce();
+    expect(state.outboxes.copies[0].mensagem).toBe(preview);
   });
 });

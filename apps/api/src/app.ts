@@ -64,6 +64,7 @@ import {
   CommercialAutomationSchedulerStatusService,
   type CommercialAutomationSchedulerStatusSnapshot,
 } from './commercial-automation-scheduler-status-service';
+import { CommercialDispatchOutboxService } from './commercial-dispatch-outbox-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -125,6 +126,10 @@ type BuildAppOptions = {
   commercialAutomationConfig?: CommercialAutomationPolicyConfig;
   commercialAutomationExecutionService?: Pick<
     CommercialAutomationExecutionService,
+    'list' | 'find'
+  >;
+  commercialDispatchOutboxService?: Pick<
+    CommercialDispatchOutboxService,
     'list' | 'find'
   >;
   commercialAutomationSchedulerStatusServiceFactory?: () => {
@@ -350,6 +355,11 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     new CommercialAutomationExecutionService(
       repositories.commercialAutomationExecutions,
     );
+  const commercialDispatchOutboxService =
+    options.commercialDispatchOutboxService ??
+    new CommercialDispatchOutboxService(
+      repositories.commercialDispatchOutboxes,
+    );
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -510,6 +520,58 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           status === 400
             ? 'Paginacao invalida'
             : 'Historico da automacao comercial indisponivel',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/outbox', async (request, reply) => {
+    try {
+      const query = request.query as {
+        page?: string;
+        limit?: string;
+        status?: string;
+      };
+      const status = query.status?.toUpperCase();
+      if (status && !['PENDING', 'PUBLISHED', 'AMBIGUOUS'].includes(status)) {
+        throw new AppError(
+          'Status de outbox invalido',
+          'INVALID_OUTBOX_FILTER',
+        );
+      }
+      return await commercialDispatchOutboxService.list({
+        status: status as 'PENDING' | 'PUBLISHED' | 'AMBIGUOUS' | undefined,
+        page: parsePositiveInteger(query.page, 1, 10_000),
+        limit: parsePositiveInteger(query.limit, 20, 100),
+      });
+    } catch (error) {
+      const invalid =
+        error instanceof AppError &&
+        ['INVALID_PAGINATION', 'INVALID_OUTBOX_FILTER'].includes(error.code);
+      return reply.status(invalid ? 400 : 500).send({
+        error: invalid ? error.code : 'COMMERCIAL_OUTBOX_HISTORY_UNAVAILABLE',
+        message: invalid
+          ? error.message
+          : 'Historico do outbox comercial indisponivel',
+      });
+    }
+  });
+
+  app.get('/commercial-automation/outbox/:id', async (request, reply) => {
+    try {
+      return await commercialDispatchOutboxService.find(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      const notFound =
+        error instanceof AppError &&
+        error.code === 'COMMERCIAL_OUTBOX_NOT_FOUND';
+      return reply.status(notFound ? 404 : 500).send({
+        error: notFound
+          ? 'COMMERCIAL_OUTBOX_NOT_FOUND'
+          : 'COMMERCIAL_OUTBOX_UNAVAILABLE',
+        message: notFound
+          ? 'Outbox comercial nao encontrado'
+          : 'Outbox comercial indisponivel',
       });
     }
   });

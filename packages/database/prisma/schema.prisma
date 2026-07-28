@@ -86,21 +86,22 @@ model WhatsAppDestination {
 }
 
 model WhatsAppDispatch {
-  id                    String                 @id @default(cuid())
+  id                    String                    @id @default(cuid())
   productId             String
-  product               ProductLead            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product               ProductLead               @relation(fields: [productId], references: [id], onDelete: Cascade)
   generatedCopyId       String
-  generatedCopy         GeneratedCopy          @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
+  generatedCopy         GeneratedCopy             @relation(fields: [generatedCopyId], references: [id], onDelete: Cascade)
   destinationId         String
-  destination           WhatsAppDestination    @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  destination           WhatsAppDestination       @relation(fields: [destinationId], references: [id], onDelete: Cascade)
   externalMessageId     String?
-  status                WhatsAppDispatchStatus @default(PENDING)
-  attemptCount          Int                    @default(0)
+  status                WhatsAppDispatchStatus    @default(PENDING)
+  attemptCount          Int                       @default(0)
   errorMessage          String?
   sentAt                DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
   commercialPipelineRun CommercialPipelineRun?
+  commercialOutbox      CommercialDispatchOutbox?
 
   @@unique([generatedCopyId, destinationId])
   @@index([productId])
@@ -164,6 +165,7 @@ model CommercialPipelineRun {
   failureCode           String?
   createdAt             DateTime                       @default(now())
   completedAt           DateTime?
+  dispatchOutbox        CommercialDispatchOutbox?
 
   @@index([createdAt])
   @@index([status, mode])
@@ -171,6 +173,21 @@ model CommercialPipelineRun {
   @@index([groupDestinationId])
   @@index([finalStatus])
   @@index([investigationRequired])
+}
+
+model CommercialDispatchOutbox {
+  id              String                         @id @default(cuid())
+  commercialRunId String                         @unique
+  commercialRun   CommercialPipelineRun          @relation(fields: [commercialRunId], references: [id], onDelete: Restrict)
+  dispatchId      String                         @unique
+  dispatch        WhatsAppDispatch               @relation(fields: [dispatchId], references: [id], onDelete: Restrict)
+  jobId           String                         @unique
+  status          CommercialDispatchOutboxStatus @default(PENDING)
+  failureCode     String?
+  createdAt       DateTime                       @default(now())
+  publishedAt     DateTime?
+
+  @@index([status, createdAt])
 }
 
 model CommercialAutomationSettings {
@@ -243,6 +260,12 @@ enum CommercialPipelineFinalStatus {
   PENDING
   SENT
   FAILED
+  AMBIGUOUS
+}
+
+enum CommercialDispatchOutboxStatus {
+  PENDING
+  PUBLISHED
   AMBIGUOUS
 }
 

@@ -188,14 +188,76 @@ export interface CommercialPipelineRunRepository {
   findByDispatchId(
     dispatchId: string,
   ): Promise<CommercialPipelineRunRecord | null>;
-  claimConfirmation(
-    id: string,
-    confirmedAt: Date,
-  ): Promise<CommercialPipelineRunRecord | null>;
 }
 
 export interface CommercialDeliveryHistoryRepository {
   wasProductSentToGroup(productId: string, groupId: string): Promise<boolean>;
+}
+
+export type CommercialDispatchOutboxStatus =
+  'PENDING' | 'PUBLISHED' | 'AMBIGUOUS';
+
+export type CommercialDispatchOutboxRecord = {
+  id: string;
+  commercialRunId: string;
+  dispatchId: string;
+  jobId: string;
+  status: CommercialDispatchOutboxStatus;
+  failureCode: string | null;
+  createdAt: Date;
+  publishedAt: Date | null;
+};
+
+export type CommercialDispatchOutboxFilters = {
+  status?: CommercialDispatchOutboxStatus;
+  page: number;
+  limit: number;
+};
+
+export type CommercialDispatchOutboxPublicationContext = {
+  outbox: CommercialDispatchOutboxRecord;
+  run: Pick<
+    CommercialPipelineRunRecord,
+    | 'id'
+    | 'mode'
+    | 'status'
+    | 'dispatchId'
+    | 'jobId'
+    | 'finalStatus'
+    | 'investigationRequired'
+  >;
+  dispatch: Pick<WhatsAppDispatchRecord, 'id' | 'status' | 'attemptCount'>;
+};
+
+export type CommercialConfirmationPersistenceInput = {
+  outboxId: string;
+  runId: string;
+  confirmedAt: Date;
+  copy: GeneratedCopyData & { id: string };
+  dispatch: WhatsAppDispatchCreateData & { id: string };
+  jobId: string;
+};
+
+export interface CommercialDispatchOutboxRepository {
+  createPendingConfirmation(
+    input: CommercialConfirmationPersistenceInput,
+  ): Promise<CommercialDispatchOutboxRecord | null>;
+  list(
+    filters: CommercialDispatchOutboxFilters,
+  ): Promise<{ items: CommercialDispatchOutboxRecord[]; total: number }>;
+  findById(id: string): Promise<CommercialDispatchOutboxRecord | null>;
+  findPublicationContext(
+    id: string,
+  ): Promise<CommercialDispatchOutboxPublicationContext | null>;
+  markPublished(
+    id: string,
+    publishedAt: Date,
+  ): Promise<CommercialDispatchOutboxRecord | null>;
+  markAmbiguous(
+    id: string,
+    failureCode: string,
+    completedAt: Date,
+  ): Promise<CommercialDispatchOutboxRecord | null>;
 }
 
 export type CommercialAutomationSettingsRecord = {

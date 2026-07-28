@@ -25,6 +25,8 @@
     "commercial:confirm": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:confirm",
     "commercial:automation:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:preview",
     "commercial:automation:worker": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:worker",
+    "commercial:outbox:status": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:outbox:status",
+    "commercial:outbox:reconcile": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:outbox:reconcile",
     "whatsapp:dispatch:worker": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker whatsapp:dispatch:worker",
     "system:start": "tsx --tsconfig tsconfig.runtime.json apps/system-supervisor/src/cli.ts start",
     "system:status": "tsx --tsconfig tsconfig.runtime.json apps/system-supervisor/src/cli.ts status",

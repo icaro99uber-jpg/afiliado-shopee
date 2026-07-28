@@ -828,6 +828,25 @@ retry ou remocao. O mesmo `dryRunId` determina copy, dispatch e job; qualquer
 estado anterior bloqueia outra tentativa. A copy e exatamente o snapshot do
 dry-run, sem cupom, comissao, score ou urgencia falsa.
 
+A confirmacao persiste copy, dispatch `PENDING`, atualizacao do run e
+`CommercialDispatchOutbox` `PENDING` em uma unica transacao. Depois do commit,
+um publicador idempotente verifica o `jobId` deterministico: reconhece o job ja
+existente ou o cria uma vez. Falha de enqueue sem comprovacao posterior fica
+`AMBIGUOUS` e nunca recebe retry automatico.
+
+Recuperacao e consulta seguras:
+
+```powershell
+corepack pnpm commercial:outbox:status
+corepack pnpm commercial:outbox:reconcile -- --outbox-id=<id> --confirm-safe-publication
+```
+
+O reconcile exige modo `preview`, os dois Schedulers desligados e nenhum worker
+de dispatch ativo; ele nao inicia consumer ou provider. A API expoe somente
+`GET /commercial-automation/outbox` e
+`GET /commercial-automation/outbox/:id`, com paginacao e dados sanitizados. Nao
+existe endpoint de publicacao.
+
 ## Controles operacionais da automacao comercial
 
 A Sprint 17.1 adiciona uma politica somente de avaliacao. Ela nao esta ligada ao

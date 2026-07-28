@@ -7,6 +7,11 @@ import type {
   CommercialAutomationSettingsRecord,
   CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
+  CommercialConfirmationPersistenceInput,
+  CommercialDispatchOutboxFilters,
+  CommercialDispatchOutboxPublicationContext,
+  CommercialDispatchOutboxRecord,
+  CommercialDispatchOutboxRepository,
   CommercialOfferCandidateFilters,
   CommercialPipelineRunData,
   CommercialPipelineRunFilters,
@@ -41,6 +46,7 @@ import type {
   WhatsAppGroupUpdate,
 } from './repositories';
 import type { ShopeeProductOffer } from '@shopee-auto-affiliate-ai/providers';
+import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 
 const isUniqueConstraintError = (error: unknown) =>
@@ -48,6 +54,9 @@ const isUniqueConstraintError = (error: unknown) =>
   error !== null &&
   'code' in error &&
   (error as { code?: string }).code === 'P2002';
+
+class CommercialConfirmationNotClaimedError extends Error {}
+class CommercialOutboxStateConflictError extends Error {}
 
 type PrismaDecimalLike = { toString(): string } | number | string;
 
@@ -511,25 +520,6 @@ export class PrismaCommercialPipelineRunRepository implements CommercialPipeline
       ? mapCommercialPipelineRun(record as unknown as Record<string, unknown>)
       : null;
   }
-
-  async claimConfirmation(
-    id: string,
-    confirmedAt: Date,
-  ): Promise<CommercialPipelineRunRecord | null> {
-    const result = await this.prisma.commercialPipelineRun.updateMany({
-      where: { id, mode: 'DRY_RUN', status: 'COMPLETED' },
-      data: {
-        mode: 'CONFIRMED',
-        status: 'STARTED',
-        confirmedAt,
-        completedAt: null,
-        failureCode: null,
-        investigationRequired: false,
-      } as never,
-    });
-    if (result.count !== 1) return null;
-    return this.findById(id);
-  }
 }
 
 export class PrismaCommercialDeliveryHistoryRepository implements CommercialDeliveryHistoryRepository {
@@ -564,6 +554,236 @@ export class PrismaCommercialDeliveryHistoryRepository implements CommercialDeli
       }),
     ]);
     return Boolean(sentDispatch || confirmedRun);
+  }
+}
+
+const mapCommercialDispatchOutbox = (
+  record: Record<string, unknown>,
+): CommercialDispatchOutboxRecord =>
+  record as unknown as CommercialDispatchOutboxRecord;
+
+export class PrismaCommercialDispatchOutboxRepository implements CommercialDispatchOutboxRepository {
+  constructor(private readonly prisma: DatabaseClient) {}
+
+  async createPendingConfirmation(
+    input: CommercialConfirmationPersistenceInput,
+  ): Promise<CommercialDispatchOutboxRecord | null> {
+    try {
+      const record = await this.prisma.$transaction(async (transaction) => {
+        const claimed = await transaction.commercialPipelineRun.updateMany({
+          where: {
+            id: input.runId,
+            mode: 'DRY_RUN',
+            status: 'COMPLETED',
+            confirmedAt: null,
+            dispatchId: null,
+            jobId: null,
+          },
+          data: {
+            mode: 'CONFIRMED',
+            status: 'STARTED',
+            confirmedAt: input.confirmedAt,
+            completedAt: null,
+            finalStatus: 'PENDING',
+            failureCode: null,
+            investigationRequired: false,
+          },
+        });
+        if (claimed.count !== 1) {
+          throw new CommercialConfirmationNotClaimedError();
+        }
+
+        await transaction.generatedCopy.create({ data: input.copy });
+        await transaction.whatsAppDispatch.create({
+          data: { ...input.dispatch, status: 'PENDING', attemptCount: 0 },
+        });
+        const outbox = await transaction.commercialDispatchOutbox.create({
+          data: {
+            id: input.outboxId,
+            commercialRunId: input.runId,
+            dispatchId: input.dispatch.id,
+            jobId: input.jobId,
+            status: 'PENDING',
+          },
+        });
+        await transaction.commercialPipelineRun.update({
+          where: { id: input.runId },
+          data: { dispatchId: input.dispatch.id },
+        });
+        return outbox;
+      });
+      return mapCommercialDispatchOutbox(
+        record as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      if (error instanceof CommercialConfirmationNotClaimedError) {
+        return null;
+      }
+      if (isUniqueConstraintError(error)) {
+        throw new AppError(
+          'Estado persistido da confirmacao comercial e inconsistente',
+          'COMMERCIAL_OUTBOX_INCONSISTENT',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async list(filters: CommercialDispatchOutboxFilters) {
+    const where = { status: filters.status };
+    const [records, total] = await Promise.all([
+      this.prisma.commercialDispatchOutbox.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.commercialDispatchOutbox.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapCommercialDispatchOutbox(
+          record as unknown as Record<string, unknown>,
+        ),
+      ),
+      total,
+    };
+  }
+
+  async findById(id: string): Promise<CommercialDispatchOutboxRecord | null> {
+    const record = await this.prisma.commercialDispatchOutbox.findUnique({
+      where: { id },
+    });
+    return record
+      ? mapCommercialDispatchOutbox(
+          record as unknown as Record<string, unknown>,
+        )
+      : null;
+  }
+
+  async findPublicationContext(
+    id: string,
+  ): Promise<CommercialDispatchOutboxPublicationContext | null> {
+    const record = await this.prisma.commercialDispatchOutbox.findUnique({
+      where: { id },
+      include: {
+        commercialRun: {
+          select: {
+            id: true,
+            mode: true,
+            status: true,
+            dispatchId: true,
+            jobId: true,
+            finalStatus: true,
+            investigationRequired: true,
+          },
+        },
+        dispatch: { select: { id: true, status: true, attemptCount: true } },
+      },
+    });
+    if (!record) return null;
+    const { commercialRun, dispatch, ...outbox } = record;
+    return {
+      outbox: mapCommercialDispatchOutbox(
+        outbox as unknown as Record<string, unknown>,
+      ),
+      run: commercialRun,
+      dispatch,
+    };
+  }
+
+  async markPublished(
+    id: string,
+    publishedAt: Date,
+  ): Promise<CommercialDispatchOutboxRecord | null> {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const outbox = await transaction.commercialDispatchOutbox.findUnique({
+          where: { id },
+        });
+        if (!outbox || outbox.status === 'AMBIGUOUS') return null;
+        if (outbox.status === 'PUBLISHED') {
+          return mapCommercialDispatchOutbox(
+            outbox as unknown as Record<string, unknown>,
+          );
+        }
+        const promoted = await transaction.commercialDispatchOutbox.updateMany({
+          where: { id, status: 'PENDING' },
+          data: {
+            status: 'PUBLISHED',
+            failureCode: null,
+            publishedAt,
+          },
+        });
+        if (promoted.count !== 1) return null;
+        const runUpdated = await transaction.commercialPipelineRun.updateMany({
+          where: {
+            id: outbox.commercialRunId,
+            mode: 'CONFIRMED',
+            dispatchId: outbox.dispatchId,
+            OR: [{ jobId: null }, { jobId: outbox.jobId }],
+          },
+          data: { jobId: outbox.jobId },
+        });
+        if (runUpdated.count !== 1) {
+          throw new CommercialOutboxStateConflictError();
+        }
+        const published = await transaction.commercialDispatchOutbox.findUnique(
+          {
+            where: { id },
+          },
+        );
+        if (!published) throw new CommercialOutboxStateConflictError();
+        return mapCommercialDispatchOutbox(
+          published as unknown as Record<string, unknown>,
+        );
+      });
+    } catch (error) {
+      if (error instanceof CommercialOutboxStateConflictError) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async markAmbiguous(
+    id: string,
+    failureCode: string,
+    completedAt: Date,
+  ): Promise<CommercialDispatchOutboxRecord | null> {
+    return this.prisma.$transaction(async (transaction) => {
+      const outbox = await transaction.commercialDispatchOutbox.findUnique({
+        where: { id },
+      });
+      if (!outbox) return null;
+      if (outbox.status === 'AMBIGUOUS') {
+        return mapCommercialDispatchOutbox(
+          outbox as unknown as Record<string, unknown>,
+        );
+      }
+      const changed = await transaction.commercialDispatchOutbox.updateMany({
+        where: { id, status: { in: ['PENDING', 'PUBLISHED'] } },
+        data: { status: 'AMBIGUOUS', failureCode },
+      });
+      if (changed.count !== 1) return null;
+      await transaction.commercialPipelineRun.update({
+        where: { id: outbox.commercialRunId },
+        data: {
+          status: 'FAILED',
+          finalStatus: 'AMBIGUOUS',
+          investigationRequired: true,
+          failureCode,
+          completedAt,
+        },
+      });
+      const ambiguous = await transaction.commercialDispatchOutbox.findUnique({
+        where: { id },
+      });
+      if (!ambiguous) return null;
+      return mapCommercialDispatchOutbox(
+        ambiguous as unknown as Record<string, unknown>,
+      );
+    });
   }
 }
 
