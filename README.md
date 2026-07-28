@@ -985,6 +985,17 @@ horario antes de qualquer encerramento. `system:stop` para apenas processos
 registrados e confirmados, usa `docker compose stop` e preserva containers,
 volumes, dados e agendamentos BullMQ.
 
+`system:start` e `system:stop` sao mutuamente exclusivos por um lock JSON local
+com owner token aleatorio, PID, marcador conhecido e horario real de inicio do
+processo. PID sozinho nunca comprova ownership. Processo ausente ou PID
+reutilizado torna o lock stale e permite recovery por releitura + reivindicacao
+atomica por hard link, sem encerrar o ocupante; formato invalido/legado ou
+identidade indisponivel preserva o arquivo para investigacao. A liberacao
+compara token, PID e inicio, e por isso uma operacao antiga nao apaga o lock
+sucessor.
+`system:status` apenas classifica o lock como `unlocked`, `active`, `stale`,
+`invalid` ou `unavailable` e nunca mostra o token.
+
 Defaults continuam conservadores: iniciar o sistema nao habilita automacao ou
 Schedulers, nao remove pausa persistida e nao cria trabalho. Para uma validacao
 local inequivocamente segura, aplique somente ao processo:

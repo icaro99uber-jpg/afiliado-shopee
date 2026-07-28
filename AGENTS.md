@@ -804,9 +804,18 @@ Comportamento operacional:
   persistir ou imprimir segredos.
 - Validar identidade e horario de cada PID antes da parada; ocupantes externos
   de porta e PIDs divergentes nunca sao encerrados.
+- Serializar `system:start` e `system:stop` com lock JSON estrito, owner token
+  aleatorio, marcador conhecido e horario real do processo. PID isolado nunca
+  comprova ownership; lock invalido e preservado, e PID reutilizado e stale sem
+  encerramento do ocupante.
+- Recuperar lock stale somente depois de releitura do mesmo owner token e
+  reivindicacao atomica por hard link. A liberacao compara token, PID e inicio
+  do processo, e uma liberacao atrasada nunca remove o lock sucessor.
 - Retornar sucesso do start somente apos snapshot final `running`; estado
   parcial durante a inicializacao reverte os filhos criados na tentativa.
 - Usar `prisma migrate deploy`, nunca `migrate dev`, na operacao local.
 - Parar composes sem remover volumes, dados ou agendamentos.
 - O supervisor apenas consulta Schedulers; registro ou remocao continuam sob
   responsabilidade dos bootstraps dos respectivos workers.
+- `system:status` classifica o lock como `unlocked`, `active`, `stale`,
+  `invalid` ou `unavailable` sem corrigi-lo e nunca expoe o owner token.

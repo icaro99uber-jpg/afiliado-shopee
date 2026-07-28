@@ -4,9 +4,11 @@ import { openSync, closeSync } from 'node:fs';
 import type {
   CommandResult,
   CommandSpec,
+  ProcessIdentityInspection,
   ProcessInspection,
   SystemDependencies,
 } from './types';
+import { processStartedAtMatches } from './types';
 
 const runCommand = (spec: CommandSpec): Promise<CommandResult> =>
   new Promise((resolve, reject) => {
@@ -35,10 +37,26 @@ const processExists = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'EPERM'
+    ) {
+      return true;
+    }
     return false;
   }
 };
+
+const normalizedMarkerMatches = (command: string | undefined, marker: string) =>
+  Boolean(
+    command
+      ?.toLowerCase()
+      .replaceAll('\\', '/')
+      .includes(marker.toLowerCase().replaceAll('\\', '/')),
+  );
 
 const waitUntilStopped = async (pid: number, timeoutMs: number) => {
   const deadline = Date.now() + timeoutMs;
@@ -108,15 +126,12 @@ const inspectWindowsProcess = async (
     StartedAt?: string;
   };
   const startedAt = parsed.StartedAt;
-  const expected = Date.parse(expectedStartedAt);
-  const actual = startedAt ? Date.parse(startedAt) : Number.NaN;
   return {
     running: true,
     identityMatches:
-      Number.isFinite(actual) &&
-      Math.abs(actual - expected) < 15_000 &&
+      processStartedAtMatches(expectedStartedAt, startedAt) &&
       (Boolean(
-        parsed.CommandLine?.toLowerCase().includes(marker.toLowerCase()),
+        normalizedMarkerMatches(parsed.CommandLine, marker),
       ) ||
         (!parsed.CommandLine && parsed.Name?.toLowerCase() === 'node')),
     command: parsed.CommandLine,
@@ -142,10 +157,69 @@ const inspectPosixProcess = async (
   return {
     running: true,
     identityMatches:
-      line.toLowerCase().includes(marker.toLowerCase()) &&
-      Math.abs(Date.parse(startedAt) - Date.parse(expectedStartedAt)) < 15_000,
+      normalizedMarkerMatches(line.slice(25), marker) &&
+      processStartedAtMatches(expectedStartedAt, startedAt),
     command: line.slice(25),
     startedAt,
+  };
+};
+
+const inspectWindowsProcessIdentity = async (
+  pid: number,
+  marker: string,
+): Promise<ProcessIdentityInspection> => {
+  const script = [
+    `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+    'if ($null -eq $p) { exit 3 }',
+    `$g=Get-Process -Id ${pid}`,
+    '[pscustomobject]@{CommandLine=$p.CommandLine;StartedAt=$g.StartTime.ToUniversalTime().ToString("o")} | ConvertTo-Json -Compress',
+  ].join('; ');
+  const result = await runCommand({
+    command: 'powershell.exe',
+    args: ['-NoProfile', '-NonInteractive', '-Command', script],
+    cwd: process.cwd(),
+  });
+  if (result.code === 3 || (!processExists(pid) && result.code !== 0)) {
+    return { running: false, markerMatches: false };
+  }
+  if (result.code !== 0) throw new Error('Process identity unavailable');
+  const parsed = JSON.parse(result.stdout) as {
+    CommandLine?: string;
+    StartedAt?: string;
+  };
+  const parsedStartedAt = new Date(parsed.StartedAt ?? '');
+  if (!Number.isFinite(parsedStartedAt.getTime())) {
+    throw new Error('Process identity unavailable');
+  }
+  return {
+    running: true,
+    markerMatches: normalizedMarkerMatches(parsed.CommandLine, marker),
+    startedAt: parsedStartedAt.toISOString(),
+  };
+};
+
+const inspectPosixProcessIdentity = async (
+  pid: number,
+  marker: string,
+): Promise<ProcessIdentityInspection> => {
+  const result = await runCommand({
+    command: 'ps',
+    args: ['-p', String(pid), '-o', 'lstart=', '-o', 'command='],
+    cwd: process.cwd(),
+  });
+  if (result.code !== 0 || !result.stdout.trim()) {
+    if (processExists(pid)) throw new Error('Process identity unavailable');
+    return { running: false, markerMatches: false };
+  }
+  const line = result.stdout.trim();
+  const parsedStartedAt = new Date(line.slice(0, 24));
+  if (!Number.isFinite(parsedStartedAt.getTime())) {
+    throw new Error('Process identity unavailable');
+  }
+  return {
+    running: true,
+    markerMatches: normalizedMarkerMatches(line.slice(25), marker),
+    startedAt: parsedStartedAt.toISOString(),
   };
 };
 
@@ -193,6 +267,10 @@ export const createSystemDependencies = (): SystemDependencies => ({
     process.platform === 'win32'
       ? inspectWindowsProcess(pid, marker, startedAt)
       : inspectPosixProcess(pid, marker, startedAt),
+  inspectProcessIdentity: (pid, marker) =>
+    process.platform === 'win32'
+      ? inspectWindowsProcessIdentity(pid, marker)
+      : inspectPosixProcessIdentity(pid, marker),
   stopProcessTree: async (pid) => {
     if (!processExists(pid)) return true;
     if (process.platform === 'win32') {

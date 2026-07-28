@@ -694,6 +694,17 @@ de criacao para evitar matar PID reutilizado. Em Windows, a parada tenta sinal
 gracioso e depois encerra a arvore somente do PID validado. Os composes recebem
 `stop`, nunca `down -v`; o supervisor nao registra nem remove Schedulers.
 
+`system:start` e `system:stop` usam um lock JSON criado exclusivamente no
+filesystem. O registro contem somente versao, PID, owner token aleatorio,
+horarios de aquisicao/inicio, marcador conhecido e operacao. Um lock ativo exige
+PID, marcador e inicio correspondentes; processo ausente ou PID reutilizado e
+stale, enquanto formato invalido e erro de inspecao preservam o arquivo. Recovery
+rele o owner token e cria uma reivindicacao atomica por hard link antes de
+substituir o lock, sem matar processos. A liberacao usa a mesma identidade
+imutavel e compara token, PID e inicio, portanto callbacks antigos nao removem
+um sucessor. SIGINT/SIGTERM executam esse cleanup quando o runtime consegue
+encerrar de forma controlada.
+
 `apps/worker/src/whatsapp-dispatch-runtime.ts` e o unico novo bootstrap de
 envio. Ele compoe `createWhatsAppProvider`, `WhatsAppGroupSendPolicy` e
 `createWhatsAppDispatchWorker`; por isso consome somente `whatsapp-dispatch` e
@@ -706,3 +717,6 @@ O status e parcial-safe e consulta os contratos existentes `/health`,
 read-only `instance/connectionState` da Evolution. A saida nunca inclui API key,
 JID, mensagem, payload, credencial, headers ou resposta externa bruta. Logs
 aceitam somente nomes logicos predefinidos e de 1 a 1000 linhas.
+O snapshot tambem informa `operationLock` (`unlocked`, `active`, `stale`,
+`invalid` ou `unavailable`) e, para registros validos, operacao, PID e horario
+de aquisicao, sem owner token e sem alterar o lock.

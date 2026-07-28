@@ -9,6 +9,8 @@ import {
   absoluteLogPath,
   appendSupervisorLog,
   clearState,
+  inspectOperationLock,
+  type OperationLockSnapshot,
   readState,
   relativeLogPath,
   rotateLogIfNeeded,
@@ -277,7 +279,7 @@ const assertPortAvailable = async (
   );
 };
 
-export type SystemStatusSnapshot = {
+export type SystemStatusSnapshot = OperationLockSnapshot & {
   overall: 'running' | 'partial' | 'stopped';
   mode: AutomationMode;
   docker: {
@@ -718,6 +720,7 @@ export class LocalSystemSupervisor {
   ): Promise<SystemStatusSnapshot> {
     const loaded = loadLocalSystemEnvironment(this.root, processEnv);
     const state = readState(this.root);
+    const operationLockPromise = inspectOperationLock(this.root, this.deps);
     const ports = state?.ports ?? loaded.ports;
     const processStatuses = Object.fromEntries(
       await Promise.all(
@@ -909,7 +912,9 @@ export class LocalSystemSupervisor {
         : runningCount === 0 && !infrastructureRunning
           ? 'stopped'
           : 'partial';
+    const operationLock = await operationLockPromise;
     return {
+      ...operationLock,
       overall,
       mode: state?.mode ?? loaded.mode,
       docker: {

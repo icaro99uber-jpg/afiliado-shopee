@@ -132,9 +132,39 @@ const composeServiceDisplay = (
   return service.health === 'healthy' ? 'online' : 'degraded';
 };
 
+type OperationSignalRuntime = Pick<NodeJS.Process, 'once' | 'off' | 'exit'>;
+
+export const installOperationSignalCleanup = (
+  release: () => void,
+  runtime: OperationSignalRuntime = process,
+) => {
+  const onSigint = () => {
+    release();
+    runtime.exit(130);
+  };
+  const onSigterm = () => {
+    release();
+    runtime.exit(143);
+  };
+  runtime.once('SIGINT', onSigint);
+  runtime.once('SIGTERM', onSigterm);
+  return () => {
+    runtime.off('SIGINT', onSigint);
+    runtime.off('SIGTERM', onSigterm);
+  };
+};
+
 export const formatStatus = (status: SystemStatusSnapshot) =>
   [
     `Sistema: ${status.overall}`,
+    `Lock operacional: ${status.operationLock}`,
+    ...(status.operation
+      ? [
+          `Operacao do lock: ${status.operation}`,
+          `PID do lock: ${status.pid ?? 'indisponivel'}`,
+          `Lock adquirido em: ${status.acquiredAt ?? 'indisponivel'}`,
+        ]
+      : []),
     `Modo comercial: ${status.mode}`,
     `Docker: ${status.docker.daemon}`,
     `PostgreSQL: ${composeServiceDisplay(status.docker.services, 'postgres')}`,
@@ -170,10 +200,8 @@ export const runSystemCli = async (
     printLogs(parsed.service, parsed.lines);
     return;
   }
-  const supervisor = new LocalSystemSupervisor(
-    resolve(ROOT),
-    createSystemDependencies(),
-  );
+  const deps = createSystemDependencies();
+  const supervisor = new LocalSystemSupervisor(resolve(ROOT), deps);
   if (parsed.command === 'status') {
     const status = await supervisor.status();
     console.log(
@@ -182,7 +210,8 @@ export const runSystemCli = async (
     return;
   }
 
-  const release = acquireLock(ROOT);
+  const release = await acquireLock(ROOT, parsed.command, deps);
+  const removeSignalCleanup = installOperationSignalCleanup(release);
   try {
     if (parsed.command === 'start') {
       const status = await supervisor.start();
@@ -201,6 +230,7 @@ export const runSystemCli = async (
       );
     }
   } finally {
+    removeSignalCleanup();
     release();
   }
 };
