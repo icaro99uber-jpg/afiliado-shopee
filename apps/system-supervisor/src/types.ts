@@ -52,6 +52,28 @@ export type ProcessInspection = {
   startedAt?: string;
 };
 
+export type ProcessIdentityInspection = {
+  running: boolean;
+  markerMatches: boolean;
+  startedAt?: string;
+};
+
+export const PROCESS_START_TOLERANCE_MS = 15_000;
+
+export const processStartedAtMatches = (
+  expected: string,
+  actual: string | undefined,
+) => {
+  if (!actual) return false;
+  const expectedTime = Date.parse(expected);
+  const actualTime = Date.parse(actual);
+  return (
+    Number.isFinite(expectedTime) &&
+    Number.isFinite(actualTime) &&
+    Math.abs(expectedTime - actualTime) < PROCESS_START_TOLERANCE_MS
+  );
+};
+
 export type PortOccupant = {
   pid?: number;
   processName: string;
@@ -70,6 +92,10 @@ export type SystemDependencies = {
     expectedMarker: string,
     expectedStartedAt: string,
   ): Promise<ProcessInspection>;
+  inspectProcessIdentity(
+    pid: number,
+    expectedMarker: string,
+  ): Promise<ProcessIdentityInspection>;
   stopProcessTree(pid: number): Promise<boolean>;
   getPortOccupant(port: number): Promise<PortOccupant | null>;
   request(

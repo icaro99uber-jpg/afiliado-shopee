@@ -1,17 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseDotEnv } from '@shopee-auto-affiliate-ai/config';
 
 import { loadLocalSystemEnvironment } from '../src/environment';
-import { parseSystemArgs } from '../src/cli';
-import {
-  acquireLock,
-  readState,
-  runtimeDirectory,
-  statePath,
-} from '../src/state-store';
+import { installOperationSignalCleanup, parseSystemArgs } from '../src/cli';
+import { readState, runtimeDirectory, statePath } from '../src/state-store';
 
 const directories: string[] = [];
 const temporaryDirectory = () => {
@@ -74,23 +69,32 @@ describe('local system CLI arguments', () => {
   });
 });
 
-describe('local system operation lock', () => {
-  it('rejects a concurrent operation and releases the lock', () => {
-    const root = temporaryDirectory();
-    const release = acquireLock(root);
-    expect(() => acquireLock(root)).toThrowError(
-      expect.objectContaining({ code: 'SYSTEM_OPERATION_IN_PROGRESS' }),
-    );
-    release();
-    expect(acquireLock(root)).toEqual(expect.any(Function));
-  });
+describe('local system controlled signals', () => {
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const)('releases the lock before controlled %s exit', (signal, code) => {
+    const handlers = new Map<string, () => void>();
+    const release = vi.fn();
+    const exit = vi.fn();
+    const runtime = {
+      once: vi.fn((event: string, handler: () => void) => {
+        handlers.set(event, handler);
+        return runtime;
+      }),
+      off: vi.fn((event: string) => {
+        handlers.delete(event);
+        return runtime;
+      }),
+      exit,
+    };
+    const remove = installOperationSignalCleanup(release, runtime as never);
 
-  it('recovers a stale lock without touching runtime state', () => {
-    const root = temporaryDirectory();
-    mkdirSync(runtimeDirectory(root), { recursive: true });
-    writeFileSync(join(runtimeDirectory(root), 'lock'), '99999999');
-    const release = acquireLock(root);
-    release();
+    handlers.get(signal)?.();
+
+    expect(release).toHaveBeenCalledOnce();
+    expect(exit).toHaveBeenCalledWith(code);
+    remove();
   });
 });
 

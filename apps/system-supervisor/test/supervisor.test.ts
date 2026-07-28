@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { statePath } from '../src/state-store';
+import {
+  operationLockPath,
+  statePath,
+  SUPERVISOR_PROCESS_MARKER,
+} from '../src/state-store';
 import { LocalSystemSupervisor } from '../src/supervisor';
 import type {
   CommandSpec,
@@ -158,6 +162,14 @@ const harness = (
       return {
         running: item?.running ?? false,
         identityMatches: Boolean(item?.matches && item.marker === marker),
+        startedAt: item?.startedAt,
+      };
+    }),
+    inspectProcessIdentity: vi.fn(async (pid, marker) => {
+      const item = processes.get(pid);
+      return {
+        running: item?.running ?? false,
+        markerMatches: Boolean(item?.matches && item.marker === marker),
         startedAt: item?.startedAt,
       };
     }),
@@ -400,6 +412,7 @@ describe('LocalSystemSupervisor', () => {
       environment(),
     );
     expect(status.overall).toBe('partial');
+    expect(status.operationLock).toBe('unlocked');
     expect(status.processes.api).toBe('stopped');
     expect(status.processes['whatsapp-dispatch-worker']).toBe('not-required');
     expect(status.schedulers.legacy).toEqual({
@@ -409,6 +422,42 @@ describe('LocalSystemSupervisor', () => {
       timezone: null,
       nextRunAt: null,
     });
+  });
+
+  it('includes sanitized active operation lock evidence in status', async () => {
+    const root = createRoot();
+    const state = harness();
+    state.processes.set(77, {
+      running: true,
+      marker: SUPERVISOR_PROCESS_MARKER,
+      startedAt: '2026-07-25T12:00:00.000Z',
+      matches: true,
+    });
+    mkdirSync(dirname(operationLockPath(root)), { recursive: true });
+    writeFileSync(
+      operationLockPath(root),
+      JSON.stringify({
+        version: 1,
+        pid: 77,
+        ownerToken: '00000000-0000-4000-8000-000000000001',
+        acquiredAt: '2026-07-25T12:00:01.000Z',
+        processStartedAt: '2026-07-25T12:00:00.000Z',
+        processMarker: SUPERVISOR_PROCESS_MARKER,
+        operation: 'start',
+      }),
+    );
+
+    const status = await createSupervisor(root, state.deps).status(
+      environment(),
+    );
+
+    expect(status).toMatchObject({
+      operationLock: 'active',
+      operation: 'start',
+      pid: 77,
+      acquiredAt: '2026-07-25T12:00:01.000Z',
+    });
+    expect(JSON.stringify(status)).not.toContain('00000000-0000-4000');
   });
 
   it('stops only validated registered processes and preserves state on PID mismatch', async () => {
