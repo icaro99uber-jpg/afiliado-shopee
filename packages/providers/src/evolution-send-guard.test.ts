@@ -135,7 +135,10 @@ describe('Evolution safe mode provider integration', () => {
 
     await expect(
       provider.sendMessage({ destination: DESTINATION, message: 'Test only' }),
-    ).rejects.toMatchObject({ code: 'EVOLUTION_SAFE_DESTINATION_BLOCKED' });
+    ).rejects.toMatchObject({
+      code: 'EVOLUTION_SAFE_DESTINATION_BLOCKED',
+      deliveryMayHaveStarted: false,
+    });
     expect(httpClient).not.toHaveBeenCalled();
   });
 

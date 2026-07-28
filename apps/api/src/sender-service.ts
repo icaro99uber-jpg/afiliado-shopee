@@ -1,5 +1,8 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { WhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
+import {
+  WhatsAppSendError,
+  type WhatsAppProvider,
+} from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type {
   WhatsAppDispatchRepository,
@@ -40,10 +43,8 @@ type DispatchWithRelations = {
   attemptCount: number;
 };
 
-const errorMessage = (error: unknown) =>
-  error instanceof Error
-    ? error.message
-    : 'Falha desconhecida ao enviar WhatsApp';
+const providerErrorCode = (error: unknown) =>
+  error instanceof AppError ? error.code : undefined;
 
 export const buildWhatsAppPublicMessage = (copy: {
   titulo: string;
@@ -77,6 +78,15 @@ export class SenderService {
 
     if (dispatch.status === 'SENT') return dispatch;
 
+    if (dispatch.status !== 'PENDING') {
+      throw new AppError(
+        'Dispatch sem permissao para envio automatico',
+        dispatch.status === 'PROCESSING'
+          ? 'WHATSAPP_DISPATCH_DELIVERY_AMBIGUOUS'
+          : 'WHATSAPP_DISPATCH_RETRY_REQUIRES_MANUAL_REVIEW',
+      );
+    }
+
     const message = this.options.messageBuilder
       ? this.options.messageBuilder(dispatch.generatedCopy)
       : buildWhatsAppPublicMessage(dispatch.generatedCopy);
@@ -95,9 +105,17 @@ export class SenderService {
       );
     }
 
-    try {
-      await this.options.dispatches.markAttemptPending(dispatch.id);
+    const claimed = await this.options.dispatches.markAttemptPending(
+      dispatch.id,
+    );
+    if (!claimed) {
+      throw new AppError(
+        'Dispatch ja adquirido por outro processamento',
+        'WHATSAPP_DISPATCH_ALREADY_CLAIMED',
+      );
+    }
 
+    try {
       const result = await this.options.provider.sendMessage({
         destination: dispatch.destination.destination,
         message,
@@ -115,20 +133,60 @@ export class SenderService {
         {
           event: 'whatsapp.dispatch.sent',
           dispatchId,
-          externalMessageId: result.externalMessageId,
         },
         'WhatsApp dispatch sent',
       );
       return updated;
     } catch (error) {
-      const messageError = errorMessage(error);
-      await this.options.dispatches.markFailed(dispatch.id, messageError);
+      if (
+        error instanceof WhatsAppSendError &&
+        !error.deliveryMayHaveStarted
+      ) {
+        try {
+          await this.options.dispatches.markFailed(
+            dispatch.id,
+            'Envio bloqueado antes do request externo',
+          );
+        } catch (persistenceError) {
+          this.options.logger.error(
+            {
+              event: 'whatsapp.dispatch.preflight-persistence-failed',
+              dispatchId,
+              errorType:
+                persistenceError instanceof Error
+                  ? persistenceError.name
+                  : 'UnknownError',
+            },
+            'WhatsApp dispatch preflight failure could not be persisted',
+          );
+          throw new AppError(
+            'Estado do dispatch incerto; revisao manual obrigatoria',
+            'WHATSAPP_DISPATCH_DELIVERY_AMBIGUOUS',
+          );
+        }
+        this.options.logger.error(
+          {
+            event: 'whatsapp.dispatch.blocked-before-request',
+            dispatchId,
+            providerErrorCode: error.code,
+          },
+          'WhatsApp dispatch blocked before external request',
+        );
+        throw error;
+      }
       this.options.logger.error(
-        { event: 'whatsapp.dispatch.failed', dispatchId, error },
-        'WhatsApp dispatch failed',
+        {
+          event: 'whatsapp.dispatch.delivery-ambiguous',
+          dispatchId,
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+          providerErrorCode: providerErrorCode(error),
+        },
+        'WhatsApp dispatch delivery is ambiguous',
       );
-      if (error instanceof AppError) throw error;
-      throw error;
+      throw new AppError(
+        'Resultado do envio incerto; revisao manual obrigatoria',
+        'WHATSAPP_DISPATCH_DELIVERY_AMBIGUOUS',
+      );
     }
   }
 }

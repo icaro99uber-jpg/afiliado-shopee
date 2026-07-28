@@ -1,10 +1,12 @@
 import type { Product, ProductFilters } from '@shopee-auto-affiliate-ai/shared';
+import { WhatsAppSendError } from './whatsapp-send-error';
 
 export * from './shopee-affiliate-offers';
 export * from './manual-shopee-affiliate-offer-provider';
 export * from './mock-shopee-affiliate-offer-provider';
 export * from './official-shopee-affiliate-offer-provider';
 export { parseEvolutionConnectionState } from './evolution-connection-state';
+export { WhatsAppSendError } from './whatsapp-send-error';
 
 export {
   EvolutionApiWhatsAppProvider,
@@ -98,12 +100,26 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
 
   async sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
     if (input.destination.trim().length === 0) {
-      throw new Error('Destino WhatsApp é obrigatório');
+      throw new WhatsAppSendError(
+        'Destino WhatsApp é obrigatório',
+        'WHATSAPP_DESTINATION_REQUIRED',
+        { deliveryMayHaveStarted: false },
+      );
     }
     if (input.message.trim().length === 0) {
-      throw new Error('Mensagem WhatsApp é obrigatória');
+      throw new WhatsAppSendError(
+        'Mensagem WhatsApp é obrigatória',
+        'WHATSAPP_MESSAGE_REQUIRED',
+        { deliveryMayHaveStarted: false },
+      );
     }
-    if (this.shouldFail) throw new Error(this.failureMessage);
+    if (this.shouldFail) {
+      throw new WhatsAppSendError(
+        this.failureMessage,
+        'MOCK_WHATSAPP_FAILURE',
+        { deliveryMayHaveStarted: false },
+      );
+    }
 
     this.calls.push({ ...input });
     return {

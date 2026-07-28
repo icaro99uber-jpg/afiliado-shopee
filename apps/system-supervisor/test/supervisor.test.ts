@@ -80,6 +80,7 @@ const harness = (
     infrastructureHealthFails?: boolean;
     migrationFails?: boolean;
     healthFails?: boolean;
+    dieAfterInitialInspection?: ServiceName;
     portOccupants?: Record<number, PortOccupant>;
   } = {},
 ) => {
@@ -94,6 +95,7 @@ const harness = (
   const stopped: number[] = [];
   const spawned: ServiceName[] = [];
   const spawnedCwds = new Map<ServiceName, string>();
+  const inspectionCounts = new Map<number, number>();
   const run = vi.fn(async (spec: CommandSpec) => {
     commands.push(spec);
     if (spec.args.length === 1 && spec.args[0] === 'info') {
@@ -143,6 +145,16 @@ const harness = (
     }),
     inspectProcess: vi.fn(async (pid, marker) => {
       const item = processes.get(pid);
+      const inspectionCount = (inspectionCounts.get(pid) ?? 0) + 1;
+      inspectionCounts.set(pid, inspectionCount);
+      const name = specs.find((spec) => spec.marker === marker)?.name;
+      if (
+        name === options.dieAfterInitialInspection &&
+        inspectionCount > 1 &&
+        item
+      ) {
+        item.running = false;
+      }
       return {
         running: item?.running ?? false,
         identityMatches: Boolean(item?.matches && item.marker === marker),
@@ -363,6 +375,20 @@ describe('LocalSystemSupervisor', () => {
     ).rejects.toMatchObject({ code: 'API_UNHEALTHY' });
     expect(state.spawned).toEqual(['api']);
     expect(state.stopped).toEqual([100]);
+    expect(() => readFileSync(statePath(root), 'utf8')).toThrow();
+  });
+
+  it('rolls back when a child dies after its initial readiness check', async () => {
+    const root = createRoot();
+    const state = harness({
+      dieAfterInitialInspection: 'commercial-worker',
+    });
+
+    await expect(
+      createSupervisor(root, state.deps).start(environment()),
+    ).rejects.toMatchObject({ code: 'SYSTEM_START_INCOMPLETE' });
+    expect(state.spawned).toEqual(['api', 'dashboard', 'commercial-worker']);
+    expect(state.stopped).toEqual([101, 100]);
     expect(() => readFileSync(statePath(root), 'utf8')).toThrow();
   });
 

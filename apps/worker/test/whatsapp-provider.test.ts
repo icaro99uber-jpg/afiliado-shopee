@@ -78,6 +78,19 @@ const createPrismaMock = (
     whatsAppDestination: {},
     whatsAppDispatch: {
       findUnique: vi.fn(async () => dispatch),
+      updateMany: vi.fn(
+        async ({ where }: { where: { status?: string } }) => {
+          if (where.status && dispatch.status !== where.status) {
+            return { count: 0 };
+          }
+          dispatch = {
+            ...dispatch,
+            status: 'PROCESSING',
+            attemptCount: dispatch.attemptCount + 1,
+          };
+          return { count: 1 };
+        },
+      ),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         dispatch = { ...dispatch, ...data } as typeof dispatch;
         return dispatch;
@@ -360,7 +373,7 @@ describe('whatsapp-dispatch worker provider integration', () => {
     expect(httpClient).toHaveBeenCalledTimes(1);
   });
 
-  it('relanca erro Evolution para permitir retry do BullMQ', async () => {
+  it('marca erro Evolution como ambiguo e bloqueia retry sem novo HTTP', async () => {
     const httpClient = vi
       .fn()
       .mockResolvedValue(
@@ -376,22 +389,24 @@ describe('whatsapp-dispatch worker provider integration', () => {
     });
     const { provider } = await bootstrapProvider(config, { httpClient });
 
-    await expect(
-      processDispatch(
-        createPrismaMock('PENDING', SAFE_TEST_DESTINATION),
-        provider,
-      ),
-    ).rejects.toMatchObject({ code: 'EVOLUTION_SERVER_ERROR' });
+    const prisma = createPrismaMock('PENDING', SAFE_TEST_DESTINATION);
+    await expect(processDispatch(prisma, provider)).rejects.toMatchObject({
+      code: 'WHATSAPP_DISPATCH_DELIVERY_AMBIGUOUS',
+    });
+    await expect(processDispatch(prisma, provider)).rejects.toMatchObject({
+      code: 'WHATSAPP_DISPATCH_DELIVERY_AMBIGUOUS',
+    });
+    expect(httpClient).toHaveBeenCalledTimes(1);
   });
 
-  it('permite tentar novamente um dispatch FAILED', async () => {
+  it('bloqueia retry automatico de dispatch FAILED', async () => {
     const provider = new MockWhatsAppProvider();
     const prisma = createPrismaMock('FAILED');
 
-    await expect(processDispatch(prisma, provider)).resolves.toMatchObject({
-      status: 'SENT',
+    await expect(processDispatch(prisma, provider)).rejects.toMatchObject({
+      code: 'WHATSAPP_DISPATCH_RETRY_REQUIRES_MANUAL_REVIEW',
     });
-    expect(provider.sentMessages).toHaveLength(1);
+    expect(provider.sentMessages).toHaveLength(0);
   });
 
   it('nao reenvia dispatch SENT', async () => {

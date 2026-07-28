@@ -489,7 +489,7 @@ export interface WhatsAppDispatchRepository {
   findByIdForSending(id: string): Promise<WhatsAppDispatchDetails | null>;
   findByIdWithDetails(id: string): Promise<WhatsAppDispatchDetails | null>;
   list(filters: WhatsAppDispatchFilters): Promise<WhatsAppDispatchDetails[]>;
-  markAttemptPending(id: string): Promise<WhatsAppDispatchRecord>;
+  markAttemptPending(id: string): Promise<boolean>;
   markSent(
     id: string,
     data: { externalMessageId: string; sentAt: Date },

@@ -189,8 +189,11 @@ Responsabilidade:
 
 - Montar mensagem publica a partir da copy gerada.
 - Processar um `WhatsAppDispatch`.
-- Incrementar tentativas, chamar provider de WhatsApp e atualizar status.
-- Marcar dispatch como `SENT` ou `FAILED`.
+- Adquirir atomicamente somente dispatch `PENDING`, incrementar tentativas,
+  chamar provider de WhatsApp e atualizar status.
+- Marcar `SENT` apenas depois da persistencia do resultado, `FAILED` somente
+  quando o provider prova que nenhum request externo iniciou e conservar
+  `PROCESSING` quando a entrega pode ter ocorrido.
 
 Entradas:
 
@@ -209,6 +212,8 @@ Dependencias:
 
 - `SenderService` em `apps/api/src/sender-service.ts`.
 - `MockWhatsAppProvider` em `packages/providers`.
+- `WhatsAppSendError` em `packages/providers`, que informa se a entrega pode
+  ter iniciado sem expor resposta ou payload externo.
 - `EvolutionApiWhatsAppProvider` em `packages/providers`, injetado no sender pelo bootstrap quando selecionado.
 - `EvolutionSendGuard` em `packages/providers`, criado uma vez para Evolution e
   responsavel por allowlist exata e limite de requests por processo.
@@ -240,6 +245,9 @@ Protecoes Evolution atuais:
   completa.
 - Timeout e erro HTTP contam porque o request foi iniciado; bloqueios antes do
   HTTP nao contam.
+- Timeout, erro de rede/HTTP ou falha ao persistir `SENT` deixam o dispatch em
+  `PROCESSING`. Redelivery e concorrencia nao chamam o provider novamente;
+  revisao manual e obrigatoria.
 - Mock sem guard e sem alteracao de comportamento.
 - Esta protecao e o contrato 2.3.6 foram validados com clientes HTTP injetados e
   mocks; testes automatizados nunca chamam a internet.
@@ -277,8 +285,10 @@ Fluxo E2E de dispatch controlado:
   destino tecnico permanece inativo e destinos normais nao sao alterados.
 - Um dispatch anterior em qualquer estado bloqueia reexecucao. Historico e job
   sao preservados para auditoria e nunca apagados pelo comando.
-- O job E2E usa `attempts: 1`, sem backoff e sem remocao automatica. Isso nao
-  modifica as tres tentativas dos dispatches normais.
+- O job E2E usa `attempts: 1`, sem backoff e sem remocao automatica. Jobs
+  normais preservam tres tentativas, mas o Sender permite chamada externa
+  somente apos aquisicao atomica de `PENDING`; `PROCESSING` e `FAILED` nunca
+  autorizam reenvio automatico.
 - O consumer isolado compoe apenas repositorios, `SenderService`, uma instancia
   de provider/guard e o worker `whatsapp-dispatch`; nao compoe Pipeline, Hunter,
   Score, Copy, Scheduler, API ou dashboard.
@@ -356,7 +366,9 @@ Persistencia:
 
 - A migracao nova aplica sobre o banco existente. A validacao de banco limpo
   permanece impedida pela migracao historica de dispatch, que referencia
-  tabelas anteriores nao criadas por ela; nenhuma migracao antiga foi alterada.
+  tabelas anteriores nao criadas por ela. O primeiro erro reproduzido e Prisma
+  `P3018`, PostgreSQL `42P01`, `relation "ProductLead" does not exist`, na
+  `20260724000000_whatsapp_dispatch`; nenhuma migracao antiga foi alterada.
 
 Infraestrutura local da Evolution API:
 
@@ -766,6 +778,8 @@ Comportamento operacional:
   persistir ou imprimir segredos.
 - Validar identidade e horario de cada PID antes da parada; ocupantes externos
   de porta e PIDs divergentes nunca sao encerrados.
+- Retornar sucesso do start somente apos snapshot final `running`; estado
+  parcial durante a inicializacao reverte os filhos criados na tentativa.
 - Usar `prisma migrate deploy`, nunca `migrate dev`, na operacao local.
 - Parar composes sem remover volumes, dados ou agendamentos.
 - O supervisor apenas consulta Schedulers; registro ou remocao continuam sob
