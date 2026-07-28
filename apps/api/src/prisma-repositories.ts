@@ -1097,15 +1097,16 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
     })) as WhatsAppDispatchDetails[];
   }
 
-  async markAttemptPending(id: string): Promise<WhatsAppDispatchRecord> {
-    return (await this.prisma.whatsAppDispatch.update({
-      where: { id },
+  async markAttemptPending(id: string): Promise<boolean> {
+    const result = await this.prisma.whatsAppDispatch.updateMany({
+      where: { id, status: 'PENDING' },
       data: {
         status: 'PROCESSING',
         attemptCount: { increment: 1 },
         errorMessage: null,
       } as never,
-    })) as WhatsAppDispatchRecord;
+    });
+    return result.count === 1;
   }
 
   async markSent(

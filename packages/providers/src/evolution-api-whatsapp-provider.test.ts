@@ -105,7 +105,27 @@ describe('EvolutionApiWhatsAppProvider', () => {
     ],
   ] as const)('rejeita %s vazio', async (_field, input, code) => {
     const provider = createProvider();
-    await expect(provider.sendMessage(input)).rejects.toMatchObject({ code });
+    await expect(provider.sendMessage(input)).rejects.toMatchObject({
+      code,
+      deliveryMayHaveStarted: false,
+    });
+  });
+
+  it('classifica identificador de grupo invalido antes do request', async () => {
+    const httpClient = vi.fn();
+    const provider = createProvider(httpClient);
+
+    await expect(
+      provider.sendMessage({
+        destination: 'invalid-group',
+        destinationType: 'GROUP',
+        message: 'Oferta',
+      }),
+    ).rejects.toMatchObject({
+      code: 'WHATSAPP_GROUP_ID_INVALID',
+      deliveryMayHaveStarted: false,
+    });
+    expect(httpClient).not.toHaveBeenCalled();
   });
 
   it('rejeita URL invalida', () => {
@@ -138,7 +158,7 @@ describe('EvolutionApiWhatsAppProvider', () => {
 
     await expect(
       provider.sendMessage({ destination: '5511999999999', message: 'Oferta' }),
-    ).rejects.toMatchObject({ code });
+    ).rejects.toMatchObject({ code, deliveryMayHaveStarted: true });
   });
 
   it('sanitiza a resposta HTTP 400 sem expor detalhes externos', async () => {
@@ -181,7 +201,10 @@ describe('EvolutionApiWhatsAppProvider', () => {
 
     await expect(
       provider.sendMessage({ destination: '5511999999999', message: 'Oferta' }),
-    ).rejects.toMatchObject({ code: 'EVOLUTION_TIMEOUT' });
+    ).rejects.toMatchObject({
+      code: 'EVOLUTION_TIMEOUT',
+      deliveryMayHaveStarted: true,
+    });
   });
 
   it('mapeia erro de rede', async () => {
@@ -191,7 +214,10 @@ describe('EvolutionApiWhatsAppProvider', () => {
 
     await expect(
       provider.sendMessage({ destination: '5511999999999', message: 'Oferta' }),
-    ).rejects.toMatchObject({ code: 'EVOLUTION_NETWORK_ERROR' });
+    ).rejects.toMatchObject({
+      code: 'EVOLUTION_NETWORK_ERROR',
+      deliveryMayHaveStarted: true,
+    });
   });
 
   it('rejeita resposta sem identificador de mensagem', async () => {

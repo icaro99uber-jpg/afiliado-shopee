@@ -561,6 +561,14 @@ describe('controlled BullMQ job and isolated worker', () => {
         prisma: {
           whatsAppDispatch: {
             findUnique: vi.fn(async () => dispatch),
+            updateMany: vi.fn(async () => {
+              dispatch = {
+                ...dispatch,
+                status: 'PROCESSING',
+                attemptCount: dispatch.attemptCount + 1,
+              };
+              return { count: 1 };
+            }),
             update,
           },
           productLead: {},

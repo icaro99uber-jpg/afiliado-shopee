@@ -11,6 +11,7 @@ import {
 } from './evolution-send-guard';
 import type { EvolutionGroupSendGuard } from './evolution-group-send-guard';
 import { fingerprintWhatsAppGroupId } from './whatsapp-group-directory';
+import { WhatsAppSendError } from './whatsapp-send-error';
 
 export type HttpClient = (
   input: string | URL | Request,
@@ -155,24 +156,42 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
   }
 
   async sendMessage(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
-    const destination = requireValue(
-      input.destination,
-      'Destino WhatsApp e obrigatorio',
-      'WHATSAPP_DESTINATION_REQUIRED',
-    );
-    const message = requireValue(
-      input.message,
-      'Mensagem WhatsApp e obrigatoria',
-      'WHATSAPP_MESSAGE_REQUIRED',
-    );
-    const isGroup = input.destinationType === 'GROUP';
-    const destinationPublic = isGroup
-      ? fingerprintWhatsAppGroupId(destination)
-      : maskEvolutionDestination(destination);
+    let destination: string;
+    let message: string;
+    let isGroup: boolean;
+    let destinationPublic: string;
+    try {
+      destination = requireValue(
+        input.destination,
+        'Destino WhatsApp e obrigatorio',
+        'WHATSAPP_DESTINATION_REQUIRED',
+      );
+      message = requireValue(
+        input.message,
+        'Mensagem WhatsApp e obrigatoria',
+        'WHATSAPP_MESSAGE_REQUIRED',
+      );
+      isGroup = input.destinationType === 'GROUP';
+      destinationPublic = isGroup
+        ? fingerprintWhatsAppGroupId(destination)
+        : maskEvolutionDestination(destination);
+    } catch (error) {
+      const preflightError =
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'Falha ao validar envio WhatsApp',
+              'WHATSAPP_SEND_PREFLIGHT_FAILED',
+            );
+      throw new WhatsAppSendError(preflightError.message, preflightError.code, {
+        deliveryMayHaveStarted: false,
+      });
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const url = `${this.baseUrl}/message/sendText/${encodeURIComponent(this.instanceName)}`;
     let responseStatus: number | undefined;
+    let deliveryMayHaveStarted = false;
 
     try {
       if (isGroup) {
@@ -186,6 +205,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
       } else {
         this.sendGuard?.authorizeRequest(destination);
       }
+      deliveryMayHaveStarted = true;
       const response = await this.httpClient(url, {
         method: 'POST',
         headers: {
@@ -254,7 +274,11 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
         },
         'Evolution API message failed',
       );
-      throw mappedError;
+      throw new WhatsAppSendError(
+        mappedError.message,
+        mappedError.code,
+        { deliveryMayHaveStarted },
+      );
     } finally {
       clearTimeout(timeout);
     }

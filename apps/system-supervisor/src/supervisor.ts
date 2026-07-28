@@ -663,11 +663,18 @@ export class LocalSystemSupervisor {
         }
       }
       writeState(this.root, state);
+      const status = await this.status(processEnv);
+      if (status.overall !== 'running') {
+        throw new LocalSystemError(
+          'Sistema ficou parcial durante a inicializacao',
+          'SYSTEM_START_INCOMPLETE',
+        );
+      }
       appendSupervisorLog(
         this.root,
         `Sistema iniciado em modo ${loaded.mode}; nenhum tick ou envio foi disparado`,
       );
-      return this.status(processEnv);
+      return status;
     } catch (error) {
       const rollbackFailures: ServiceName[] = [];
       for (const name of [...startedThisAttempt].reverse()) {

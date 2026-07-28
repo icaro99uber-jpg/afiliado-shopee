@@ -166,6 +166,9 @@ Fluxo operacional atual:
 8. `WHATSAPP_PROVIDER=mock` permanece como padrao; `evolution` exige configuracao completa e explicita.
 9. Em Evolution, o safe mode ativo por padrao valida uma allowlist normalizada
    e reserva o limite por processo imediatamente antes do request HTTP.
+10. O Sender adquire atomicamente apenas `PENDING`. Depois do request, timeout,
+    erro HTTP/rede ou falha ao persistir `SENT` conservam `PROCESSING`; retry e
+    redelivery falham fechados sem nova chamada externa.
 
 Seguranca do provider Evolution:
 
@@ -227,8 +230,8 @@ Teste E2E controlado de dispatch:
    destino tecnico e inativo. Qualquer dispatch/job anterior ou trabalho
    concorrente bloqueia uma nova execucao sem apagar historico.
 4. O job `whatsapp-dispatch` usa `attempts: 1`, nao possui backoff e nao e
-   removido automaticamente. A politica normal de tres tentativas permanece
-   inalterada.
+   removido automaticamente. Jobs normais preservam tres tentativas, mas
+   apenas a primeira aquisicao atomica de `PENDING` pode chamar o provider.
 5. O worker E2E instancia somente o consumer de dispatch e cria uma unica
    factory de provider/guard. `SenderService` recebe um message builder fixo
    para entregar exatamente a frase controlada, sem alterar mensagens normais.
@@ -293,7 +296,9 @@ apenas por mocks e nao deve ser executado nesta task.
 A nova migracao `20260724190000_whatsapp_group_directory` foi aplicada ao banco
 existente. Um banco limpo nao pode ser validado enquanto a migracao historica
 `20260724000000_whatsapp_dispatch` depender de tabelas preexistentes que ela nao
-cria; a migracao antiga foi preservada sem alteracao.
+cria. O primeiro erro reproduzido e Prisma `P3018`, PostgreSQL `42P01`,
+`relation "ProductLead" does not exist`; a migracao antiga foi preservada sem
+alteracao.
 
 ## Infraestrutura local da Evolution API
 
@@ -559,7 +564,10 @@ impede repeticao. O job controlado usa uma tentativa, sem backoff, sem remocao e
 sem alterar a politica de tres tentativas dos jobs normais.
 
 O worker `whatsapp-dispatch` existente finaliza o run como `SENT`, `FAILED` ou
-`AMBIGUOUS`. Falhas e timeout exigem investigacao manual e nunca reenfileiram.
+`AMBIGUOUS`. Bloqueios comprovadamente anteriores ao request podem terminar em
+`FAILED`; falhas/timeout depois do inicio do request ou falha ao persistir
+`SENT` conservam o dispatch em `PROCESSING`, exigem investigacao manual e nao
+autorizam nova chamada ao provider.
 O CLI isolado inicia somente esse consumer e exige provider Evolution, safe
 mode, master switch, limites iguais a 1, Scheduler desligado e ausencia de
 workers concorrentes. Cupons e Shopee oficial permanecem fora do fluxo.
@@ -647,7 +655,8 @@ compose principal, script `evolution:up`, healthchecks, `prisma generate`,
 o consumer isolado de dispatch. Ele nunca chama o script raiz `dev`, o bootstrap
 legado de `apps/worker/src/index.ts`, um tick comercial, o E2E ou CLIs de
 confirmacao. Falhas depois do spawn encerram somente filhos criados pela
-tentativa atual.
+tentativa atual. O start aguarda um snapshot final `running`; estado `partial`
+durante a propria inicializacao e falha com rollback, nao sucesso operacional.
 
 O runtime persiste em `.runtime/local-system/state.json` apenas metadados
 sanitizados. A validacao combina PID, marcador conhecido do entrypoint e horario

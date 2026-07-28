@@ -366,8 +366,15 @@ O módulo de envio usa o provider selecionado no bootstrap do worker. `WHATSAPP_
 2. Após cada `GeneratedCopy`, o pipeline busca `WhatsAppDestination` ativos.
 3. Para cada combinação copy + destino ativo, cria um `WhatsAppDispatch` `PENDING`.
 4. Cada dispatch é enfileirado em `whatsapp-dispatch`.
-5. O worker executa `SenderService`, incrementa `attemptCount`, chama o mock e atualiza para `SENT` ou `FAILED`.
-6. O retry é responsabilidade do BullMQ (`attempts: 3`, backoff exponencial); não há retry manual no serviço.
+5. O worker executa `SenderService`, que adquire atomicamente apenas um dispatch
+   `PENDING`, muda para `PROCESSING`, incrementa `attemptCount` e chama o
+   provider.
+6. Sucesso persistido muda para `SENT`; bloqueio comprovadamente anterior ao
+   request pode mudar para `FAILED`. Resultado externo incerto ou falha ao
+   persistir `SENT` conserva `PROCESSING` e exige investigacao manual.
+7. O BullMQ preserva `attempts: 3` e backoff exponencial nos jobs normais, mas
+   retries/redeliveries de `PROCESSING` ou `FAILED` nao chamam o provider de
+   novo. Nao ha retry manual no servico.
 
 A mensagem pública enviada é formada por título, mensagem, CTA e hashtags. Comissão de afiliado não é adicionada pelo sender ao payload público.
 
@@ -400,7 +407,7 @@ Destinos inativos permanecem cadastrados, mas não recebem dispatch no pipeline.
 ### Filas
 
 - `product-pipeline` / job `pipeline-product`: orquestra Hunter, Score, Copy e criação dos dispatches.
-- `whatsapp-dispatch` / job `whatsapp-dispatch`: payload `{ "dispatchId": "..." }`, com `attempts: 3`, backoff exponencial, `removeOnComplete` e `removeOnFail` limitados.
+- `whatsapp-dispatch` / job `whatsapp-dispatch`: payload `{ "dispatchId": "..." }`, com `attempts: 3`, backoff exponencial, `removeOnComplete` e `removeOnFail` limitados; somente a aquisicao atomica inicial de `PENDING` autoriza a chamada externa.
 
 ### Scheduler do pipeline
 
@@ -666,7 +673,9 @@ argumento.
 A migracao `20260724190000_whatsapp_group_directory` atualiza com sucesso o
 banco existente. A recriacao limpa continua bloqueada por uma limitacao anterior:
 a primeira migracao versionada cria dispatches antes das tabelas historicas
-`ProductLead` e `GeneratedCopy`. Nenhuma migracao anterior foi alterada ou
+`ProductLead` e `GeneratedCopy`. O primeiro erro reproduzido e Prisma `P3018`,
+PostgreSQL `42P01`, `relation "ProductLead" does not exist`, ao aplicar
+`20260724000000_whatsapp_dispatch`. Nenhuma migracao anterior foi alterada ou
 re-baselineada nesta task.
 
 ### Débito técnico
@@ -924,6 +933,9 @@ worker comercial. O consumer isolado de `whatsapp-dispatch` e iniciado somente
 quando `COMMERCIAL_AUTOMATION_MODE=send`. Esse consumer reutiliza o provider, a
 politica de grupos e a finalizacao comercial existentes, sem Scheduler, Hunter,
 Score, Copy ou `PipelineService` legado.
+O comando so retorna sucesso depois de uma leitura final com topologia
+`running`; se um filho morrer entre a verificacao inicial e esse snapshot, a
+tentativa falha e reverte apenas os filhos que acabou de criar.
 
 O estado sanitizado e os logs locais ficam em `.runtime/local-system/`, que e
 ignorado pelo Git. O estado guarda somente versao, horario, modo, portas, nomes

@@ -123,7 +123,7 @@ describe('SenderService com grupo', () => {
     const provider = new MockWhatsAppProvider();
     const dispatches = {
       findByIdForSending: vi.fn(async () => dispatch),
-      markAttemptPending: vi.fn(async () => ({ ...dispatch, attemptCount: 1 })),
+      markAttemptPending: vi.fn(async () => true),
       markSent: vi.fn(async () => ({ ...dispatch, status: 'SENT' })),
       markFailed: vi.fn(),
     };
