@@ -110,6 +110,9 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 - `pnpm dev:api`: inicia somente a API com a resolucao ESM de desenvolvimento.
 - `pnpm test:runtime`: inicia a API em ambiente controlado, consulta `/health`
   e encerra o processo filho.
+- `corepack pnpm system:stability:preview`: valida ciclos reais agendados em
+  preview, reinicializações e indisponibilidades temporárias; exige a
+  confirmação `--confirm-local-preview-stability-test`.
 - `pnpm evolution:init`: cria a configuração local ignorada da Evolution API
   com segredos aleatórios, sem exibi-los.
 - `pnpm evolution:up`: sobe Evolution API, PostgreSQL e Redis isolados.
@@ -1035,3 +1038,23 @@ uma porta da API ou do dashboard estiver ocupada por outro processo, o
 supervisor informa `SYSTEM_PORT_OCCUPIED` e nao encerra o ocupante. Em uma
 parada com PID divergente ou recurso que nao encerrou, o estado e preservado e
 a intervencao manual necessaria e reportada.
+
+### Validação operacional prolongada em preview
+
+Com o sistema inicialmente parado, lock livre, automação pausada e histórico
+comercial sem estados pendentes ou ambíguos:
+
+```powershell
+corepack pnpm system:stability:preview -- --confirm-local-preview-stability-test
+```
+
+As configurações de teste existem somente nos processos filhos: Scheduler
+legado e envio para grupos permanecem desligados, o modo é `preview` e a Shopee
+usa o provider mock. A CLI exige um único grupo já autorizado e usa a instância
+persistida apenas nos processos filhos, sem alterar grupo ou `.env`. Ela observa
+ticks reais, reinicia somente processos
+gerenciados, interrompe Redis/PostgreSQL com `compose stop/start` e preserva
+todos os volumes. Em sucesso ou falha, pausa novamente a automação, remove o
+Scheduler comercial conhecido e deixa a topologia parada. O relatório
+sanitizado é salvo em
+`.runtime/local-system/preview-stability-report.json`.

@@ -130,9 +130,15 @@ importers:
       '@shopee-auto-affiliate-ai/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@shopee-auto-affiliate-ai/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@shopee-auto-affiliate-ai/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@shopee-auto-affiliate-ai/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
     devDependencies:
       tsx:
         specifier: ^4.16.0

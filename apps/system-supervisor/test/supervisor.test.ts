@@ -21,6 +21,7 @@ import type {
   ServiceName,
   SystemDependencies,
 } from '../src/types';
+import { PREVIEW_STABILITY_PRISMA_VALIDATION } from '../src/types';
 
 const directories: string[] = [];
 const requiredFiles = [
@@ -86,6 +87,7 @@ const harness = (
     healthFails?: boolean;
     dieAfterInitialInspection?: ServiceName;
     portOccupants?: Record<number, PortOccupant>;
+    managedDescendants?: Record<number, number[]>;
   } = {},
 ) => {
   let nextPid = 100;
@@ -182,6 +184,11 @@ const harness = (
     getPortOccupant: vi.fn(
       async (port) => options.portOccupants?.[port] ?? null,
     ),
+    isProcessInTree: vi.fn(
+      async (rootPid, candidatePid) =>
+        rootPid === candidatePid ||
+        Boolean(options.managedDescendants?.[rootPid]?.includes(candidatePid)),
+    ),
     request: vi.fn(async (url) => {
       if (
         options.healthFails &&
@@ -270,6 +277,9 @@ describe('LocalSystemSupervisor', () => {
         item.args.some((arg) => /tick|confirm|send/i.test(arg)),
       ),
     ).toBe(false);
+    expect(
+      state.commands.some((command) => command.args.includes('db:generate')),
+    ).toBe(true);
     const persisted = readFileSync(statePath(root), 'utf8');
     expect(persisted).not.toContain('private');
     expect(persisted).not.toContain('DATABASE_URL');
@@ -285,6 +295,21 @@ describe('LocalSystemSupervisor', () => {
       'commercial-worker',
       'whatsapp-dispatch-worker',
     ]);
+  });
+
+  it('reuses a Prisma client validated by the safe preview preflight', async () => {
+    const root = createRoot();
+    const state = harness();
+    await createSupervisor(root, state.deps).start({
+      ...environment(),
+      [PREVIEW_STABILITY_PRISMA_VALIDATION]: 'true',
+      SCHEDULER_ENABLED: 'false',
+      WHATSAPP_GROUP_SEND_ENABLED: 'false',
+      SHOPEE_AFFILIATE_PROVIDER: 'mock',
+    });
+    expect(
+      state.commands.some((command) => command.args.includes('db:generate')),
+    ).toBe(false);
   });
 
   it('preserves ownership and rejects a dispatch worker registered in preview', async () => {
@@ -313,6 +338,50 @@ describe('LocalSystemSupervisor', () => {
     await supervisor.start(environment());
     await supervisor.start(environment());
     expect(state.spawned).toEqual(['api', 'dashboard', 'commercial-worker']);
+  });
+
+  it('accepts a listening descendant of a validated managed process', async () => {
+    const root = createRoot();
+    const portOccupants: Record<number, PortOccupant> = {};
+    const state = harness({
+      portOccupants,
+      managedDescendants: { 100: [900], 101: [901] },
+    });
+    const supervisor = createSupervisor(root, state.deps);
+    await supervisor.start(environment());
+    const worker = [...state.processes.values()].find(
+      (process) => process.marker === 'commercial-entry',
+    );
+    expect(worker).toBeDefined();
+    worker!.running = false;
+    portOccupants[3333] = { pid: 900, processName: 'node' };
+    portOccupants[3000] = { pid: 901, processName: 'node' };
+
+    await supervisor.start(environment());
+
+    expect(
+      state.spawned.filter((name) => name === 'commercial-worker'),
+    ).toHaveLength(2);
+    expect(state.stopped).toEqual([]);
+  });
+
+  it('restarts a missing API without regenerating Prisma beside live workers', async () => {
+    const root = createRoot();
+    const state = harness();
+    const supervisor = createSupervisor(root, state.deps);
+    await supervisor.start(environment());
+    const api = [...state.processes.values()].find(
+      (process) => process.marker === 'api-entry',
+    );
+    expect(api).toBeDefined();
+    api!.running = false;
+
+    await supervisor.start(environment());
+
+    expect(state.spawned.filter((name) => name === 'api')).toHaveLength(2);
+    expect(
+      state.commands.filter((command) => command.args.includes('db:generate')),
+    ).toHaveLength(1);
   });
 
   it('recovers stale registrations without killing a reused PID', async () => {

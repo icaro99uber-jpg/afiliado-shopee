@@ -40,6 +40,11 @@ describe('Shopee affiliate offer providers', () => {
 
     expect(first).toEqual(repeated);
     expect(first.items).toHaveLength(2);
+    expect(
+      first.items.some(
+        (offer) => offer.providerProductId === 'mock-affiliate-000',
+      ),
+    ).toBe(true);
     expect(first.hasNextPage).toBe(true);
     expect(first.nextCursor).toBe('offset:2');
     expect(

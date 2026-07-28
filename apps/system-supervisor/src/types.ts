@@ -6,6 +6,8 @@ export const SERVICE_NAMES = [
 ] as const;
 
 export const LOG_SERVICE_NAMES = [...SERVICE_NAMES, 'supervisor'] as const;
+export const PREVIEW_STABILITY_PRISMA_VALIDATION =
+  'PREVIEW_STABILITY_PRISMA_CLIENT_VALIDATED';
 
 export type ServiceName = (typeof SERVICE_NAMES)[number];
 export type LogServiceName = (typeof LOG_SERVICE_NAMES)[number];
@@ -98,6 +100,7 @@ export type SystemDependencies = {
   ): Promise<ProcessIdentityInspection>;
   stopProcessTree(pid: number): Promise<boolean>;
   getPortOccupant(port: number): Promise<PortOccupant | null>;
+  isProcessInTree?(rootPid: number, candidatePid: number): Promise<boolean>;
   request(
     url: string,
     options?: { headers?: Record<string, string>; timeoutMs?: number },

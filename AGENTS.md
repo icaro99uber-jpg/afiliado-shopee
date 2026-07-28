@@ -798,6 +798,9 @@ Responsabilidade:
 - Iniciar explicitamente API, dashboard e worker comercial; adicionar o worker
   isolado de `whatsapp-dispatch` somente em modo `send`.
 - Manter estado e logs locais sanitizados em `.runtime/local-system/`.
+- Validar estabilidade real em preview somente pelo comando confirmado
+  `system:stability:preview`, com sistema inicialmente parado, estados
+  comerciais seguros e restauração obrigatória da pausa e dos Schedulers.
 
 Dependencias:
 
@@ -831,3 +834,14 @@ Comportamento operacional:
   responsabilidade dos bootstraps dos respectivos workers.
 - `system:status` classifica o lock como `unlocked`, `active`, `stale`,
   `invalid` ou `unavailable` sem corrigi-lo e nunca expoe o owner token.
+- Reinício parcial reutiliza o Prisma Client já gerado enquanto outros filhos
+  gerenciados permanecem ativos; a geração continua nas inicializações frias.
+- Portas da API e do dashboard podem pertencer a descendentes do launcher; o
+  supervisor aceita somente descendência comprovada e continua bloqueando e
+  preservando qualquer ocupante externo.
+- A validação de estabilidade usa apenas o Scheduler comercial em preview e o
+  provider Shopee mock. Ela exige exatamente um grupo já autorizado e usa sua
+  instância persistida somente nos processos filhos, sem alterar o grupo ou o
+  `.env`. Indisponibilidades temporárias usam somente
+  `docker compose stop/start`; nunca removem volumes, iniciam o worker de
+  dispatch ou recuperam estados stale/ambíguos.
