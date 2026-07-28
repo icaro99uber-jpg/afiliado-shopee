@@ -121,6 +121,8 @@ export const createCommercialAutomationOrchestratorRuntime = (
       commercialRuns: repositories.commercialRuns,
       executions: repositories.commercialAutomationExecutions,
       logger,
+      leaseSeconds: config.COMMERCIAL_EXECUTION_LEASE_SECONDS,
+      heartbeatSeconds: config.COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS,
     }),
     prisma,
     ownsPrisma: !options.prisma,

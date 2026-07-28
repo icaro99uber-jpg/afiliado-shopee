@@ -637,10 +637,32 @@ ou dispatch comercial `PENDING/PROCESSING`. Falhas anteriores a confirmacao
 terminam como `FAILED`; falhas depois que a confirmacao foi tentada terminam
 como `AMBIGUOUS` e nao recebem retry automatico.
 
+Execucoes `STARTED` novas persistem `ownerId`, `heartbeatAt` e
+`leaseExpiresAt` junto da chave ativa. O orquestrador renova a lease durante o
+tick e exige o mesmo owner, status `STARTED`, chave ativa e lease valida antes
+de sync, dry-run, confirmacao e finalizacao. Perda de ownership interrompe novas
+etapas e deixa a evidencia para recuperacao manual; owners vencidos nunca
+reativam a lease.
+
+`STARTED` sem owner/lease, inclusive registros legados, ou com lease vencida e
+classificada como stale. A politica separa
+`STALE_COMMERCIAL_EXECUTION_EXISTS` de `COMMERCIAL_EXECUTION_IN_PROGRESS`. As
+APIs de historico mostram somente `stale`, `heartbeatAt` e `leaseExpiresAt`,
+nunca `ownerId`.
+
+Os comandos `commercial:execution:status` e `commercial:execution:recover`
+operam uma execucao por vez. Recovery exige preview, automacao desabilitada e
+pausada e ambos os Schedulers desligados. Ele nao inicia worker/provider, nao
+publica outbox e nao cria job: ausencia comprovada de efeitos termina `FAILED`,
+outbox publicado com job comprovado termina `QUEUED`, outbox `PENDING` exige o
+reconcile existente e evidencia incerta termina `AMBIGUOUS`.
+
 Os defaults sao Scheduler desligado, cron `0 9 * * *`, timezone
 `America/Sao_Paulo` e modo `preview`. `send` so e uma configuracao valida com
 Shopee `official`, Evolution, safe mode, envio para grupos habilitado e
 Scheduler legado desligado. Mock e importacao manual nunca autorizam envio.
+A lease usa 120 segundos e o heartbeat 30 segundos por padrao; os valores devem
+ser inteiros positivos e o heartbeat deve ser menor que metade da lease.
 
 A API oferece apenas leitura em `GET /commercial-automation/scheduler`,
 `GET /commercial-automation/executions` e

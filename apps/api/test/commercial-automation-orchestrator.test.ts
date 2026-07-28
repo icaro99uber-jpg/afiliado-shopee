@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import {
   COMMERCIAL_AUTOMATION_OFFICIAL_PROVIDER_REQUIRED,
   CommercialAutomationOrchestrator,
 } from '../src/commercial-automation-orchestrator';
+import { COMMERCIAL_EXECUTION_OWNERSHIP_LOST } from '../src/commercial-automation-execution-domain';
 import { COMMERCIAL_EXECUTION_IN_PROGRESS } from '../src/commercial-automation-policy-service';
 import type {
   CommercialAutomationExecutionRecord,
@@ -17,22 +18,37 @@ const NOW = new Date('2026-07-26T15:00:00.000Z');
 class MemoryExecutions implements CommercialAutomationExecutionRepository {
   records: CommercialAutomationExecutionRecord[] = [];
   concurrent = false;
+  concurrentStale = false;
+  heartbeatCalls = 0;
+  loseAfterHeartbeats: number | null = null;
 
   async start(input: {
     schedulerJobId: string;
     bullMqJobId?: string;
     mode: 'PREVIEW' | 'SEND';
     startedAt: Date;
+    ownerId: string;
+    heartbeatAt: Date;
+    leaseExpiresAt: Date;
   }) {
     const existing = this.records.find(
       (record) => input.bullMqJobId && record.bullMqJobId === input.bullMqJobId,
     );
     if (existing) return { outcome: 'existing' as const, execution: existing };
-    if (this.concurrent) return { outcome: 'concurrent' as const };
+    if (this.concurrent) {
+      return {
+        outcome: 'concurrent' as const,
+        stale: this.concurrentStale,
+      };
+    }
     const execution: CommercialAutomationExecutionRecord = {
       id: `execution-${this.records.length + 1}`,
       schedulerJobId: input.schedulerJobId,
       bullMqJobId: input.bullMqJobId ?? null,
+      activeKey: 'commercial-automation',
+      ownerId: input.ownerId,
+      heartbeatAt: input.heartbeatAt,
+      leaseExpiresAt: input.leaseExpiresAt,
       mode: input.mode,
       status: 'STARTED',
       reasons: [],
@@ -42,7 +58,11 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
       completedAt: null,
     };
     this.records.push(execution);
-    return { outcome: 'created' as const, execution };
+    return {
+      outcome: 'created' as const,
+      execution,
+      ownership: { executionId: execution.id, ownerId: input.ownerId },
+    };
   }
 
   async createBlocked(input: {
@@ -56,6 +76,10 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
       id: `execution-${this.records.length + 1}`,
       schedulerJobId: input.schedulerJobId,
       bullMqJobId: input.bullMqJobId ?? null,
+      activeKey: null,
+      ownerId: null,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
       mode: input.mode,
       status: 'BLOCKED',
       reasons: input.reasons,
@@ -68,8 +92,31 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
     return execution;
   }
 
+  async heartbeat(
+    ownership: { executionId: string; ownerId: string },
+    input: { heartbeatAt: Date; leaseExpiresAt: Date },
+  ) {
+    this.heartbeatCalls += 1;
+    const record = this.records.find(
+      (candidate) => candidate.id === ownership.executionId,
+    );
+    if (
+      !record ||
+      record.status !== 'STARTED' ||
+      record.ownerId !== ownership.ownerId ||
+      !record.leaseExpiresAt ||
+      record.leaseExpiresAt <= input.heartbeatAt ||
+      (this.loseAfterHeartbeats !== null &&
+        this.heartbeatCalls > this.loseAfterHeartbeats)
+    ) {
+      throw new AppError('ownership lost', COMMERCIAL_EXECUTION_OWNERSHIP_LOST);
+    }
+    record.heartbeatAt = input.heartbeatAt;
+    record.leaseExpiresAt = input.leaseExpiresAt;
+  }
+
   async finish(
-    id: string,
+    ownership: { executionId: string; ownerId: string },
     input: {
       status: Exclude<CommercialAutomationExecutionStatus, 'STARTED'>;
       reasons?: string[];
@@ -78,7 +125,17 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
       completedAt: Date;
     },
   ) {
-    const index = this.records.findIndex((record) => record.id === id);
+    const index = this.records.findIndex(
+      (record) => record.id === ownership.executionId,
+    );
+    if (
+      index < 0 ||
+      this.records[index].ownerId !== ownership.ownerId ||
+      !this.records[index].leaseExpiresAt ||
+      this.records[index].leaseExpiresAt! <= input.completedAt
+    ) {
+      throw new AppError('ownership lost', COMMERCIAL_EXECUTION_OWNERSHIP_LOST);
+    }
     this.records[index] = {
       ...this.records[index],
       ...input,
@@ -86,6 +143,7 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
       commercialRunId:
         input.commercialRunId ?? this.records[index].commercialRunId,
       failureCode: input.failureCode ?? this.records[index].failureCode,
+      activeKey: null,
     };
     return this.records[index];
   }
@@ -96,6 +154,14 @@ class MemoryExecutions implements CommercialAutomationExecutionRepository {
 
   async findById(id: string) {
     return this.records.find((record) => record.id === id) ?? null;
+  }
+
+  async findRecoveryContext() {
+    return null;
+  }
+
+  async recoverStale(): Promise<CommercialAutomationExecutionRecord> {
+    throw new Error('not used');
   }
 }
 
@@ -133,6 +199,9 @@ const createSubject = () => {
     executions,
     logger,
     clock: () => NOW,
+    leaseSeconds: 120,
+    heartbeatSeconds: 30,
+    ownerIdFactory: () => 'owner-1',
   });
   return {
     orchestrator,
@@ -153,6 +222,23 @@ const tick = {
 };
 
 describe('CommercialAutomationOrchestrator', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('cria ownership, lease e encerra o timer depois do tick', async () => {
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const subject = createSubject();
+
+    await subject.orchestrator.executeTick(tick);
+
+    expect(subject.executions.records[0]).toMatchObject({
+      ownerId: 'owner-1',
+      heartbeatAt: NOW,
+      leaseExpiresAt: new Date('2026-07-26T15:02:00.000Z'),
+      activeKey: null,
+    });
+    expect(subject.executions.heartbeatCalls).toBe(2);
+    expect(clearIntervalSpy).toHaveBeenCalled();
+  });
   it('registra BLOCKED e nao sincroniza nem executa pipeline quando o guardrail bloqueia', async () => {
     const subject = createSubject();
     subject.policy.evaluateAutomationReadiness.mockResolvedValue({
@@ -185,6 +271,16 @@ describe('CommercialAutomationOrchestrator', () => {
       },
     );
     expect(subject.policy.evaluateAutomationReadiness).not.toHaveBeenCalled();
+  });
+
+  it('separa concorrencia stale de execucao ativa', async () => {
+    const subject = createSubject();
+    subject.executions.concurrent = true;
+    subject.executions.concurrentStale = true;
+
+    await expect(subject.orchestrator.executeTick(tick)).resolves.toMatchObject(
+      { reasons: ['STALE_COMMERCIAL_EXECUTION_EXISTS'] },
+    );
   });
 
   it('sincroniza e executa exatamente um dry-run no modo preview sem confirmar', async () => {
@@ -269,6 +365,10 @@ describe('CommercialAutomationOrchestrator', () => {
       id: 'execution-started',
       schedulerJobId: tick.schedulerJobId,
       bullMqJobId: tick.bullMqJobId,
+      activeKey: 'commercial-automation',
+      ownerId: 'owner-existing',
+      heartbeatAt: NOW,
+      leaseExpiresAt: new Date('2026-07-26T15:02:00.000Z'),
       mode: 'PREVIEW',
       status: 'STARTED',
       reasons: [],
@@ -282,6 +382,18 @@ describe('CommercialAutomationOrchestrator', () => {
       code: COMMERCIAL_EXECUTION_IN_PROGRESS,
     });
     expect(subject.syncOffers.run).not.toHaveBeenCalled();
+  });
+
+  it('interrompe a proxima etapa ao perder ownership', async () => {
+    const subject = createSubject();
+    subject.executions.loseAfterHeartbeats = 1;
+
+    await expect(subject.orchestrator.executeTick(tick)).rejects.toMatchObject({
+      code: COMMERCIAL_EXECUTION_OWNERSHIP_LOST,
+    });
+    expect(subject.syncOffers.run).toHaveBeenCalledOnce();
+    expect(subject.pipeline.dryRun).not.toHaveBeenCalled();
+    expect(subject.executions.records[0].status).toBe('STARTED');
   });
 
   it('finaliza FAILED quando a sincronizacao falha antes do dry-run', async () => {

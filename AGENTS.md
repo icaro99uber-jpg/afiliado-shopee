@@ -737,11 +737,19 @@ Isolamento e idempotencia:
   simultaneos. Run confirmado iniciado, final pendente ou dispatch comercial
   `PENDING/PROCESSING` tambem bloqueia com
   `COMMERCIAL_EXECUTION_IN_PROGRESS`.
+- Cada `STARTED` novo recebe owner aleatorio, heartbeat e lease atomicos. Somente
+  o mesmo owner com lease valida pode renovar ou finalizar; owner antigo nunca
+  reativa uma lease vencida.
+- `STARTED` sem ownership/lease ou com lease vencida e stale e bloqueia a
+  politica com `STALE_COMMERCIAL_EXECUTION_EXISTS`, separadamente de uma
+  execucao ativa.
 
 Configuracao e seguranca:
 
 - `COMMERCIAL_SCHEDULER_ENABLED=false`, cron `0 9 * * *`, timezone
   `America/Sao_Paulo` e modo `preview` sao os defaults.
+- A lease usa 120 segundos e heartbeat de 30 segundos por padrao; ambos sao
+  inteiros positivos e o heartbeat deve ser menor que metade da lease.
 - O modo `send` exige provider Shopee `official`, Evolution, safe mode e o
   master switch de grupos, mantendo o Scheduler legado desligado. Providers
   `mock` e `manual` sao bloqueados para envio.
@@ -756,9 +764,18 @@ Observabilidade:
 - `GET /commercial-automation/scheduler` expoe somente estado, agenda, modo e
   proxima execucao sanitizados.
 - `GET /commercial-automation/executions` e
-  `GET /commercial-automation/executions/:id` expoem historico sanitizado.
+  `GET /commercial-automation/executions/:id` expoem `stale`, `heartbeatAt` e
+  `leaseExpiresAt`, mas nunca `ownerId`.
 - Nao existe endpoint para disparar tick ou habilitar o Scheduler, e o
   dashboard nao ganhou controles nesta sprint.
+- `commercial:execution:status` e somente leitura. A recuperacao aceita somente
+  `commercial:execution:recover -- --execution-id=<id>
+  --confirm-stale-recovery`, exige preview, automacao desabilitada/pausada e os
+  dois Schedulers desligados; nao inicia worker/provider nem publica outbox.
+- Recuperacao stale usa somente evidencia persistida e compare-and-set:
+  ausencia segura de efeitos termina `FAILED`, job publicado comprovado termina
+  `QUEUED`, outbox `PENDING` exige o reconcile existente e qualquer incerteza
+  termina `AMBIGUOUS`, sem enqueue, takeover ou retry automatico.
 
 ## Supervisor local
 

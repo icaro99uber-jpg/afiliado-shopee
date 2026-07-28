@@ -891,6 +891,8 @@ COMMERCIAL_SCHEDULER_ENABLED=false
 COMMERCIAL_SCHEDULER_CRON=0 9 * * *
 COMMERCIAL_SCHEDULER_TIMEZONE=America/Sao_Paulo
 COMMERCIAL_AUTOMATION_MODE=preview
+COMMERCIAL_EXECUTION_LEASE_SECONDS=120
+COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS=30
 ```
 
 Ele usa exclusivamente a fila `commercial-automation`, o job
@@ -910,6 +912,12 @@ deduplica o mesmo job, uma chave ativa impede ticks simultaneos e qualquer run
 confirmado iniciado, final pendente ou dispatch comercial em processamento
 bloqueia nova execucao.
 
+Cada execucao `STARTED` nova recebe owner interno, heartbeat e lease na mesma
+criacao. O heartbeat e renovado durante o tick, e apenas o mesmo owner com lease
+valida pode continuar ou finalizar. Registros sem ownership/lease e leases
+vencidas ficam stale, exigem recuperacao manual e aparecem separados de uma
+execucao realmente ativa; `ownerId` nunca e exposto.
+
 Para validar com seguranca:
 
 ```powershell
@@ -928,6 +936,20 @@ Endpoints somente leitura:
 
 Nao existe endpoint para executar um tick, habilitar o Scheduler ou alterar a
 agenda. O dashboard nao foi modificado nesta sprint.
+
+Consulta e recuperacao manual conservadora:
+
+```powershell
+corepack pnpm commercial:execution:status
+corepack pnpm commercial:execution:recover -- --execution-id=<id> --confirm-stale-recovery
+```
+
+O recovery exige modo `preview`, automacao desabilitada e pausada e ambos os
+Schedulers desligados. Ele processa somente uma execucao stale por
+compare-and-set, nao inicia worker/provider e nunca cria ou publica job. Outbox
+`PENDING` permanece inalterado e exige `commercial:outbox:reconcile`; job
+publicado comprovado finaliza a responsabilidade como `QUEUED`; evidencia
+incerta permanece `AMBIGUOUS`.
 
 ## Operacao local com um comando
 

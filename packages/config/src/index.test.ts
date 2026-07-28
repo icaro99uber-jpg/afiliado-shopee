@@ -81,6 +81,25 @@ describe('envSchema Scheduler comercial', () => {
     expect(config.COMMERCIAL_SCHEDULER_CRON).toBe('0 9 * * *');
     expect(config.COMMERCIAL_SCHEDULER_TIMEZONE).toBe('America/Sao_Paulo');
     expect(config.COMMERCIAL_AUTOMATION_MODE).toBe('preview');
+    expect(config.COMMERCIAL_EXECUTION_LEASE_SECONDS).toBe(120);
+    expect(config.COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS).toBe(30);
+  });
+
+  it('exige heartbeat positivo e menor que metade da lease', () => {
+    for (const input of [
+      { COMMERCIAL_EXECUTION_LEASE_SECONDS: '0' },
+      { COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS: '0' },
+      {
+        COMMERCIAL_EXECUTION_LEASE_SECONDS: '120',
+        COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS: '60',
+      },
+      {
+        COMMERCIAL_EXECUTION_LEASE_SECONDS: '120',
+        COMMERCIAL_EXECUTION_HEARTBEAT_SECONDS: '61',
+      },
+    ]) {
+      expect(envSchema.safeParse({ ...baseEnv, ...input }).success).toBe(false);
+    }
   });
 
   it('valida cron, timezone e modo comerciais', () => {

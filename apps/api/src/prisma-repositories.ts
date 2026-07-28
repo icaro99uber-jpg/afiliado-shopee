@@ -2,6 +2,8 @@ import type { DatabaseClient } from '@shopee-auto-affiliate-ai/database';
 import type {
   AnalyticsRepository,
   CommercialAutomationExecutionRecord,
+  CommercialAutomationExecutionOwnership,
+  CommercialAutomationExecutionRecoveryContext,
   CommercialAutomationExecutionRepository,
   CommercialAutomationHistoryRepository,
   CommercialAutomationSettingsRecord,
@@ -48,6 +50,10 @@ import type {
 import type { ShopeeProductOffer } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
+import {
+  COMMERCIAL_EXECUTION_OWNERSHIP_LOST,
+  isCommercialAutomationExecutionStale,
+} from './commercial-automation-execution-domain';
 
 const isUniqueConstraintError = (error: unknown) =>
   typeof error === 'object' &&
@@ -797,6 +803,12 @@ export class PrismaCommercialAutomationSettingsRepository implements CommercialA
     >,
   ) {}
 
+  async get(): Promise<CommercialAutomationSettingsRecord | null> {
+    return this.prisma.commercialAutomationSettings.findUnique({
+      where: { id: COMMERCIAL_AUTOMATION_SETTINGS_ID },
+    });
+  }
+
   async getOrCreate(now: Date): Promise<CommercialAutomationSettingsRecord> {
     return this.prisma.commercialAutomationSettings.upsert({
       where: { id: COMMERCIAL_AUTOMATION_SETTINGS_ID },
@@ -823,6 +835,30 @@ export class PrismaCommercialAutomationSettingsRepository implements CommercialA
     });
   }
 }
+
+const COMMERCIAL_AUTOMATION_ACTIVE_KEY = 'commercial-automation';
+
+const staleCommercialExecutionWhere = (at: Date) => ({
+  status: 'STARTED' as const,
+  OR: [
+    { activeKey: null },
+    { ownerId: null },
+    { heartbeatAt: null },
+    { leaseExpiresAt: null },
+    { leaseExpiresAt: { lte: at } },
+  ],
+});
+
+const ownedCommercialExecutionWhere = (
+  ownership: CommercialAutomationExecutionOwnership,
+  at: Date,
+) => ({
+  id: ownership.executionId,
+  status: 'STARTED' as const,
+  ownerId: ownership.ownerId,
+  activeKey: { not: null },
+  leaseExpiresAt: { gt: at },
+});
 
 export class PrismaCommercialAutomationHistoryRepository implements CommercialAutomationHistoryRepository {
   constructor(
@@ -895,9 +931,12 @@ export class PrismaCommercialAutomationHistoryRepository implements CommercialAu
     return Boolean(run || execution);
   }
 
-  async hasActiveCommercialExecution(): Promise<boolean> {
-    return Boolean(
-      await this.prisma.commercialPipelineRun.findFirst({
+  async hasActiveCommercialExecution(
+    now: Date,
+    excludedExecutionId?: string,
+  ): Promise<boolean> {
+    const [run, execution] = await Promise.all([
+      this.prisma.commercialPipelineRun.findFirst({
         where: {
           OR: [
             { mode: 'CONFIRMED', status: 'STARTED' },
@@ -907,11 +946,30 @@ export class PrismaCommercialAutomationHistoryRepository implements CommercialAu
         },
         select: { id: true },
       }),
+      this.prisma.commercialAutomationExecution.findFirst({
+        where: {
+          status: 'STARTED',
+          activeKey: { not: null },
+          ownerId: { not: null },
+          heartbeatAt: { not: null },
+          leaseExpiresAt: { gt: now },
+          ...(excludedExecutionId ? { id: { not: excludedExecutionId } } : {}),
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(run || execution);
+  }
+
+  async hasStaleCommercialExecution(now: Date): Promise<boolean> {
+    return Boolean(
+      await this.prisma.commercialAutomationExecution.findFirst({
+        where: staleCommercialExecutionWhere(now),
+        select: { id: true },
+      }),
     );
   }
 }
-
-const COMMERCIAL_AUTOMATION_ACTIVE_KEY = 'commercial-automation';
 
 const mapCommercialAutomationExecution = (
   record: Record<string, unknown>,
@@ -919,6 +977,10 @@ const mapCommercialAutomationExecution = (
   id: record.id as string,
   schedulerJobId: record.schedulerJobId as string,
   bullMqJobId: (record.bullMqJobId as string | null) ?? null,
+  activeKey: (record.activeKey as string | null) ?? null,
+  ownerId: (record.ownerId as string | null) ?? null,
+  heartbeatAt: (record.heartbeatAt as Date | null) ?? null,
+  leaseExpiresAt: (record.leaseExpiresAt as Date | null) ?? null,
   mode: record.mode as CommercialAutomationExecutionRecord['mode'],
   status: record.status as CommercialAutomationExecutionRecord['status'],
   reasons: record.reasons as string[],
@@ -932,7 +994,7 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
   constructor(
     private readonly prisma: Pick<
       DatabaseClient,
-      'commercialAutomationExecution'
+      'commercialAutomationExecution' | 'commercialPipelineRun'
     >,
   ) {}
 
@@ -952,6 +1014,9 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
     bullMqJobId?: string;
     mode: CommercialAutomationExecutionRecord['mode'];
     startedAt: Date;
+    ownerId: string;
+    heartbeatAt: Date;
+    leaseExpiresAt: Date;
   }) {
     try {
       const record = await this.prisma.commercialAutomationExecution.create({
@@ -959,6 +1024,9 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
           schedulerJobId: input.schedulerJobId,
           bullMqJobId: input.bullMqJobId,
           activeKey: COMMERCIAL_AUTOMATION_ACTIVE_KEY,
+          ownerId: input.ownerId,
+          heartbeatAt: input.heartbeatAt,
+          leaseExpiresAt: input.leaseExpiresAt,
           mode: input.mode,
           status: 'STARTED',
           reasons: [],
@@ -970,15 +1038,34 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
         execution: mapCommercialAutomationExecution(
           record as unknown as Record<string, unknown>,
         ),
+        ownership: {
+          executionId: record.id,
+          ownerId: input.ownerId,
+        },
       };
     } catch (error) {
       if (!isUniqueConstraintError(error)) throw error;
       const existing = input.bullMqJobId
         ? await this.findByBullMqJobId(input.bullMqJobId)
         : null;
-      return existing
-        ? { outcome: 'existing' as const, execution: existing }
-        : { outcome: 'concurrent' as const };
+      if (existing)
+        return { outcome: 'existing' as const, execution: existing };
+      const active = await this.prisma.commercialAutomationExecution.findUnique(
+        {
+          where: { activeKey: COMMERCIAL_AUTOMATION_ACTIVE_KEY },
+        },
+      );
+      return {
+        outcome: 'concurrent' as const,
+        stale: active
+          ? isCommercialAutomationExecutionStale(
+              mapCommercialAutomationExecution(
+                active as unknown as Record<string, unknown>,
+              ),
+              input.startedAt,
+            )
+          : false,
+      };
     }
   }
 
@@ -1012,8 +1099,24 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
     }
   }
 
+  async heartbeat(
+    ownership: CommercialAutomationExecutionOwnership,
+    input: { heartbeatAt: Date; leaseExpiresAt: Date },
+  ) {
+    const updated = await this.prisma.commercialAutomationExecution.updateMany({
+      where: {
+        ...ownedCommercialExecutionWhere(ownership, input.heartbeatAt),
+      },
+      data: {
+        heartbeatAt: input.heartbeatAt,
+        leaseExpiresAt: input.leaseExpiresAt,
+      },
+    });
+    if (updated.count !== 1) this.throwOwnershipLost();
+  }
+
   async finish(
-    id: string,
+    ownership: CommercialAutomationExecutionOwnership,
     input: {
       status: Exclude<CommercialAutomationExecutionRecord['status'], 'STARTED'>;
       reasons?: string[];
@@ -1022,8 +1125,10 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
       completedAt: Date;
     },
   ) {
-    const record = await this.prisma.commercialAutomationExecution.update({
-      where: { id },
+    const updated = await this.prisma.commercialAutomationExecution.updateMany({
+      where: {
+        ...ownedCommercialExecutionWhere(ownership, input.completedAt),
+      },
       data: {
         activeKey: null,
         status: input.status,
@@ -1033,8 +1138,84 @@ export class PrismaCommercialAutomationExecutionRepository implements Commercial
         completedAt: input.completedAt,
       },
     });
-    return mapCommercialAutomationExecution(
-      record as unknown as Record<string, unknown>,
+    if (updated.count !== 1) this.throwOwnershipLost();
+    return this.findExecutionAfterMutation(ownership.executionId);
+  }
+
+  async findRecoveryContext(
+    id: string,
+  ): Promise<CommercialAutomationExecutionRecoveryContext | null> {
+    const execution = await this.findById(id);
+    if (!execution) return null;
+    if (!execution.commercialRunId) return { execution, run: null };
+    const run = await this.prisma.commercialPipelineRun.findUnique({
+      where: { id: execution.commercialRunId },
+      include: { dispatch: true, dispatchOutbox: true },
+    });
+    if (!run) return { execution, run: null };
+    return {
+      execution,
+      run: {
+        id: run.id,
+        mode: run.mode,
+        dispatchId: run.dispatchId,
+        jobId: run.jobId,
+        finalStatus: run.finalStatus,
+        investigationRequired: run.investigationRequired,
+        dispatch: run.dispatch
+          ? {
+              id: run.dispatch.id,
+              status: run.dispatch.status,
+              attemptCount: run.dispatch.attemptCount,
+            }
+          : null,
+        outbox: run.dispatchOutbox
+          ? mapCommercialDispatchOutbox(
+              run.dispatchOutbox as unknown as Record<string, unknown>,
+            )
+          : null,
+      },
+    };
+  }
+
+  async recoverStale(
+    id: string,
+    input: {
+      status: 'QUEUED' | 'FAILED' | 'AMBIGUOUS';
+      failureCode?: string;
+      completedAt: Date;
+    },
+  ) {
+    const updated = await this.prisma.commercialAutomationExecution.updateMany({
+      where: {
+        id,
+        ...staleCommercialExecutionWhere(input.completedAt),
+      },
+      data: {
+        activeKey: null,
+        status: input.status,
+        failureCode: input.failureCode,
+        completedAt: input.completedAt,
+      },
+    });
+    if (updated.count !== 1) {
+      const current = await this.findById(id);
+      if (current && current.status !== 'STARTED') return current;
+      this.throwOwnershipLost();
+    }
+    return this.findExecutionAfterMutation(id);
+  }
+
+  private async findExecutionAfterMutation(id: string) {
+    const record = await this.findById(id);
+    if (!record) this.throwOwnershipLost();
+    return record;
+  }
+
+  private throwOwnershipLost(): never {
+    throw new AppError(
+      'Ownership da execucao comercial foi perdido',
+      COMMERCIAL_EXECUTION_OWNERSHIP_LOST,
     );
   }
 

@@ -53,6 +53,10 @@ class MemorySettings implements CommercialAutomationSettingsRepository {
     return this.record;
   }
 
+  async get() {
+    return this.record;
+  }
+
   async setPaused(paused: boolean, now: Date) {
     this.record = {
       ...this.record,
@@ -71,6 +75,7 @@ class MemoryHistory implements CommercialAutomationHistoryRepository {
   lastSentAt: Date | null = null;
   ambiguous = false;
   active = false;
+  stale = false;
   lastRange?: { dayStartsAt: Date; dayEndsAt: Date; groupId?: string };
 
   async getSnapshot(input: {
@@ -92,6 +97,10 @@ class MemoryHistory implements CommercialAutomationHistoryRepository {
 
   async hasActiveCommercialExecution() {
     return this.active;
+  }
+
+  async hasStaleCommercialExecution() {
+    return this.stale;
   }
 }
 
@@ -338,6 +347,16 @@ describe('CommercialAutomationPolicyService', () => {
 
     await expect(service.evaluateAutomationReadiness()).resolves.toMatchObject({
       reasons: ['COMMERCIAL_EXECUTION_IN_PROGRESS'],
+      nextAllowedAt: null,
+    });
+  });
+
+  it('separa execucao stale de execucao ativa', async () => {
+    const { service, history } = createSubject();
+    history.stale = true;
+
+    await expect(service.evaluateAutomationReadiness()).resolves.toMatchObject({
+      reasons: ['STALE_COMMERCIAL_EXECUTION_EXISTS'],
       nextAllowedAt: null,
     });
   });
