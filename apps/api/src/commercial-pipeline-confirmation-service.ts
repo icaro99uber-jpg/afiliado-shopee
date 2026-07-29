@@ -3,7 +3,7 @@ import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import type { CommercialCopyGenerator } from './commercial-copy-service';
 import { isCommercialAuthorizedGroup } from './commercial-group-selection';
-import { commercialProductRejections } from './commercial-pipeline-service';
+import { commercialProductRejections } from './commercial-offer-eligibility';
 import type {
   CommercialDeliveryHistoryRepository,
   CommercialDispatchOutboxRepository,

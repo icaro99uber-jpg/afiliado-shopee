@@ -136,6 +136,15 @@ export type CommercialPipelineRejectionCode =
   | 'SCORE_BELOW_MINIMUM'
   | 'ALREADY_SENT_TO_GROUP';
 
+export type CommercialOfferScorePolicyVersion = 'legacy-v1' | 'official-v2';
+
+export type CommercialPipelineScoreBreakdown = {
+  policyVersion: CommercialOfferScorePolicyVersion;
+  rawTotal: number;
+  finalScore: number;
+  components: Record<string, number>;
+};
+
 export type CommercialPipelineRunData = {
   mode: CommercialPipelineRunMode;
   status: CommercialPipelineRunStatus;
@@ -146,6 +155,10 @@ export type CommercialPipelineRunData = {
   groupName?: string | null;
   groupFingerprint?: string | null;
   score?: number | null;
+  scorePolicyVersion?: CommercialOfferScorePolicyVersion | null;
+  minimumScoreUsed?: number | null;
+  maximumScoreObserved?: number | null;
+  selectedScoreBreakdown?: CommercialPipelineScoreBreakdown | null;
   candidateCount: number;
   eligibleCount: number;
   rejectedCount: number;

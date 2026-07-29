@@ -613,9 +613,12 @@ Responsabilidade:
 
 Dependencias:
 
-- `ShopeeOfferRepository` para candidatos `MOCK` ou `MANUAL`.
+- `ShopeeOfferRepository` para candidatos `MOCK`, `MANUAL` ou `OFFICIAL`
+  persistidos.
 - `WhatsAppGroupDirectoryRepository` para o unico grupo elegivel.
-- `ScoreService.calculate`; nao existe segunda formula.
+- `CommercialOfferScorePolicy`: `legacy-v1` delega exatamente ao
+  `ScoreService.calculate` para `MOCK`/`MANUAL`; `official-v2` usa somente
+  comissao, avaliacao, vendas e desconto oficiais persistidos.
 - `CommercialCopyService`, sem persistencia em `GeneratedCopy`.
 - `CommercialDeliveryHistoryRepository` para dispatches `SENT` e futuras runs
   `CONFIRMED`.
@@ -626,7 +629,8 @@ Elegibilidade e ranking:
 
 - Oferta indisponivel, expirada, ainda nao iniciada, sem link afiliado HTTP/HTTPS
   ou com dados comerciais invalidos e rejeitada com codigo estruturado.
-- O score minimo padrao e 70; o limite e 20, com teto 100 candidatos.
+- O score minimo padrao e 70 para `MOCK`/`MANUAL` e 60 para `OFFICIAL`; um
+  limite explicito sempre prevalece. O limite e 20, com teto 100 candidatos.
 - Ordem: score, comissao, vendas, desconto, avaliacao e `providerProductId`.
 - Produto ja entregue ao grupo recebe `ALREADY_SENT_TO_GROUP`; dry-run anterior
   nao e entrega.
@@ -655,6 +659,13 @@ Persistencia e operacao:
   confirmacao/envio permanecem bloqueados.
 - O dashboard oferece somente executar dry-run, copiar preview e consultar
   historico.
+- Runs `COMPLETED` e `BLOCKED` preservam versao da politica, limite usado e
+  maior score observado; o breakdown selecionado existe somente quando um
+  produto foi efetivamente escolhido.
+- `corepack pnpm commercial:official:diagnose` e read-only, aceita zero
+  argumentos, exige preview com automacao pausada/desabilitada e os dois
+  Schedulers desligados, e grava apenas evidencia sanitizada ignorada em
+  `.runtime/local-system/official-offer-diagnosis.json`.
 
 ## Commercial Pipeline Confirmed
 

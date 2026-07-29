@@ -220,9 +220,14 @@ const parseCommercialPipelineInput = (
   }
   const input: CommercialPipelineInput = {};
   if (record.source !== undefined) {
-    if (!['MOCK', 'MANUAL'].includes(String(record.source).toUpperCase()))
+    if (
+      !['MOCK', 'MANUAL', 'OFFICIAL'].includes(
+        String(record.source).toUpperCase(),
+      )
+    )
       throw new AppError('source invalido', 'INVALID_PIPELINE_FILTERS');
-    input.source = String(record.source).toUpperCase() as 'MOCK' | 'MANUAL';
+    input.source = String(record.source).toUpperCase() as
+      'MOCK' | 'MANUAL' | 'OFFICIAL';
   }
   for (const field of [
     'minPrice',

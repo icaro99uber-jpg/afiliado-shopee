@@ -140,8 +140,7 @@ Na validação observada em 29 de julho de 2026, o Explorer retornou um node com
 GraphQL, com cinco nodes e cinco `offerLink`. A resposta confirmou dinheiro e
 taxas como strings, contagens e IDs como números, `periodStartTime` em segundos
 e `scrollId` nulo. O mapeamento rejeitou os cinco nodes antes da persistência;
-o limite antigo de ano 2100 rejeitou `periodEndTime` válido em seconds no ano
-2999.
+o limite antigo de ano 2100 rejeitou `periodEndTime` válido em seconds no ano 2999.
 
 O parser corrigido aceita timestamps Unix em seconds ou milliseconds somente
 quando exatamente uma unidade produz uma `Date` válida entre 2000 e 9999. Ele
@@ -217,7 +216,7 @@ numéricos. Produtos não são apagados automaticamente. `lastSeenAt` registra a
 última observação e `unavailableAt` fica disponível para uma política futura
 explícita.
 
-A fórmula de score permanece:
+A fórmula `legacy-v1` permanece para `MOCK` e `MANUAL`:
 
 - comissão: 35%, normalizada entre 0 e 20%;
 - avaliação: 25%, normalizada entre 0 e 5;
@@ -228,6 +227,30 @@ A fórmula de score permanece:
 Preço não recebeu peso arbitrário. Oferta expirada ou indisponível é
 inelegível, e a listagem para score exclui esses registros. Não há métrica de
 conversão inventada.
+
+Produtos `OFFICIAL` persistidos usam a politica comercial `official-v2`:
+
+- comissao limitada a 20%: ate 35 pontos;
+- avaliacao limitada a 5: ate 25 pontos;
+- vendas limitadas a 10.000 e normalizadas por `log10(1 + vendas)`: ate 20
+  pontos;
+- desconto limitado a 100%: ate 20 pontos.
+
+A soma interna conserva precisao completa e somente o score final e
+arredondado. Preco, `commissionAmount`, nome da loja, `shopType` e categoria nao
+participam. O minimo padrao oficial e 60; o legado permanece 70, e um valor
+explicito sempre prevalece.
+
+O comando read-only abaixo aceita zero argumentos, exige o ambiente local
+pausado em preview e nao compoe provider, fila ou pipeline run:
+
+```powershell
+corepack pnpm commercial:official:diagnose
+```
+
+O relatorio contem apenas IDs internos, rejeicoes estruturais, distribuicao e
+componentes com ate quatro casas decimais. Ele e salvo em
+`.runtime/local-system/official-offer-diagnosis.json`, ignorado pelo Git.
 
 ## Links, Sub_ids e cupons
 
@@ -257,13 +280,13 @@ escopo enquanto não houver endpoint oficial confirmado.
 
 `CommercialPipelineService` prepara uma unica oportunidade comercial sem chamar
 o pipeline legado. O fluxo consulta o catalogo persistido, aplica filtros de
-origem `MOCK` ou `MANUAL`, valida elegibilidade, reutiliza exclusivamente
-`ScoreService.calculate`, ordena os candidatos e escolhe exatamente um grupo
+origem `MOCK`, `MANUAL` ou `OFFICIAL`, valida elegibilidade, resolve a politica
+versionada da origem, ordena os candidatos e escolhe exatamente um grupo
 ativo/disponivel da instancia atual. O servico depende somente de contratos e
 nao importa Prisma, Fastify, BullMQ, Evolution ou WhatsApp.
 
-Valores padrao: origem `MOCK`, score minimo 70 e no maximo 20 candidatos. O
-limite absoluto e 100. Produto sem link afiliado, expirado, indisponivel,
+Valores padrao: origem `MOCK`, score minimo 70 para `MOCK`/`MANUAL`, 60 para
+`OFFICIAL` e no maximo 20 candidatos. O limite absoluto e 100. Produto sem link afiliado, expirado, indisponivel,
 invalido ou abaixo do score minimo recebe motivo estruturado. Links devem ser
 HTTP/HTTPS e nunca sao modificados.
 
@@ -300,6 +323,9 @@ Cada tentativa valida cria um `CommercialPipelineRun` `DRY_RUN`. Estados
 concluidos, bloqueados e falhos guardam apenas produto/grupo sanitizados, score,
 contagens, resumo de rejeicoes, copy, Sub_ids planejados e codigo publico. Nao
 sao armazenados JID, telefone, credencial, payload Evolution ou participantes.
+A migration `20260729100000_official_offer_scoring_v2` adiciona versao da
+politica, limite usado, maior score observado e breakdown selecionado. Runs
+`BLOCKED` nao guardam breakdown individual de produtos rejeitados.
 
 Rotas:
 
