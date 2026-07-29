@@ -12,6 +12,7 @@ model ProductLead {
   whatsappDispatches     WhatsAppDispatch[]
   coupons                Coupon[]
   commercialPipelineRuns CommercialPipelineRun[]
+  commercialOfferSnapshots CommercialOfferSnapshot[]
   id                     String                  @id @default(cuid())
   source                 ShopeeOfferSource       @default(MOCK)
   providerProductId      String
@@ -39,6 +40,8 @@ model ProductLead {
   fetchedAt              DateTime                @default(now())
   lastSeenAt             DateTime                @default(now())
   unavailableAt          DateTime?
+  commercialSnapshotRevision Int                 @default(0)
+  commercialSnapshotFingerprint String?
   title                  String
   score                  Int?
   scoreUpdatedAt         DateTime?
@@ -48,6 +51,31 @@ model ProductLead {
   @@unique([source, providerProductId])
   @@index([source, lastSeenAt])
   @@index([offerEndsAt, unavailableAt])
+}
+
+model CommercialOfferSnapshot {
+  id             String      @id @default(cuid())
+  productId      String
+  product        ProductLead @relation(fields: [productId], references: [id], onDelete: Restrict)
+  revision       Int
+  fingerprint    String
+  price          Decimal     @db.Decimal(14, 4)
+  priceMin       Decimal?    @db.Decimal(14, 4)
+  priceMax       Decimal?    @db.Decimal(14, 4)
+  discountRate   Float
+  commissionRate Float
+  observedRating Float
+  observedSales  Int
+  offerStartsAt  DateTime?
+  offerEndsAt    DateTime?
+  unavailableAt  DateTime?
+  capturedAt     DateTime
+  createdAt      DateTime    @default(now())
+
+  @@unique([productId, revision])
+  @@index([productId, revision])
+  @@index([productId, capturedAt])
+  @@index([fingerprint])
 }
 
 model GeneratedCopy {

@@ -367,6 +367,24 @@ atualizam o mesmo registro e preservam copies e dispatches. Dinheiro novo usa
 string decimal no domínio e `Decimal` no Prisma. Ofertas expiradas são ignoradas
 na sincronização e inelegíveis para score.
 
+Ofertas `OFFICIAL` são persistidas por um boundary transacional que mantém o
+estado atual no `ProductLead` e cria `CommercialOfferSnapshot` apenas quando o
+fingerprint de preço, desconto, comissão, vigência ou indisponibilidade muda.
+Revision mede transições comerciais, não leituras: A → B → A gera revisions 1,
+2 e 3, enquanto A → A mantém uma única revision. Rating e vendas ficam como
+observações do snapshot criado, mas sozinhos não alteram o fingerprint.
+`capturedAt` preserva o `fetchedAt` da oferta.
+
+O baseline de registros oficiais anteriores à migration exige o comando local,
+confirmado e idempotente:
+
+```powershell
+corepack pnpm commercial:snapshots:backfill -- --confirm-local-official-backfill
+```
+
+O backfill não chama provider, Redis ou fila. Mineração, sinais promocionais e
+filas permanecem fora desta etapa.
+
 O Explorer oficial público permite observar `productOfferV2`, mas não confirma
 transporte, assinatura, headers, rate limits, semântica real de paginação ou
 cupons para esta conta. **Autenticação e transporte real aguardam credenciais e

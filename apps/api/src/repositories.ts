@@ -74,6 +74,14 @@ export type ShopeeOfferRecord = ShopeeProductOffer & {
   updatedAt: Date;
 };
 
+export type OfficialOfferSnapshotUpsertResult = {
+  product: ShopeeOfferRecord;
+  productAction: 'created' | 'updated';
+  commercialStateChanged: boolean;
+  snapshotCreated: boolean;
+  snapshotRevision: number;
+};
+
 export type ShopeeOfferFilters = {
   source?: ShopeeAffiliateOfferSource;
   status?: ShopeeOfferStatus;
@@ -105,6 +113,9 @@ export interface ShopeeOfferRepository {
     id: string,
     offer: ShopeeProductOffer,
   ): Promise<ShopeeOfferRecord>;
+  upsertOfficialOfferWithSnapshot(
+    offer: ShopeeProductOffer,
+  ): Promise<OfficialOfferSnapshotUpsertResult>;
   findOfferById(id: string): Promise<ShopeeOfferRecord | null>;
   listOffers(
     filters: ShopeeOfferFilters,
@@ -112,6 +123,13 @@ export interface ShopeeOfferRepository {
   listCommercialCandidates(
     filters: CommercialOfferCandidateFilters,
   ): Promise<ShopeeOfferRecord[]>;
+}
+
+export interface CommercialOfferSnapshotBackfillRepository {
+  countOfficialProducts(): Promise<number>;
+  countOfficialProductsPendingSnapshot(): Promise<number>;
+  listOfficialProductIdsPendingSnapshot(limit: number): Promise<string[]>;
+  initializeOfficialProductSnapshot(productId: string): Promise<boolean>;
 }
 
 export type CommercialPipelineRunMode = 'DRY_RUN' | 'CONFIRMED';

@@ -27,6 +27,7 @@
     "shopee:official:sync": "corepack pnpm --filter @shopee-auto-affiliate-ai/api shopee:official:sync",
     "commercial:dry-run": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:dry-run",
     "commercial:official:diagnose": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:official:diagnose",
+    "commercial:snapshots:backfill": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:snapshots:backfill",
     "commercial:confirm": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:confirm",
     "commercial:automation:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:preview",
     "commercial:automation:worker": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:worker",
