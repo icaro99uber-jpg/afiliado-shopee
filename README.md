@@ -1085,3 +1085,20 @@ todos os volumes. Em sucesso ou falha, pausa novamente a automação, remove o
 Scheduler comercial conhecido e deixa a topologia parada. O relatório
 sanitizado é salvo em
 `.runtime/local-system/preview-stability-report.json`.
+
+## Nichos e campanhas comerciais
+
+A API oferece CRUD paginado em `/commercial/niches` e
+`/commercial/campaigns`. Nichos normalizam categorias e keywords e fazem
+matching determinístico de ofertas `OFFICIAL` por tokens/frases e critérios
+comerciais.
+
+Campanhas usam como identidade o fingerprint lógico do grupo, calculado apenas
+do JID canônico e estável entre instâncias Evolution. O destino âncora é uma
+referência interna, não a propriedade da campanha por um número específico.
+Elas nascem inativas; a ativação exige `ATIVAR_CAMPANHA`, nicho ativo e destino
+correspondente elegível.
+
+A janela é `[allowedStartTime, allowedEndTime)` e os slots são
+`floor((fimEmMinutos - inicioEmMinutos) / cadenceMinutes)`. Esta etapa não
+implementa mineração, IA, sender assignments, filas, dispatches ou envio.

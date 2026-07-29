@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import {
   COMMERCIAL_AUTOMATION_DEFAULTS,
@@ -65,6 +65,8 @@ import {
   type CommercialAutomationSchedulerStatusSnapshot,
 } from './commercial-automation-scheduler-status-service';
 import { CommercialDispatchOutboxService } from './commercial-dispatch-outbox-service';
+import { CommercialNicheService } from './commercial-niche-service';
+import { CommercialGroupCampaignService } from './commercial-group-campaign-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -132,6 +134,14 @@ type BuildAppOptions = {
     CommercialDispatchOutboxService,
     'list' | 'find'
   >;
+  commercialNicheService?: Pick<
+    CommercialNicheService,
+    'create' | 'list' | 'find' | 'update'
+  >;
+  commercialGroupCampaignService?: Pick<
+    CommercialGroupCampaignService,
+    'create' | 'list' | 'find' | 'update' | 'activate' | 'deactivate'
+  >;
   commercialAutomationSchedulerStatusServiceFactory?: () => {
     getStatus(): Promise<CommercialAutomationSchedulerStatusSnapshot>;
   };
@@ -179,6 +189,65 @@ const parsePositiveInteger = (
     throw new AppError('Paginacao invalida', 'INVALID_PAGINATION');
   }
   return parsed;
+};
+
+const parseCommercialConfigurationQuery = (query: unknown) => {
+  if (!query || typeof query !== 'object' || Array.isArray(query)) {
+    throw new AppError(
+      'Query invalida',
+      'COMMERCIAL_CONFIGURATION_QUERY_INVALID',
+    );
+  }
+  const record = query as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => !['page', 'limit', 'active'].includes(key),
+    )
+  ) {
+    throw new AppError(
+      'A query contem campos nao permitidos',
+      'COMMERCIAL_CONFIGURATION_QUERY_INVALID',
+    );
+  }
+  let active: boolean | undefined;
+  if (record.active !== undefined) {
+    if (record.active !== 'true' && record.active !== 'false') {
+      throw new AppError(
+        'Filtro active invalido',
+        'COMMERCIAL_CONFIGURATION_QUERY_INVALID',
+      );
+    }
+    active = record.active === 'true';
+  }
+  return {
+    page: parsePositiveInteger(record.page, 1, 1_000_000),
+    limit: parsePositiveInteger(record.limit, 20, 100),
+    active,
+  };
+};
+
+const COMMERCIAL_CONFIGURATION_ERROR_STATUS: Readonly<Record<string, number>> =
+  {
+    COMMERCIAL_NICHE_NOT_FOUND: 404,
+    COMMERCIAL_GROUP_CAMPAIGN_NOT_FOUND: 404,
+    COMMERCIAL_GROUP_DESTINATION_NOT_FOUND: 404,
+    COMMERCIAL_NICHE_SLUG_CONFLICT: 409,
+    COMMERCIAL_GROUP_CAMPAIGN_ALREADY_EXISTS: 409,
+    COMMERCIAL_GROUP_CAMPAIGN_NICHE_INACTIVE: 409,
+    COMMERCIAL_GROUP_CAMPAIGN_GROUP_UNAVAILABLE: 409,
+    COMMERCIAL_GROUP_CAMPAIGN_STATE_CONFLICT: 409,
+  };
+
+const sendCommercialConfigurationError = (
+  reply: FastifyReply,
+  error: unknown,
+) => {
+  if (!(error instanceof AppError)) {
+    return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+  const code = error.code;
+  const status = COMMERCIAL_CONFIGURATION_ERROR_STATUS[code] ?? 400;
+  return reply.code(status).send({ error: code, message: error.message });
 };
 
 const offerStatus = (offer: { unavailableAt?: Date; offerEndsAt?: Date }) =>
@@ -365,6 +434,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     new CommercialDispatchOutboxService(
       repositories.commercialDispatchOutboxes,
     );
+  const commercialNicheService =
+    options.commercialNicheService ??
+    new CommercialNicheService(repositories.commercialNiches);
+  const commercialGroupCampaignService =
+    options.commercialGroupCampaignService ??
+    new CommercialGroupCampaignService(
+      repositories.commercialGroupCampaigns,
+      repositories.commercialNiches,
+    );
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -432,6 +510,110 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   await app.register(cors, { origin: true });
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));
+
+  app.post('/commercial/niches', async (request, reply) => {
+    try {
+      return reply
+        .code(201)
+        .send(await commercialNicheService.create(request.body));
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.get('/commercial/niches', async (request, reply) => {
+    try {
+      return await commercialNicheService.list(
+        parseCommercialConfigurationQuery(request.query),
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.get('/commercial/niches/:id', async (request, reply) => {
+    try {
+      return await commercialNicheService.find(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.patch('/commercial/niches/:id', async (request, reply) => {
+    try {
+      return await commercialNicheService.update(
+        (request.params as { id: string }).id,
+        request.body,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.post('/commercial/campaigns', async (request, reply) => {
+    try {
+      return reply
+        .code(201)
+        .send(await commercialGroupCampaignService.create(request.body));
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.get('/commercial/campaigns', async (request, reply) => {
+    try {
+      return await commercialGroupCampaignService.list(
+        parseCommercialConfigurationQuery(request.query),
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.get('/commercial/campaigns/:id', async (request, reply) => {
+    try {
+      return await commercialGroupCampaignService.find(
+        (request.params as { id: string }).id,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.patch('/commercial/campaigns/:id', async (request, reply) => {
+    try {
+      return await commercialGroupCampaignService.update(
+        (request.params as { id: string }).id,
+        request.body,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.post('/commercial/campaigns/:id/activate', async (request, reply) => {
+    try {
+      return await commercialGroupCampaignService.activate(
+        (request.params as { id: string }).id,
+        request.body,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.post('/commercial/campaigns/:id/deactivate', async (request, reply) => {
+    try {
+      return await commercialGroupCampaignService.deactivate(
+        (request.params as { id: string }).id,
+        request.body,
+      );
+    } catch (error) {
+      return sendCommercialConfigurationError(reply, error);
+    }
+  });
 
   app.get('/analytics', async (request, reply) => {
     try {

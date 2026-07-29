@@ -79,11 +79,57 @@ model WhatsAppDestination {
   lastSyncedAt           DateTime?
   dispatches             WhatsAppDispatch[]
   commercialPipelineRuns CommercialPipelineRun[]
+  anchoredCampaigns      CommercialGroupCampaign[]
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
 
   @@unique([destination, sourceInstanceName])
   @@index([type, active, available])
+}
+
+model CommercialNiche {
+  id                String                    @id @default(cuid())
+  name              String
+  slug              String                    @unique
+  active            Boolean                   @default(true)
+  categoryIds       String[]                  @default([])
+  includeKeywords   String[]                  @default([])
+  excludeKeywords   String[]                  @default([])
+  minPrice          Decimal?                  @db.Decimal(14, 4)
+  maxPrice          Decimal?                  @db.Decimal(14, 4)
+  minDiscountRate   Float                     @default(5)
+  minRating         Float                     @default(0)
+  minSales          Int                       @default(0)
+  minCommissionRate Float                     @default(0)
+  minimumScore      Int                       @default(60)
+  campaigns         CommercialGroupCampaign[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@index([active])
+}
+
+model CommercialGroupCampaign {
+  id                      String               @id @default(cuid())
+  name                    String
+  logicalGroupFingerprint String               @unique
+  anchorDestinationId     String?
+  anchorDestination       WhatsAppDestination? @relation(fields: [anchorDestinationId], references: [id], onDelete: SetNull)
+  nicheId                 String
+  niche                   CommercialNiche      @relation(fields: [nicheId], references: [id], onDelete: Restrict)
+  active                  Boolean              @default(false)
+  cadenceMinutes          Int                  @default(15)
+  timezone                String               @default("America/Sao_Paulo")
+  allowedStartTime        String               @default("07:00")
+  allowedEndTime          String               @default("22:00")
+  dailyLimit              Int                  @default(60)
+  queueTargetSize         Int                  @default(40)
+  dedupeDays              Int                  @default(30)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  @@index([active])
+  @@index([nicheId])
 }
 
 model WhatsAppDispatch {

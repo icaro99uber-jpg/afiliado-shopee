@@ -415,6 +415,133 @@ export interface CommercialAutomationExecutionRepository {
   findById(id: string): Promise<CommercialAutomationExecutionRecord | null>;
 }
 
+export type CommercialNicheData = {
+  name: string;
+  slug: string;
+  active: boolean;
+  categoryIds: string[];
+  includeKeywords: string[];
+  excludeKeywords: string[];
+  minPrice: string | null;
+  maxPrice: string | null;
+  minDiscountRate: number;
+  minRating: number;
+  minSales: number;
+  minCommissionRate: number;
+  minimumScore: number;
+};
+
+export type CommercialNicheRecord = CommercialNicheData & {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CommercialNicheFilters = {
+  page: number;
+  limit: number;
+  active?: boolean;
+};
+
+export interface CommercialNicheRepository {
+  create(data: CommercialNicheData): Promise<CommercialNicheRecord>;
+  list(
+    filters: CommercialNicheFilters,
+  ): Promise<{ items: CommercialNicheRecord[]; total: number }>;
+  findById(id: string): Promise<CommercialNicheRecord | null>;
+  update(
+    id: string,
+    data: Partial<Omit<CommercialNicheData, 'slug'>>,
+  ): Promise<CommercialNicheRecord | null>;
+}
+
+export type CommercialCampaignGroupSummary = {
+  id: string;
+  name: string;
+  fingerprint: string | null;
+  active: boolean;
+  available: boolean;
+};
+
+export type CommercialCampaignNicheSummary = Pick<
+  CommercialNicheRecord,
+  'id' | 'name' | 'slug' | 'active'
+>;
+
+export type CommercialGroupCampaignData = {
+  name: string;
+  logicalGroupFingerprint: string;
+  anchorDestinationId: string | null;
+  nicheId: string;
+  active: boolean;
+  cadenceMinutes: number;
+  timezone: string;
+  allowedStartTime: string;
+  allowedEndTime: string;
+  dailyLimit: number;
+  queueTargetSize: number;
+  dedupeDays: number;
+};
+
+export type CommercialGroupCampaignRecord = CommercialGroupCampaignData & {
+  id: string;
+  niche: CommercialCampaignNicheSummary;
+  anchorDestination: CommercialCampaignGroupSummary | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CommercialGroupCampaignCreateData = Pick<
+  CommercialGroupCampaignData,
+  | 'name'
+  | 'nicheId'
+  | 'cadenceMinutes'
+  | 'timezone'
+  | 'allowedStartTime'
+  | 'allowedEndTime'
+  | 'dailyLimit'
+  | 'queueTargetSize'
+  | 'dedupeDays'
+> & { groupDestinationId: string };
+
+export type CommercialGroupCampaignUpdateData = Partial<
+  Pick<
+    CommercialGroupCampaignData,
+    | 'name'
+    | 'nicheId'
+    | 'active'
+    | 'cadenceMinutes'
+    | 'timezone'
+    | 'allowedStartTime'
+    | 'allowedEndTime'
+    | 'dailyLimit'
+    | 'queueTargetSize'
+    | 'dedupeDays'
+  >
+>;
+
+export type CommercialGroupCampaignFilters = {
+  page: number;
+  limit: number;
+  active?: boolean;
+};
+
+export interface CommercialGroupCampaignRepository {
+  createForGroup(
+    data: CommercialGroupCampaignCreateData,
+  ): Promise<CommercialGroupCampaignRecord>;
+  list(
+    filters: CommercialGroupCampaignFilters,
+  ): Promise<{ items: CommercialGroupCampaignRecord[]; total: number }>;
+  findById(id: string): Promise<CommercialGroupCampaignRecord | null>;
+  update(
+    id: string,
+    data: CommercialGroupCampaignUpdateData,
+  ): Promise<CommercialGroupCampaignRecord | null>;
+  hasEligibleDestination(logicalGroupFingerprint: string): Promise<boolean>;
+  activateIfEligible(id: string): Promise<CommercialGroupCampaignRecord | null>;
+}
+
 export type CouponSource = 'MANUAL' | 'OFFICIAL';
 export type CouponDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 

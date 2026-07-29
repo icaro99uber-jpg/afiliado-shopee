@@ -866,3 +866,20 @@ Comportamento operacional:
   `.env`. Indisponibilidades temporárias usam somente
   `docker compose stop/start`; nunca removem volumes, iniciam o worker de
   dispatch ou recuperam estados stale/ambíguos.
+
+## Nichos e campanhas por grupo lógico
+
+- `CommercialNiche` guarda critérios determinísticos para ofertas `OFFICIAL`:
+  categorias, keywords normalizadas, faixas comerciais e score mínimo.
+- O matching usa tokens e frases normalizados, com include `ANY` e exclusão
+  prioritária; não usa regex, substring arbitrária, IA ou chamadas externas.
+- `CommercialGroupCampaign` pertence ao fingerprint lógico derivado somente do
+  JID canônico do grupo. O destino âncora é uma referência interna atual, não a
+  identidade da campanha nem um vínculo permanente com uma instância Evolution.
+- A campanha nasce inativa. Ativação exige `ATIVAR_CAMPANHA`, nicho ativo e ao
+  menos um destino correspondente ativo, disponível e associado a uma instância.
+- A quantidade teórica de slots é
+  `floor((fimEmMinutos - inicioEmMinutos) / cadenceMinutes)`; o limite diário
+  não pode excedê-la.
+- Esta fundação não minera produtos, não cria copy por IA, sender assignments,
+  fila, dispatch, outbox, job ou mensagem. Esses fluxos dependem de tasks futuras.
