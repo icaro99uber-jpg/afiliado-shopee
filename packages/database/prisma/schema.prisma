@@ -29,6 +29,7 @@ model ProductLead {
   shopeeCommissionRate   Float?
   loja                   String
   shopId                 String?
+  shopType               Int[]                   @default([])
   categoryIds            String[]                @default([])
   urlImagem              String
   productLink            String?                 @map("url")

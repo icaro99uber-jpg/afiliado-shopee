@@ -54,17 +54,26 @@ describe('commercial:dry-run CLI', () => {
     });
   });
 
-  it('bloqueia provider official antes do servico', async () => {
+  it('aceita source official persistida', () => {
+    expect(parseCommercialDryRunArgs(['--source=official'])).toEqual({
+      source: 'OFFICIAL',
+    });
+  });
+
+  it('bloqueia provider official sem source persistida explicita', async () => {
     const service = { dryRun: vi.fn() };
     await expect(
       executeCommercialDryRun({
         input: {},
         provider: 'official',
         schedulerEnabled: false,
+        commercialSchedulerEnabled: false,
         groupSendEnabled: false,
         service: service as never,
       }),
-    ).rejects.toMatchObject({ code: 'SHOPEE_OFFICIAL_PROVIDER_BLOCKED' });
+    ).rejects.toMatchObject({
+      code: 'SHOPEE_OFFICIAL_PERSISTED_SOURCE_REQUIRED',
+    });
     expect(service.dryRun).not.toHaveBeenCalled();
   });
 
@@ -84,6 +93,7 @@ describe('commercial:dry-run CLI', () => {
       input: { source: 'MOCK' },
       provider: 'mock',
       schedulerEnabled: false,
+      commercialSchedulerEnabled: false,
       groupSendEnabled: false,
       service,
       syncMock,
@@ -100,6 +110,38 @@ describe('commercial:dry-run CLI', () => {
       input: { source: 'MANUAL' },
       provider: 'manual',
       schedulerEnabled: false,
+      commercialSchedulerEnabled: false,
+      groupSendEnabled: false,
+      service,
+      syncMock,
+    });
+    expect(syncMock).not.toHaveBeenCalled();
+  });
+
+  it('usa catalogo official persistido sem sincronizar a Shopee', async () => {
+    const syncMock = vi.fn();
+    const service = { dryRun: vi.fn().mockResolvedValue(safeResult) };
+    await executeCommercialDryRun({
+      input: { source: 'OFFICIAL' },
+      provider: 'official',
+      schedulerEnabled: false,
+      commercialSchedulerEnabled: false,
+      groupSendEnabled: false,
+      service,
+      syncMock,
+    });
+    expect(service.dryRun).toHaveBeenCalledWith({ source: 'OFFICIAL' });
+    expect(syncMock).not.toHaveBeenCalled();
+  });
+
+  it('nao sincroniza mock quando a source efetiva e OFFICIAL', async () => {
+    const syncMock = vi.fn();
+    const service = { dryRun: vi.fn().mockResolvedValue(safeResult) };
+    await executeCommercialDryRun({
+      input: { source: 'OFFICIAL' },
+      provider: 'mock',
+      schedulerEnabled: false,
+      commercialSchedulerEnabled: false,
       groupSendEnabled: false,
       service,
       syncMock,
@@ -138,6 +180,18 @@ describe('commercial:dry-run CLI', () => {
         input: {},
         provider: 'mock',
         schedulerEnabled: true,
+        commercialSchedulerEnabled: false,
+        groupSendEnabled: false,
+        service: { dryRun: vi.fn() } as never,
+      }),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_DRY_RUN_UNSAFE_ENVIRONMENT' });
+
+    await expect(
+      executeCommercialDryRun({
+        input: {},
+        provider: 'mock',
+        schedulerEnabled: false,
+        commercialSchedulerEnabled: true,
         groupSendEnabled: false,
         service: { dryRun: vi.fn() } as never,
       }),

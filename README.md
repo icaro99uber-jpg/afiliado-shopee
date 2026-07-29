@@ -208,11 +208,15 @@ manual com preview, catálogo público, domínio local de cupons e preview de co
 sem envio. O provider mock continua sendo o padrão e usa somente dados
 fictícios com URLs `example.invalid`.
 
-O provider oficial não implementa assinatura, headers ou HTTP. Ele permanece
-bloqueado até a conta receber credenciais e documentação. **Autenticação e
-transporte real aguardam credenciais e documentação liberada para a conta.**
-Não há scraping, automação de navegador, consulta de endpoints privados/mobile
-ou geração especulativa de links.
+O provider oficial implementa o contrato GraphQL documentado pela Shopee com
+signer SHA-256 puro, `fetch` e clock injetáveis, timeout/abort e resposta
+limitada. A configuração fica apenas no `.env` ignorado. O preflight exige modo
+preview, automação pausada, ambos os Schedulers desligados e nenhum worker/job
+de dispatch; o sync confirmado faz somente uma página de até cinco produtos,
+sem retry, pipeline ou WhatsApp. Não há scraping, consulta de endpoints
+privados/mobile ou geração especulativa de links. A captura documental local é
+efêmera, limitada aos hosts oficiais e salva apenas artefatos sanitizados
+ignorados pelo Git.
 
 Rotas locais:
 
@@ -228,8 +232,8 @@ oferece filtros, sincronização, importação JSON validada e preview marcado
 ações cria dispatch, chama fila ou envia WhatsApp.
 
 Consulte [docs/shopee-affiliate.md](docs/shopee-affiliate.md) para os campos
-públicos observados em `productOfferV2`, formato JSON/CSV, configuração, score,
-Sub_ids, cupons, limitações e plano da Task 15.2.
+confirmados em `productOfferV2`, assinatura, transporte, formato JSON/CSV,
+configuração, score, Sub_ids, cupons e limitações operacionais da Sprint 18.1.
 
 ## Score Engine
 
