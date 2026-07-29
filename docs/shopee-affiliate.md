@@ -101,6 +101,7 @@ corepack pnpm shopee:official:capture-contract
 corepack pnpm shopee:official:configure
 corepack pnpm shopee:official:preflight
 corepack pnpm shopee:official:sync -- --confirm-one-real-read
+corepack pnpm shopee:official:sync -- --confirm-second-real-read-after-fix
 ```
 
 O capture usa perfil efêmero, não salva screenshots, HAR, storage, cookies ou
@@ -109,6 +110,16 @@ produtos e exige preview, ambos os Schedulers desligados, automação desabilita
 e pausada, envio em grupo desligado e nenhum worker/job ativo de dispatch. O
 sync mantém um marcador local ignorado antes do único request, limita a cinco
 itens e compara contagens comerciais antes/depois.
+
+A segunda flag foi uma autorização diagnóstica única após a primeira resposta
+HTTP 200 ter sido registrada sem o detalhe público do erro GraphQL. Ela exige o
+marcador anterior com `SHOPEE_API_GRAPHQL_ERROR`, zero produto `OFFICIAL` e cria
+um marcador separado antes da rede; sua existência bloqueia permanentemente
+outra leitura nesta sprint. A evidência sanitizada observada em 29 de julho de
+2026 foi HTTP 200, código público `10020` e mensagem `Invalid Credential`, sem
+`data` ou nodes. Portanto, a falha foi classificada como autenticação, não como
+query, variables, permissão ou rate limit. Nenhuma alteração de signer/query é
+justificada por essa resposta e não foi feita uma terceira chamada.
 
 ## Importação manual
 
@@ -201,10 +212,12 @@ não coleta cupons e não inclui cupom automaticamente na copy nesta task.
 ## Sprint 18.1
 
 Contrato, signer, transporte, mapeamento, configuração e guardas operacionais
-foram implementados com fixtures oficiais e HTTP mockado. A única sincronização
-real controlada permanece a etapa que confirma tipos opcionais e unidade dos
-timestamps; nenhuma segunda chamada pode ser feita por conveniência. Cupons
-continuam fora do escopo enquanto não houver endpoint oficial confirmado.
+foram implementados com fixtures oficiais e HTTP mockado. As duas leituras
+controladas desta sprint foram consumidas; a última comprovou credencial
+inválida e não retornou produtos. Tipos opcionais e unidade dos timestamps
+permanecem não observados e não são deduzidos. Uma terceira chamada está
+bloqueada. Cupons continuam fora do escopo enquanto não houver endpoint oficial
+confirmado.
 
 ## Pipeline comercial dry-run — Task 16.1
 

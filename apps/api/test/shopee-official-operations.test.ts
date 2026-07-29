@@ -14,8 +14,11 @@ import {
   type ShopeeOfficialPreflightRuntime,
 } from '../src/shopee-official-preflight';
 import {
+  assertSecondReadEligibility,
+  createSanitizedResponseEvidence,
   createSingleOfficialReadFetch,
   executeShopeeOfficialSync,
+  parseShopeeOfficialSyncArgs,
   type ShopeeOfficialSyncRuntime,
 } from '../src/shopee-official-sync';
 
@@ -187,6 +190,12 @@ describe('shopee:official:sync', () => {
     reportOverrides: Record<string, unknown> = {},
   ): ShopeeOfficialSyncRuntime => ({
     preflight: vi.fn().mockResolvedValue(undefined),
+    firstReadState: vi.fn().mockReturnValue({
+      status: 'RESPONSE_RECEIVED',
+      httpStatus: 200,
+      applicationErrorCode: 'SHOPEE_API_GRAPHQL_ERROR',
+    }),
+    officialProductCount: vi.fn().mockResolvedValue(0),
     protectedCounts: vi.fn().mockResolvedValue(counts),
     sync: vi.fn().mockResolvedValue({
       source: 'official',
@@ -205,18 +214,34 @@ describe('shopee:official:sync', () => {
   });
 
   it('exige flag exata antes do preflight', async () => {
-    const fake = runtime();
-    await expect(
-      executeShopeeOfficialSync({ args: [], env: {}, runtime: fake }),
-    ).rejects.toMatchObject({ code: 'SHOPEE_OFFICIAL_CONFIRMATION_REQUIRED' });
-    expect(fake.preflight).not.toHaveBeenCalled();
+    expect(() => parseShopeeOfficialSyncArgs([])).toThrowError(
+      expect.objectContaining({ code: 'SHOPEE_OFFICIAL_CONFIRMATION_REQUIRED' }),
+    );
+  });
+
+  it('aceita somente as duas autorizacoes explicitas', () => {
+    expect(parseShopeeOfficialSyncArgs(['--confirm-one-real-read'])).toBe(
+      'first',
+    );
+    expect(
+      parseShopeeOfficialSyncArgs([
+        '--',
+        '--confirm-second-real-read-after-fix',
+      ]),
+    ).toBe('second');
+    expect(() =>
+      parseShopeeOfficialSyncArgs([
+        '--confirm-one-real-read',
+        '--confirm-second-real-read-after-fix',
+      ]),
+    ).toThrow();
   });
 
   it('bloqueia CI antes do preflight', async () => {
     const fake = runtime();
     await expect(
       executeShopeeOfficialSync({
-        args: ['--confirm-one-real-read'],
+        attempt: 'first',
         env: { CI: 'true' },
         runtime: fake,
       }),
@@ -227,7 +252,7 @@ describe('shopee:official:sync', () => {
   it('retorna somente relatorio sanitizado e preserva estados comerciais', async () => {
     const fake = runtime();
     const result = await executeShopeeOfficialSync({
-      args: ['--', '--confirm-one-real-read'],
+      attempt: 'first',
       env: {},
       runtime: fake,
     });
@@ -251,7 +276,7 @@ describe('shopee:official:sync', () => {
   it('bloqueia mais de cinco produtos e efeitos comerciais', async () => {
     await expect(
       executeShopeeOfficialSync({
-        args: ['--confirm-one-real-read'],
+        attempt: 'first',
         env: {},
         runtime: runtime({ fetched: 6 }),
       }),
@@ -263,11 +288,26 @@ describe('shopee:official:sync', () => {
       .mockResolvedValueOnce({ ...counts, whatsappDispatches: 6 });
     await expect(
       executeShopeeOfficialSync({
-        args: ['--confirm-one-real-read'],
+        attempt: 'first',
         env: {},
         runtime: fake,
       }),
     ).rejects.toMatchObject({ code: 'SHOPEE_OFFICIAL_FORBIDDEN_SIDE_EFFECT' });
+  });
+
+  it('revalida efeitos comerciais mesmo quando a leitura falha', async () => {
+    const fake = runtime();
+    vi.mocked(fake.sync).mockRejectedValueOnce(
+      new Error('falha GraphQL sanitizada'),
+    );
+    await expect(
+      executeShopeeOfficialSync({
+        attempt: 'first',
+        env: {},
+        runtime: fake,
+      }),
+    ).rejects.toThrow('falha GraphQL sanitizada');
+    expect(fake.protectedCounts).toHaveBeenCalledTimes(2);
   });
 
   it('faz uma unica chamada HTTP e bloqueia repeticao local', async () => {
@@ -284,9 +324,19 @@ describe('shopee:official:sync', () => {
       statePath,
       now: () => new Date('2026-07-28T12:00:00.000Z'),
     });
-    await guardedFetch(SHOPEE_AFFILIATE_OFFICIAL_API_URL);
+    const requestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operationName: 'ProductOfferV2',
+        query:
+          'query ProductOfferV2 { productOfferV2(page: 1, limit: 5) { nodes { offerLink } } }',
+        variables: {},
+      }),
+    };
+    await guardedFetch(SHOPEE_AFFILIATE_OFFICIAL_API_URL, requestInit);
     await expect(
-      guardedFetch(SHOPEE_AFFILIATE_OFFICIAL_API_URL),
+      guardedFetch(SHOPEE_AFFILIATE_OFFICIAL_API_URL, requestInit),
     ).rejects.toMatchObject({ code: 'SHOPEE_OFFICIAL_MULTIPLE_READS_BLOCKED' });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(readFileSync(statePath, 'utf8')).toContain('RESPONSE_RECEIVED');
@@ -297,10 +347,177 @@ describe('shopee:official:sync', () => {
       statePath,
     });
     await expect(
-      nextGuard(SHOPEE_AFFILIATE_OFFICIAL_API_URL),
+      nextGuard(SHOPEE_AFFILIATE_OFFICIAL_API_URL, requestInit),
     ).rejects.toMatchObject({
       code: 'SHOPEE_OFFICIAL_REAL_READ_ALREADY_CLAIMED',
     });
     expect(nextProcessFetch).not.toHaveBeenCalled();
+  });
+
+  it('exige evidencia da primeira falha e zero produto para a segunda leitura', () => {
+    expect(() =>
+      assertSecondReadEligibility({
+        firstState: {
+          status: 'RESPONSE_RECEIVED',
+          httpStatus: 200,
+          applicationErrorCode: 'SHOPEE_API_GRAPHQL_ERROR',
+        },
+        officialProductCount: 0,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertSecondReadEligibility({
+        firstState: { status: 'RESPONSE_RECEIVED', httpStatus: 200 },
+        officialProductCount: 0,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE',
+      }),
+    );
+    expect(() =>
+      assertSecondReadEligibility({
+        firstState: {
+          status: 'RESPONSE_RECEIVED',
+          httpStatus: 200,
+          applicationErrorCode: 'SHOPEE_API_GRAPHQL_ERROR',
+        },
+        officialProductCount: 1,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_SECOND_READ_PRODUCTS_EXIST',
+      }),
+    );
+  });
+
+  it('persiste somente request e erro GraphQL sanitizados', async () => {
+    const directory = join(
+      process.cwd(),
+      '.runtime',
+      'shopee-official-contract',
+    );
+    const suffix = `${process.pid}-${Date.now()}`;
+    const statePath = join(directory, `test-second-state-${suffix}.json`);
+    const diagnosticPath = join(
+      directory,
+      `test-second-diagnostic-${suffix}.json`,
+    );
+    temporaryPaths.push(statePath, diagnosticPath);
+    const secret = 'fixture-secret-that-must-not-survive';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          errors: [
+            {
+              message: `invalid signature ${secret}`,
+              path: ['productOfferV2'],
+              extensions: { code: 10020 },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const guardedFetch = createSingleOfficialReadFetch({
+      fetchImplementation: fetchMock,
+      statePath,
+      diagnosticPath,
+      sensitiveValues: ['fixture-app-id', secret],
+      justification: 'TESTED_QUERY_FIX',
+      now: () => new Date('2026-07-29T12:00:00.000Z'),
+    });
+    await guardedFetch(SHOPEE_AFFILIATE_OFFICIAL_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: 'sensitive-header-value',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        operationName: 'ProductOfferV2',
+        query:
+          'query ProductOfferV2($page: Int!, $limit: Int!) { productOfferV2(page: $page, limit: $limit) { nodes { offerLink } pageInfo { page limit hasNextPage scrollId } } }',
+        variables: { page: 1, limit: 5 },
+      }),
+    });
+    const artifact = readFileSync(diagnosticPath, 'utf8');
+    expect(artifact).toContain('ProductOfferV2');
+    expect(artifact).toContain('bodySha256');
+    expect(artifact).toContain('authorization');
+    expect(artifact).toContain('10020');
+    expect(artifact).toContain('Invalid Signature');
+    expect(artifact).not.toContain(secret);
+    expect(artifact).not.toContain('sensitive-header-value');
+    expect(readFileSync(statePath, 'utf8')).toContain(
+      'SHOPEE_API_GRAPHQL_ERROR',
+    );
+  });
+
+  it('permite somente um claim entre processos concorrentes', async () => {
+    const statePath = join(
+      process.cwd(),
+      '.runtime',
+      'shopee-official-contract',
+      `test-concurrent-second-${process.pid}-${Date.now()}.json`,
+    );
+    temporaryPaths.push(statePath);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    const request = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operationName: 'ProductOfferV2',
+        query:
+          'query ProductOfferV2 { productOfferV2(page: 1, limit: 5) { nodes { offerLink } } }',
+        variables: {},
+      }),
+    };
+    const first = createSingleOfficialReadFetch({
+      fetchImplementation: fetchMock,
+      statePath,
+    });
+    const second = createSingleOfficialReadFetch({
+      fetchImplementation: fetchMock,
+      statePath,
+    });
+    const results = await Promise.allSettled([
+      first(SHOPEE_AFFILIATE_OFFICIAL_API_URL, request),
+      second(SHOPEE_AFFILIATE_OFFICIAL_API_URL, request),
+    ]);
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(
+      1,
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('resume sucesso sem persistir offerLink', () => {
+    const evidence = createSanitizedResponseEvidence(200, {
+      data: {
+        productOfferV2: {
+          nodes: [{ offerLink: 'https://affiliate.example/private' }],
+          pageInfo: {
+            page: 1,
+            limit: 5,
+            hasNextPage: false,
+            scrollId: 'opaque',
+          },
+        },
+      },
+    });
+    expect(evidence).toMatchObject({
+      dataPresent: true,
+      graphqlErrorCount: 0,
+      nodeCount: 1,
+      offerLinkPresentCount: 1,
+      pageInfoTypes: {
+        page: 'number',
+        limit: 'number',
+        hasNextPage: 'boolean',
+        scrollId: 'string',
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain('affiliate.example');
   });
 });

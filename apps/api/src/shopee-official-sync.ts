@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   mkdirSync,
   openSync,
+  readFileSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,7 +14,9 @@ import type { AppEnv } from '@shopee-auto-affiliate-ai/config';
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import {
   OfficialShopeeAffiliateOfferProvider,
+  SHOPEE_AFFILIATE_OFFICIAL_API_URL,
   SHOPEE_AFFILIATE_REAL_READ_LIMIT,
+  SHOPEE_AFFILIATE_RESPONSE_LIMIT_BYTES,
   type OfficialShopeeAffiliateFetch,
 } from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
@@ -26,15 +30,29 @@ import {
   ShopeeOfferSyncService,
   type ShopeeOfferSyncReport,
 } from './shopee-offer-sync-service';
+import {
+  assertSanitizedArtifact,
+  describeJsonShape,
+  sanitizeDocumentationText,
+  sanitizeGraphqlPayload,
+  sanitizeOfficialUrl,
+} from './shopee-official-contract-sanitizer';
 
-const CONFIRM_FLAG = '--confirm-one-real-read';
+const FIRST_CONFIRM_FLAG = '--confirm-one-real-read';
+const SECOND_CONFIRM_FLAG = '--confirm-second-real-read-after-fix';
+export type ShopeeOfficialReadAttempt = 'first' | 'second';
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const STATE_DIRECTORY = join(
   REPOSITORY_ROOT,
   '.runtime',
   'shopee-official-contract',
 );
-const STATE_PATH = join(STATE_DIRECTORY, 'real-read-state.json');
+const FIRST_STATE_PATH = join(STATE_DIRECTORY, 'real-read-state.json');
+const SECOND_STATE_PATH = join(STATE_DIRECTORY, 'second-real-read-state.json');
+const SECOND_DIAGNOSTIC_PATH = join(
+  STATE_DIRECTORY,
+  'second-real-read-diagnostic.sanitized.json',
+);
 const CONTRACT_EVIDENCE_PATH = join(
   STATE_DIRECTORY,
   'real-response-contract.sanitized.json',
@@ -64,6 +82,8 @@ export type SanitizedShopeeOfficialSyncReport = Pick<
 
 export type ShopeeOfficialSyncRuntime = {
   preflight(): Promise<void>;
+  firstReadState(): unknown;
+  officialProductCount(): Promise<number>;
   protectedCounts(): Promise<ProtectedCounts>;
   sync(): Promise<ShopeeOfferSyncReport>;
   close(): Promise<void>;
@@ -71,19 +91,23 @@ export type ShopeeOfficialSyncRuntime = {
 
 const blocked = (code: string, message: string) => new AppError(message, code);
 
-export const parseShopeeOfficialSyncArgs = (args: readonly string[]) => {
+export const parseShopeeOfficialSyncArgs = (
+  args: readonly string[],
+): ShopeeOfficialReadAttempt => {
   const separators = args.filter((argument) => argument === '--').length;
   const normalized = args.filter((argument) => argument !== '--');
-  if (
-    separators > 1 ||
-    normalized.length !== 1 ||
-    normalized[0] !== CONFIRM_FLAG
-  ) {
+  if (separators > 1 || normalized.length !== 1) {
     throw blocked(
       'SHOPEE_OFFICIAL_CONFIRMATION_REQUIRED',
-      `A flag exata ${CONFIRM_FLAG} e obrigatoria`,
+      `Uma flag de confirmacao exata e obrigatoria`,
     );
   }
+  if (normalized[0] === FIRST_CONFIRM_FLAG) return 'first';
+  if (normalized[0] === SECOND_CONFIRM_FLAG) return 'second';
+  throw blocked(
+    'SHOPEE_OFFICIAL_CONFIRMATION_REQUIRED',
+    `Uma flag de confirmacao exata e obrigatoria`,
+  );
 };
 
 const writeAtomicState = (path: string, value: Record<string, unknown>) => {
@@ -116,13 +140,92 @@ const assertStateDirectoryIgnored = () => {
   }
 };
 
+const sanitizedRequestVariables = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {};
+  }
+  const variables = (payload as Record<string, unknown>).variables;
+  if (!variables || typeof variables !== 'object' || Array.isArray(variables)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(variables).map(([key, value]) => [
+      key,
+      (key === 'page' || key === 'limit') &&
+      typeof value === 'number' &&
+      Number.isSafeInteger(value)
+        ? value
+        : describeJsonShape(value, key),
+    ]),
+  );
+};
+
+const readLimitedDiagnosticBody = async (
+  response: Response,
+  signal: AbortSignal,
+) => {
+  const declaredLength = Number(response.headers.get('content-length') ?? 0);
+  if (declaredLength > SHOPEE_AFFILIATE_RESPONSE_LIMIT_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw blocked(
+      'SHOPEE_OFFICIAL_DIAGNOSTIC_RESPONSE_TOO_LARGE',
+      'Resposta excedeu o limite seguro de diagnostico',
+    );
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let rejectOnAbort: ((reason?: unknown) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectOnAbort = reject;
+  });
+  const handleAbort = () =>
+    rejectOnAbort?.(new DOMException('aborted', 'AbortError'));
+  signal.addEventListener('abort', handleAbort, { once: true });
+  try {
+    if (signal.aborted) handleAbort();
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > SHOPEE_AFFILIATE_RESPONSE_LIMIT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw blocked(
+          'SHOPEE_OFFICIAL_DIAGNOSTIC_RESPONSE_TOO_LARGE',
+          'Resposta excedeu o limite seguro de diagnostico',
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (signal.aborted) await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', handleAbort);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+};
+
 export const createSingleOfficialReadFetch = ({
   fetchImplementation = fetch,
-  statePath = STATE_PATH,
+  statePath = FIRST_STATE_PATH,
+  diagnosticPath,
+  sensitiveValues = [],
+  justification,
   now = () => new Date(),
 }: {
   fetchImplementation?: OfficialShopeeAffiliateFetch;
   statePath?: string;
+  diagnosticPath?: string;
+  sensitiveValues?: readonly string[];
+  justification?: string;
   now?: () => Date;
 } = {}): OfficialShopeeAffiliateFetch => {
   let calls = 0;
@@ -159,12 +262,81 @@ export const createSingleOfficialReadFetch = ({
       closeSync(descriptor);
     }
     try {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = init?.method?.toUpperCase() ?? 'GET';
+      if (
+        sanitizeOfficialUrl(url) !== SHOPEE_AFFILIATE_OFFICIAL_API_URL ||
+        method !== 'POST' ||
+        typeof init?.body !== 'string'
+      ) {
+        throw blocked(
+          'SHOPEE_OFFICIAL_REQUEST_CONTRACT_INVALID',
+          'Contrato HTTP oficial invalido',
+        );
+      }
+      const body = init.body;
+      const requestPayload = JSON.parse(body) as unknown;
+      const headerNames: string[] = [];
+      new Headers(init.headers).forEach((_value, name) =>
+        headerNames.push(name),
+      );
+      const requestEvidence = {
+        endpoint: sanitizeOfficialUrl(url),
+        method,
+        ...sanitizeGraphqlPayload(requestPayload),
+        variables: sanitizedRequestVariables(requestPayload),
+        bodySha256: createHash('sha256').update(body).digest('hex'),
+        headerNames: headerNames.sort(),
+      };
+      if (diagnosticPath) {
+        const requestArtifact = {
+          capturedAt: now().toISOString(),
+          ...(justification ? { justification } : {}),
+          request: requestEvidence,
+          response: null,
+        };
+        assertSanitizedArtifact(requestArtifact);
+        writeAtomicState(diagnosticPath, requestArtifact);
+      }
       const response = await fetchImplementation(input, init);
+      let responseEvidence: Record<string, unknown> | undefined;
+      try {
+        const responseText = await readLimitedDiagnosticBody(
+          response.clone(),
+          init?.signal ?? new AbortController().signal,
+        );
+        const parsed = JSON.parse(responseText) as unknown;
+        responseEvidence = createSanitizedResponseEvidence(
+          response.status,
+          parsed,
+          sensitiveValues,
+        );
+        if (diagnosticPath) {
+          const responseArtifact = {
+            capturedAt: now().toISOString(),
+            ...(justification ? { justification } : {}),
+            request: requestEvidence,
+            response: responseEvidence,
+          };
+          assertSanitizedArtifact(responseArtifact);
+          writeAtomicState(diagnosticPath, responseArtifact);
+        }
+      } catch {
+        throw blocked(
+          'SHOPEE_OFFICIAL_DIAGNOSTIC_SANITIZATION_FAILED',
+          'Resposta nao pode ser sanitizada com seguranca',
+        );
+      }
       writeAtomicState(statePath, {
         status: 'RESPONSE_RECEIVED',
         receivedAt: now().toISOString(),
         httpStatus: response.status,
         maximumProducts: SHOPEE_AFFILIATE_REAL_READ_LIMIT,
+        ...(justification ? { justification } : {}),
+        graphqlErrorCodes: responseEvidence.graphqlErrorCodes ?? [],
+        ...(responseEvidence.graphqlErrorCount
+          ? { applicationErrorCode: 'SHOPEE_API_GRAPHQL_ERROR' }
+          : {}),
       });
       return response;
     } catch (error) {
@@ -178,6 +350,182 @@ export const createSingleOfficialReadFetch = ({
   }) as OfficialShopeeAffiliateFetch;
 };
 
+const redactExactValues = (value: string, sensitiveValues: readonly string[]) =>
+  sensitiveValues.reduce(
+    (result, sensitive) =>
+      sensitive ? result.split(sensitive).join('[REMOVIDO]') : result,
+    value,
+  );
+
+const publicGraphqlCode = (value: unknown) => {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string' && /^\d{1,10}$/.test(value)) return value;
+  return null;
+};
+
+const sanitizeGraphqlPath = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .slice(0, 20)
+        .map((part) =>
+          typeof part === 'number'
+            ? part
+            : typeof part === 'string'
+              ? sanitizeDocumentationText(part).slice(0, 100)
+              : '[REMOVIDO]',
+        )
+    : null;
+
+export const classifyShopeeGraphqlError = (
+  code: string | number | null,
+  message: string,
+) => {
+  const normalizedCode = code === null ? '' : String(code);
+  const normalizedMessage = message.toLowerCase();
+  if (normalizedCode === '10030') return 'RATE_LIMIT';
+  if (normalizedCode === '10010') {
+    return /variable/.test(normalizedMessage) ? 'VARIABLES' : 'QUERY';
+  }
+  if (normalizedCode === '10020') {
+    if (/timestamp|expired|clock/.test(normalizedMessage)) return 'TIMESTAMP';
+    if (/signature|sign/.test(normalizedMessage)) return 'SIGNATURE';
+    return 'AUTHENTICATION';
+  }
+  if (
+    normalizedCode === '11000' ||
+    /permission|forbidden|activate/.test(normalizedMessage)
+  ) {
+    return 'PERMISSION';
+  }
+  return 'UNCLASSIFIED';
+};
+
+const sanitizedGraphqlMessage = (message: string) => {
+  const normalized = message.toLowerCase();
+  if (/invalid credential/.test(normalized)) return 'Invalid Credential';
+  if (/invalid signature/.test(normalized)) return 'Invalid Signature';
+  if (/timestamp|expired|clock/.test(normalized)) return 'Invalid Timestamp';
+  if (/rate limit|too many request/.test(normalized)) return 'Rate Limit';
+  if (/permission|forbidden|activate/.test(normalized)) return 'Permission';
+  if (/variable/.test(normalized)) return 'Invalid Variables';
+  if (/query/.test(normalized)) return 'Invalid Query';
+  return 'GraphQL error message redacted';
+};
+
+export const createSanitizedResponseEvidence = (
+  httpStatus: number,
+  value: unknown,
+  sensitiveValues: readonly string[] = [],
+) => {
+  const envelope =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const rawErrors = Array.isArray(envelope.errors) ? envelope.errors : [];
+  const errors = rawErrors.slice(0, 20).map((error) => {
+    const record =
+      error && typeof error === 'object' && !Array.isArray(error)
+        ? (error as Record<string, unknown>)
+        : {};
+    const extensions =
+      record.extensions &&
+      typeof record.extensions === 'object' &&
+      !Array.isArray(record.extensions)
+        ? (record.extensions as Record<string, unknown>)
+        : {};
+    const sanitizedMessage =
+      typeof record.message === 'string'
+        ? sanitizeDocumentationText(
+            redactExactValues(record.message, sensitiveValues),
+          ).slice(0, 300)
+        : 'Erro GraphQL sem mensagem publica';
+    const code = publicGraphqlCode(extensions.code);
+    return {
+      code,
+      path: sanitizeGraphqlPath(record.path),
+      message: sanitizedGraphqlMessage(sanitizedMessage),
+      classification: classifyShopeeGraphqlError(code, sanitizedMessage),
+    };
+  });
+  const data =
+    envelope.data &&
+    typeof envelope.data === 'object' &&
+    !Array.isArray(envelope.data)
+      ? (envelope.data as Record<string, unknown>)
+      : undefined;
+  const offer =
+    data?.productOfferV2 &&
+    typeof data.productOfferV2 === 'object' &&
+    !Array.isArray(data.productOfferV2)
+      ? (data.productOfferV2 as Record<string, unknown>)
+      : undefined;
+  const nodes = Array.isArray(offer?.nodes)
+    ? offer.nodes.slice(0, SHOPEE_AFFILIATE_REAL_READ_LIMIT)
+    : [];
+  const pageInfo =
+    offer?.pageInfo &&
+    typeof offer.pageInfo === 'object' &&
+    !Array.isArray(offer.pageInfo)
+      ? (offer.pageInfo as Record<string, unknown>)
+      : {};
+  const evidence = {
+    httpStatus,
+    graphqlErrorCount: errors.length,
+    graphqlErrorCodes: errors.flatMap(({ code }) =>
+      code === null ? [] : [code],
+    ),
+    errors,
+    dataPresent: Object.prototype.hasOwnProperty.call(envelope, 'data'),
+    dataShape: describeJsonShape(envelope.data ?? null),
+    nodeCount: nodes.length,
+    pageInfoTypes: Object.fromEntries(
+      ['page', 'limit', 'hasNextPage', 'scrollId'].map((key) => [
+        key,
+        typeof pageInfo[key],
+      ]),
+    ),
+    offerLinkPresentCount: nodes.filter(
+      (node) =>
+        node &&
+        typeof node === 'object' &&
+        !Array.isArray(node) &&
+        typeof (node as Record<string, unknown>).offerLink === 'string' &&
+        ((node as Record<string, unknown>).offerLink as string).length > 0,
+    ).length,
+  };
+  assertSanitizedArtifact(evidence);
+  return evidence;
+};
+
+export const assertSecondReadEligibility = ({
+  firstState,
+  officialProductCount,
+}: {
+  firstState: unknown;
+  officialProductCount: number;
+}) => {
+  const state =
+    firstState && typeof firstState === 'object' && !Array.isArray(firstState)
+      ? (firstState as Record<string, unknown>)
+      : {};
+  if (
+    state.status !== 'RESPONSE_RECEIVED' ||
+    state.httpStatus !== 200 ||
+    state.applicationErrorCode !== 'SHOPEE_API_GRAPHQL_ERROR'
+  ) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE',
+      'Primeira tentativa nao comprova HTTP 200 com erro GraphQL',
+    );
+  }
+  if (officialProductCount !== 0) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_SECOND_READ_PRODUCTS_EXIST',
+      'A primeira tentativa persistiu produtos oficiais',
+    );
+  }
+};
+
 const protectedCountsEqual = (
   before: ProtectedCounts,
   after: ProtectedCounts,
@@ -187,13 +535,13 @@ const protectedCountsEqual = (
   );
 
 export const executeShopeeOfficialSync = async ({
-  args,
   env,
   runtime,
+  attempt,
 }: {
-  args: readonly string[];
   env: NodeJS.ProcessEnv;
   runtime: ShopeeOfficialSyncRuntime;
+  attempt: ShopeeOfficialReadAttempt;
 }): Promise<SanitizedShopeeOfficialSyncReport> => {
   if (env.CI) {
     throw blocked(
@@ -201,10 +549,27 @@ export const executeShopeeOfficialSync = async ({
       'Consulta oficial bloqueada em CI',
     );
   }
-  parseShopeeOfficialSyncArgs(args);
   await runtime.preflight();
+  if (attempt === 'second') {
+    assertSecondReadEligibility({
+      firstState: runtime.firstReadState(),
+      officialProductCount: await runtime.officialProductCount(),
+    });
+  }
   const before = await runtime.protectedCounts();
-  const report = await runtime.sync();
+  let report: ShopeeOfferSyncReport;
+  try {
+    report = await runtime.sync();
+  } catch (error) {
+    const afterFailure = await runtime.protectedCounts();
+    if (!protectedCountsEqual(before, afterFailure)) {
+      throw blocked(
+        'SHOPEE_OFFICIAL_FORBIDDEN_SIDE_EFFECT',
+        'A consulta com falha alterou estado comercial proibido',
+      );
+    }
+    throw error;
+  }
   const after = await runtime.protectedCounts();
   if (!protectedCountsEqual(before, after)) {
     throw blocked(
@@ -238,6 +603,7 @@ export const executeShopeeOfficialSync = async ({
 
 export const createShopeeOfficialSyncRuntime = (
   config: AppEnv,
+  attempt: ShopeeOfficialReadAttempt = 'first',
 ): ShopeeOfficialSyncRuntime => {
   const prisma = createPrismaClient();
   const preflightRuntime = createShopeeOfficialPreflightRuntime(config);
@@ -246,7 +612,20 @@ export const createShopeeOfficialSyncRuntime = (
     apiUrl: config.SHOPEE_AFFILIATE_API_URL,
     appId: config.SHOPEE_AFFILIATE_APP_ID,
     secret: config.SHOPEE_AFFILIATE_SECRET,
-    fetch: createSingleOfficialReadFetch(),
+    fetch: createSingleOfficialReadFetch({
+      statePath: attempt === 'second' ? SECOND_STATE_PATH : FIRST_STATE_PATH,
+      ...(attempt === 'second'
+        ? {
+            diagnosticPath: SECOND_DIAGNOSTIC_PATH,
+            sensitiveValues: [
+              config.SHOPEE_AFFILIATE_APP_ID as string,
+              config.SHOPEE_AFFILIATE_SECRET as string,
+            ],
+            justification:
+              'SANITIZED_GRAPHQL_ERROR_CAPTURE_ADDED_AFTER_FIRST_HTTP_200',
+          }
+        : {}),
+    }),
     onObservedContract: (contract) =>
       writeAtomicState(CONTRACT_EVIDENCE_PATH, {
         observedAt: new Date().toISOString(),
@@ -268,6 +647,19 @@ export const createShopeeOfficialSyncRuntime = (
         config,
         runtime: preflightRuntime,
       });
+    },
+    firstReadState() {
+      try {
+        return JSON.parse(readFileSync(FIRST_STATE_PATH, 'utf8')) as unknown;
+      } catch {
+        throw blocked(
+          'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE',
+          'Marcador sanitizado da primeira tentativa indisponivel',
+        );
+      }
+    },
+    async officialProductCount() {
+      return prisma.productLead.count({ where: { source: 'OFFICIAL' } });
     },
     async protectedCounts() {
       const [
@@ -300,14 +692,17 @@ export const createShopeeOfficialSyncRuntime = (
   };
 };
 
-export const runShopeeOfficialSync = async ({
+const runShopeeOfficialSyncAttempt = async ({
   args = process.argv.slice(2),
   env = process.env,
   runtimeFactory = createShopeeOfficialSyncRuntime,
 }: {
   args?: readonly string[];
   env?: NodeJS.ProcessEnv;
-  runtimeFactory?: (config: AppEnv) => ShopeeOfficialSyncRuntime;
+  runtimeFactory?: (
+    config: AppEnv,
+    attempt: ShopeeOfficialReadAttempt,
+  ) => ShopeeOfficialSyncRuntime;
 } = {}) => {
   if (env.CI) {
     throw blocked(
@@ -315,29 +710,39 @@ export const runShopeeOfficialSync = async ({
       'Consulta oficial bloqueada em CI',
     );
   }
-  parseShopeeOfficialSyncArgs(args);
+  const attempt = parseShopeeOfficialSyncArgs(args);
   const config = loadShopeeOfficialConfig(env);
   process.env.DATABASE_URL ??= config.DATABASE_URL;
-  const runtime = runtimeFactory(config);
+  const runtime = runtimeFactory(config, attempt);
   try {
-    return await executeShopeeOfficialSync({ args, env, runtime });
+    return {
+      attempt,
+      result: await executeShopeeOfficialSync({ env, runtime, attempt }),
+    };
   } finally {
     await runtime.close();
   }
 };
+
+export const runShopeeOfficialSync = async (
+  options: Parameters<typeof runShopeeOfficialSyncAttempt>[0] = {},
+) => (await runShopeeOfficialSyncAttempt(options)).result;
 
 const isDirectExecution =
   process.argv[1] &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 
 if (isDirectExecution) {
-  runShopeeOfficialSync()
-    .then((result) => {
-      writeAtomicState(STATE_PATH, {
-        status: 'COMPLETED',
-        completedAt: new Date().toISOString(),
-        ...result,
-      });
+  runShopeeOfficialSyncAttempt()
+    .then(({ attempt, result }) => {
+      writeAtomicState(
+        attempt === 'second' ? SECOND_STATE_PATH : FIRST_STATE_PATH,
+        {
+          status: 'COMPLETED',
+          completedAt: new Date().toISOString(),
+          ...result,
+        },
+      );
       console.log(JSON.stringify(result));
     })
     .catch((error) => {

@@ -45,9 +45,9 @@ export const parseCommercialDryRunArgs = (
   for (const argument of normalized) {
     if (argument.startsWith('--source=')) {
       const source = argument.slice('--source='.length).toUpperCase();
-      if (!['MOCK', 'MANUAL'].includes(source))
+      if (!['MOCK', 'MANUAL', 'OFFICIAL'].includes(source))
         throw new AppError('source invalido', 'INVALID_PIPELINE_FILTERS');
-      input.source = source as 'MOCK' | 'MANUAL';
+      input.source = source as 'MOCK' | 'MANUAL' | 'OFFICIAL';
     } else if (argument.startsWith('--minimum-score=')) {
       input.minimumScore = Number(argument.slice('--minimum-score='.length));
     } else if (argument.startsWith('--campaign=')) {
@@ -72,6 +72,7 @@ export const executeCommercialDryRun = async ({
   input,
   provider,
   schedulerEnabled,
+  commercialSchedulerEnabled,
   groupSendEnabled,
   service,
   syncMock,
@@ -79,23 +80,24 @@ export const executeCommercialDryRun = async ({
   input: CommercialPipelineInput;
   provider: 'mock' | 'manual' | 'official';
   schedulerEnabled: boolean;
+  commercialSchedulerEnabled: boolean;
   groupSendEnabled: boolean;
   service: CommercialDryRunExecutable;
   syncMock?: () => Promise<unknown>;
 }) => {
-  if (provider === 'official') {
+  if (provider === 'official' && input.source !== 'OFFICIAL') {
     throw new AppError(
-      'Provider official bloqueado no dry-run comercial',
-      'SHOPEE_OFFICIAL_PROVIDER_BLOCKED',
+      'Provider official exige source OFFICIAL persistida',
+      'SHOPEE_OFFICIAL_PERSISTED_SOURCE_REQUIRED',
     );
   }
-  if (schedulerEnabled || groupSendEnabled) {
+  if (schedulerEnabled || commercialSchedulerEnabled || groupSendEnabled) {
     throw new AppError(
       'Scheduler e envio para grupos devem permanecer desativados',
       'COMMERCIAL_DRY_RUN_UNSAFE_ENVIRONMENT',
     );
   }
-  if (provider === 'mock') await syncMock?.();
+  if (provider === 'mock' && input.source === 'MOCK') await syncMock?.();
   return service.dryRun(input);
 };
 
@@ -115,12 +117,6 @@ export const runCommercialDryRun = async (
   const configuredProvider = String(
     mergedEnv.SHOPEE_AFFILIATE_PROVIDER ?? 'mock',
   ).toLocaleLowerCase();
-  if (configuredProvider === 'official') {
-    throw new AppError(
-      'Provider official bloqueado no dry-run comercial',
-      'SHOPEE_OFFICIAL_PROVIDER_BLOCKED',
-    );
-  }
   const config = loadConfig(mergedEnv);
   process.env.DATABASE_URL ??= config.DATABASE_URL;
   safeLogger.info({
@@ -165,10 +161,16 @@ export const runCommercialDryRun = async (
       input: {
         ...input,
         source:
-          input.source ?? (configuredProvider === 'manual' ? 'MANUAL' : 'MOCK'),
+          input.source ??
+          (configuredProvider === 'official'
+            ? 'OFFICIAL'
+            : configuredProvider === 'manual'
+              ? 'MANUAL'
+              : 'MOCK'),
       },
-      provider: configuredProvider as 'mock' | 'manual',
+      provider: configuredProvider as 'mock' | 'manual' | 'official',
       schedulerEnabled: config.SCHEDULER_ENABLED,
+      commercialSchedulerEnabled: config.COMMERCIAL_SCHEDULER_ENABLED,
       groupSendEnabled: config.WHATSAPP_GROUP_SEND_ENABLED,
       service,
       syncMock:

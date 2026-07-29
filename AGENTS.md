@@ -62,6 +62,9 @@ Segurança operacional:
   WhatsApp.
 - O sync oficial controlado exige preflight, uma flag exata, no máximo uma
   página/cinco produtos e um marcador local que bloqueia repetição.
+- As duas leituras reais da Sprint 18.1 foram consumidas. A segunda retornou
+  HTTP 200 com erro público `10020` (`Invalid Credential`), sem dados ou
+  produtos persistidos; uma terceira leitura permanece bloqueada.
 - Importação CLI é dry-run por padrão e grava somente com `--confirm-import`.
 - `official` nunca inventa assinatura, headers, URL GraphQL ou rate limit.
 - Sub_ids são metadados separados; links manuais nunca são alterados.
@@ -647,8 +650,9 @@ Persistencia e operacao:
 - `POST /commercial-pipeline/dry-run` e as rotas de historico nao recebem fila,
   dispatch, Scheduler, Sender ou provider Evolution.
 - `corepack pnpm commercial:dry-run` usa PostgreSQL local, sincroniza apenas o
-  mock ficticio quando selecionado e bloqueia official, Scheduler, group send e
-  flags de confirmacao/envio.
+  mock ficticio quando selecionado e permite `--source=official` somente sobre
+  dados já persistidos, sem chamar a Shopee. Scheduler, group send e flags de
+  confirmacao/envio permanecem bloqueados.
 - O dashboard oferece somente executar dry-run, copiar preview e consultar
   historico.
 
