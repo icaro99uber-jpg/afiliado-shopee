@@ -102,7 +102,12 @@ corepack pnpm shopee:official:configure
 corepack pnpm shopee:official:preflight
 corepack pnpm shopee:official:sync -- --confirm-one-real-read
 corepack pnpm shopee:official:sync -- --confirm-second-real-read-after-fix
+corepack pnpm shopee:official:sync -- --confirm-final-real-read-after-auth-fix
 ```
+
+As três flags de sync registram autorizações históricas de uso único. Seus
+marcadores já existentes impedem reexecução; o bloco não é um roteiro para
+repetir chamadas consumidas.
 
 O capture usa perfil efêmero, não salva screenshots, HAR, storage, cookies ou
 headers brutos e bloqueia POST GraphQL antes da rede. O preflight não lista
@@ -118,8 +123,25 @@ um marcador separado antes da rede; sua existência bloqueia permanentemente
 outra leitura nesta sprint. A evidência sanitizada observada em 29 de julho de
 2026 foi HTTP 200, código público `10020` e mensagem `Invalid Credential`, sem
 `data` ou nodes. Portanto, a falha foi classificada como autenticação, não como
-query, variables, permissão ou rate limit. Nenhuma alteração de signer/query é
-justificada por essa resposta e não foi feita uma terceira chamada.
+query, variables, permissão ou rate limit. Naquele checkpoint, nenhuma alteração
+de signer/query era justificada e nenhuma terceira chamada havia sido feita.
+
+A autorização final exige o marcador preservado da segunda tentativa com HTTP
+200 e erro `10020`, zero produto `OFFICIAL` e um novo marcador exclusivo antes
+da rede. Ela foi adicionada somente depois de o Explorer oficial responder com
+sucesso usando as credenciais reconfiguradas e de a comparação em memória
+confirmar endpoint, método, content type, formato do header, Credential,
+timestamp, serialização e assinatura. A assinatura do Explorer coincide com a
+fórmula documentada; portanto, não houve alteração especulativa no signer.
+
+Na validação observada em 29 de julho de 2026, o Explorer retornou um node com
+`offerLink`, e a leitura terminal do provider retornou HTTP 200, sem erro
+GraphQL, com cinco nodes e cinco `offerLink`. A resposta confirmou dinheiro e
+taxas como strings, contagens e IDs como números, `periodStartTime` em segundos
+e `scrollId` nulo. O mapeamento rejeitou os cinco nodes antes da persistência;
+o contrato sanitizado indica unidade não reconhecida para `periodEndTime`, mas
+não contém os valores nem os códigos individuais necessários para provar a
+causa exata. Nenhuma correção especulativa ou chamada adicional foi feita.
 
 ## Importação manual
 
@@ -212,12 +234,14 @@ não coleta cupons e não inclui cupom automaticamente na copy nesta task.
 ## Sprint 18.1
 
 Contrato, signer, transporte, mapeamento, configuração e guardas operacionais
-foram implementados com fixtures oficiais e HTTP mockado. As duas leituras
-controladas desta sprint foram consumidas; a última comprovou credencial
-inválida e não retornou produtos. Tipos opcionais e unidade dos timestamps
-permanecem não observados e não são deduzidos. Uma terceira chamada está
-bloqueada. Cupons continuam fora do escopo enquanto não houver endpoint oficial
-confirmado.
+foram implementados com fixtures oficiais e HTTP mockado. Os marcadores das
+duas tentativas com erro foram preservados. Depois da reconfiguração local, o
+Explorer e a leitura terminal comprovaram autenticação válida sem alteração do
+signer. A leitura terminal está consumida e bloqueia repetição. Cinco nodes
+foram recebidos, mas nenhum foi persistido porque todos foram rejeitados pelo
+mapeamento; a evidência sanitizada não permite atribuir um código individual
+sem adivinhação. Cupons continuam fora do escopo enquanto não houver endpoint
+oficial confirmado.
 
 ## Pipeline comercial dry-run — Task 16.1
 

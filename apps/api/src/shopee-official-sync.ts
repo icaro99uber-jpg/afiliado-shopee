@@ -38,21 +38,46 @@ import {
   sanitizeOfficialUrl,
 } from './shopee-official-contract-sanitizer';
 
-const FIRST_CONFIRM_FLAG = '--confirm-one-real-read';
-const SECOND_CONFIRM_FLAG = '--confirm-second-real-read-after-fix';
-export type ShopeeOfficialReadAttempt = 'first' | 'second';
+export type ShopeeOfficialReadAttempt = 'first' | 'second' | 'final';
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const STATE_DIRECTORY = join(
   REPOSITORY_ROOT,
   '.runtime',
   'shopee-official-contract',
 );
-const FIRST_STATE_PATH = join(STATE_DIRECTORY, 'real-read-state.json');
-const SECOND_STATE_PATH = join(STATE_DIRECTORY, 'second-real-read-state.json');
-const SECOND_DIAGNOSTIC_PATH = join(
-  STATE_DIRECTORY,
-  'second-real-read-diagnostic.sanitized.json',
-);
+const READ_ATTEMPT_CONFIG = {
+  first: {
+    flag: '--confirm-one-real-read',
+    statePath: join(STATE_DIRECTORY, 'real-read-state.json'),
+  },
+  second: {
+    flag: '--confirm-second-real-read-after-fix',
+    statePath: join(STATE_DIRECTORY, 'second-real-read-state.json'),
+    diagnosticPath: join(
+      STATE_DIRECTORY,
+      'second-real-read-diagnostic.sanitized.json',
+    ),
+    justification: 'SANITIZED_GRAPHQL_ERROR_CAPTURE_ADDED_AFTER_FIRST_HTTP_200',
+  },
+  final: {
+    flag: '--confirm-final-real-read-after-auth-fix',
+    statePath: join(STATE_DIRECTORY, 'final-real-read-state.json'),
+    diagnosticPath: join(
+      STATE_DIRECTORY,
+      'final-real-read-diagnostic.sanitized.json',
+    ),
+    justification:
+      'EXPLORER_AUTHENTICATION_CONFIRMED_AFTER_CREDENTIAL_RECONFIGURATION',
+  },
+} as const satisfies Record<
+  ShopeeOfficialReadAttempt,
+  {
+    flag: string;
+    statePath: string;
+    diagnosticPath?: string;
+    justification?: string;
+  }
+>;
 const CONTRACT_EVIDENCE_PATH = join(
   STATE_DIRECTORY,
   'real-response-contract.sanitized.json',
@@ -83,6 +108,7 @@ export type SanitizedShopeeOfficialSyncReport = Pick<
 export type ShopeeOfficialSyncRuntime = {
   preflight(): Promise<void>;
   firstReadState(): unknown;
+  secondReadState(): unknown;
   officialProductCount(): Promise<number>;
   protectedCounts(): Promise<ProtectedCounts>;
   sync(): Promise<ShopeeOfferSyncReport>;
@@ -102,8 +128,12 @@ export const parseShopeeOfficialSyncArgs = (
       `Uma flag de confirmacao exata e obrigatoria`,
     );
   }
-  if (normalized[0] === FIRST_CONFIRM_FLAG) return 'first';
-  if (normalized[0] === SECOND_CONFIRM_FLAG) return 'second';
+  const attempt = (
+    Object.entries(READ_ATTEMPT_CONFIG) as Array<
+      [ShopeeOfficialReadAttempt, (typeof READ_ATTEMPT_CONFIG)[ShopeeOfficialReadAttempt]]
+    >
+  ).find(([, config]) => config.flag === normalized[0])?.[0];
+  if (attempt) return attempt;
   throw blocked(
     'SHOPEE_OFFICIAL_CONFIRMATION_REQUIRED',
     `Uma flag de confirmacao exata e obrigatoria`,
@@ -120,6 +150,21 @@ const writeAtomicState = (path: string, value: Record<string, unknown>) => {
     mode: 0o600,
   });
   renameSync(temporary, path);
+};
+
+const readAttemptState = (attempt: 'first' | 'second') => {
+  try {
+    return JSON.parse(
+      readFileSync(READ_ATTEMPT_CONFIG[attempt].statePath, 'utf8'),
+    ) as unknown;
+  } catch {
+    throw blocked(
+      attempt === 'first'
+        ? 'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE'
+        : 'SHOPEE_OFFICIAL_FINAL_READ_NOT_ELIGIBLE',
+      `Marcador sanitizado da ${attempt === 'first' ? 'primeira' : 'segunda'} tentativa indisponivel`,
+    );
+  }
 };
 
 const assertStateDirectoryIgnored = () => {
@@ -215,7 +260,7 @@ const readLimitedDiagnosticBody = async (
 
 export const createSingleOfficialReadFetch = ({
   fetchImplementation = fetch,
-  statePath = FIRST_STATE_PATH,
+  statePath = READ_ATTEMPT_CONFIG.first.statePath,
   diagnosticPath,
   sensitiveValues = [],
   justification,
@@ -526,6 +571,36 @@ export const assertSecondReadEligibility = ({
   }
 };
 
+export const assertFinalReadEligibility = ({
+  secondState,
+  officialProductCount,
+}: {
+  secondState: unknown;
+  officialProductCount: number;
+}) => {
+  const state =
+    secondState && typeof secondState === 'object' && !Array.isArray(secondState)
+      ? (secondState as Record<string, unknown>)
+      : {};
+  if (
+    state.status !== 'RESPONSE_RECEIVED' ||
+    state.httpStatus !== 200 ||
+    !Array.isArray(state.graphqlErrorCodes) ||
+    !state.graphqlErrorCodes.some((code) => String(code) === '10020')
+  ) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_FINAL_READ_NOT_ELIGIBLE',
+      'Segunda tentativa nao comprova HTTP 200 com erro GraphQL 10020',
+    );
+  }
+  if (officialProductCount !== 0) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_FINAL_READ_PRODUCTS_EXIST',
+      'Uma tentativa anterior ja persistiu produtos oficiais',
+    );
+  }
+};
+
 const protectedCountsEqual = (
   before: ProtectedCounts,
   after: ProtectedCounts,
@@ -553,6 +628,12 @@ export const executeShopeeOfficialSync = async ({
   if (attempt === 'second') {
     assertSecondReadEligibility({
       firstState: runtime.firstReadState(),
+      officialProductCount: await runtime.officialProductCount(),
+    });
+  }
+  if (attempt === 'final') {
+    assertFinalReadEligibility({
+      secondState: runtime.secondReadState(),
       officialProductCount: await runtime.officialProductCount(),
     });
   }
@@ -607,22 +688,22 @@ export const createShopeeOfficialSyncRuntime = (
 ): ShopeeOfficialSyncRuntime => {
   const prisma = createPrismaClient();
   const preflightRuntime = createShopeeOfficialPreflightRuntime(config);
+  const attemptConfig = READ_ATTEMPT_CONFIG[attempt];
   const provider = new OfficialShopeeAffiliateOfferProvider({
     apiEnabled: config.SHOPEE_AFFILIATE_API_ENABLED,
     apiUrl: config.SHOPEE_AFFILIATE_API_URL,
     appId: config.SHOPEE_AFFILIATE_APP_ID,
     secret: config.SHOPEE_AFFILIATE_SECRET,
     fetch: createSingleOfficialReadFetch({
-      statePath: attempt === 'second' ? SECOND_STATE_PATH : FIRST_STATE_PATH,
-      ...(attempt === 'second'
+      statePath: attemptConfig.statePath,
+      ...('diagnosticPath' in attemptConfig
         ? {
-            diagnosticPath: SECOND_DIAGNOSTIC_PATH,
+            diagnosticPath: attemptConfig.diagnosticPath,
             sensitiveValues: [
               config.SHOPEE_AFFILIATE_APP_ID as string,
               config.SHOPEE_AFFILIATE_SECRET as string,
             ],
-            justification:
-              'SANITIZED_GRAPHQL_ERROR_CAPTURE_ADDED_AFTER_FIRST_HTTP_200',
+            justification: attemptConfig.justification,
           }
         : {}),
     }),
@@ -649,14 +730,10 @@ export const createShopeeOfficialSyncRuntime = (
       });
     },
     firstReadState() {
-      try {
-        return JSON.parse(readFileSync(FIRST_STATE_PATH, 'utf8')) as unknown;
-      } catch {
-        throw blocked(
-          'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE',
-          'Marcador sanitizado da primeira tentativa indisponivel',
-        );
-      }
+      return readAttemptState('first');
+    },
+    secondReadState() {
+      return readAttemptState('second');
     },
     async officialProductCount() {
       return prisma.productLead.count({ where: { source: 'OFFICIAL' } });
@@ -736,7 +813,7 @@ if (isDirectExecution) {
   runShopeeOfficialSyncAttempt()
     .then(({ attempt, result }) => {
       writeAtomicState(
-        attempt === 'second' ? SECOND_STATE_PATH : FIRST_STATE_PATH,
+        READ_ATTEMPT_CONFIG[attempt].statePath,
         {
           status: 'COMPLETED',
           completedAt: new Date().toISOString(),

@@ -14,6 +14,7 @@ import {
   type ShopeeOfficialPreflightRuntime,
 } from '../src/shopee-official-preflight';
 import {
+  assertFinalReadEligibility,
   assertSecondReadEligibility,
   createSanitizedResponseEvidence,
   createSingleOfficialReadFetch,
@@ -195,6 +196,11 @@ describe('shopee:official:sync', () => {
       httpStatus: 200,
       applicationErrorCode: 'SHOPEE_API_GRAPHQL_ERROR',
     }),
+    secondReadState: vi.fn().mockReturnValue({
+      status: 'RESPONSE_RECEIVED',
+      httpStatus: 200,
+      graphqlErrorCodes: [10020],
+    }),
     officialProductCount: vi.fn().mockResolvedValue(0),
     protectedCounts: vi.fn().mockResolvedValue(counts),
     sync: vi.fn().mockResolvedValue({
@@ -219,7 +225,7 @@ describe('shopee:official:sync', () => {
     );
   });
 
-  it('aceita somente as duas autorizacoes explicitas', () => {
+  it('aceita somente as tres autorizacoes explicitas', () => {
     expect(parseShopeeOfficialSyncArgs(['--confirm-one-real-read'])).toBe(
       'first',
     );
@@ -229,6 +235,12 @@ describe('shopee:official:sync', () => {
         '--confirm-second-real-read-after-fix',
       ]),
     ).toBe('second');
+    expect(
+      parseShopeeOfficialSyncArgs([
+        '--',
+        '--confirm-final-real-read-after-auth-fix',
+      ]),
+    ).toBe('final');
     expect(() =>
       parseShopeeOfficialSyncArgs([
         '--confirm-one-real-read',
@@ -270,6 +282,19 @@ describe('shopee:official:sync', () => {
     });
     expect(fake.preflight).toHaveBeenCalledOnce();
     expect(fake.protectedCounts).toHaveBeenCalledTimes(2);
+    expect(fake.sync).toHaveBeenCalledOnce();
+  });
+
+  it('revalida o marcador 10020 antes da autorizacao final', async () => {
+    const fake = runtime();
+    await executeShopeeOfficialSync({
+      attempt: 'final',
+      env: {},
+      runtime: fake,
+    });
+    expect(fake.preflight).toHaveBeenCalledOnce();
+    expect(fake.secondReadState).toHaveBeenCalledOnce();
+    expect(fake.officialProductCount).toHaveBeenCalledOnce();
     expect(fake.sync).toHaveBeenCalledOnce();
   });
 
@@ -387,6 +412,47 @@ describe('shopee:official:sync', () => {
     ).toThrowError(
       expect.objectContaining({
         code: 'SHOPEE_OFFICIAL_SECOND_READ_PRODUCTS_EXIST',
+      }),
+    );
+  });
+
+  it('exige o erro 10020 da segunda tentativa e zero produto para a leitura final', () => {
+    expect(() =>
+      assertFinalReadEligibility({
+        secondState: {
+          status: 'RESPONSE_RECEIVED',
+          httpStatus: 200,
+          graphqlErrorCodes: [10020],
+        },
+        officialProductCount: 0,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertFinalReadEligibility({
+        secondState: {
+          status: 'RESPONSE_RECEIVED',
+          httpStatus: 200,
+          graphqlErrorCodes: [10010],
+        },
+        officialProductCount: 0,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_FINAL_READ_NOT_ELIGIBLE',
+      }),
+    );
+    expect(() =>
+      assertFinalReadEligibility({
+        secondState: {
+          status: 'RESPONSE_RECEIVED',
+          httpStatus: 200,
+          graphqlErrorCodes: [10020],
+        },
+        officialProductCount: 1,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_FINAL_READ_PRODUCTS_EXIST',
       }),
     );
   });
