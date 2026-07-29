@@ -6,9 +6,19 @@ import {
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type { CommercialCopyGenerator } from './commercial-copy-service';
 import { isCommercialAuthorizedGroup } from './commercial-group-selection';
+import {
+  commercialProductRejections,
+  incrementCommercialRejectionSummary,
+} from './commercial-offer-eligibility';
+import {
+  CommercialOfferScorePolicyResolver,
+  sanitizeCommercialScoreBreakdown,
+} from './commercial-offer-score-policy';
 import type {
   CommercialDeliveryHistoryRepository,
+  CommercialOfferScorePolicyVersion,
   CommercialPipelineRejectionCode,
+  CommercialPipelineScoreBreakdown,
   CommercialPipelineRunFilters,
   CommercialPipelineRunRecord,
   CommercialPipelineRunRepository,
@@ -55,6 +65,10 @@ export type CommercialPipelineDryRunResult = {
   eligibleCount: number;
   rejectedCount: number;
   rejectionSummary: Partial<Record<CommercialPipelineRejectionCode, number>>;
+  scorePolicyVersion: CommercialOfferScorePolicyVersion;
+  minimumScoreUsed: number;
+  maximumScoreObserved: number;
+  selectedScoreBreakdown: CommercialPipelineScoreBreakdown;
   selectedProduct: {
     id: string;
     name: string;
@@ -90,13 +104,17 @@ export type CommercialPipelineServiceOptions = {
 };
 
 const MAXIMUM_CANDIDATES = 100;
-const HTTP_URL = /^https?:\/\//i;
+
+export const defaultCommercialMinimumScore = (
+  source: Exclude<CommercialPipelineInput['source'], undefined>,
+) => (source === 'OFFICIAL' ? 60 : 70);
 
 const normalizeInput = (
   input: CommercialPipelineInput,
 ): NormalizedCommercialPipelineInput => {
   const source = input.source ?? 'MOCK';
-  const minimumScore = input.minimumScore ?? 70;
+  const minimumScore =
+    input.minimumScore ?? defaultCommercialMinimumScore(source);
   const limitCandidates = input.limitCandidates ?? 20;
   const campaign = input.campaign?.trim() || 'dry-run-local';
   const numericEntries = [
@@ -147,53 +165,14 @@ const normalizeInput = (
   };
 };
 
-const addReason = (
-  summary: Partial<Record<CommercialPipelineRejectionCode, number>>,
-  code: CommercialPipelineRejectionCode,
-) => {
-  summary[code] = (summary[code] ?? 0) + 1;
-};
-
-export const commercialProductRejections = (
-  product: ShopeeOfferRecord,
-  now: Date,
-): CommercialPipelineRejectionCode[] => {
-  const reasons: CommercialPipelineRejectionCode[] = [];
-  if (product.unavailableAt) reasons.push('OFFER_UNAVAILABLE');
-  if (product.offerEndsAt && product.offerEndsAt <= now)
-    reasons.push('OFFER_EXPIRED');
-  if (product.offerStartsAt && product.offerStartsAt > now)
-    reasons.push('OFFER_NOT_STARTED');
-  if (!product.affiliateLink) reasons.push('MISSING_AFFILIATE_LINK');
-  else if (!HTTP_URL.test(product.affiliateLink))
-    reasons.push('INVALID_AFFILIATE_LINK');
-  if (!product.productName.trim()) reasons.push('INVALID_PRODUCT_NAME');
-  if (!Number.isFinite(Number(product.price)) || Number(product.price) <= 0)
-    reasons.push('INVALID_PRICE');
-  if (!HTTP_URL.test(product.imageUrl)) reasons.push('INVALID_IMAGE');
-  if (!product.shopName.trim()) reasons.push('INVALID_SHOP');
-  if (
-    !Number.isFinite(product.rating) ||
-    product.rating < 0 ||
-    product.rating > 5
-  )
-    reasons.push('INVALID_RATING');
-  if (!Number.isInteger(product.sales) || product.sales < 0)
-    reasons.push('INVALID_SALES');
-  if (
-    !Number.isFinite(product.commissionRate) ||
-    product.commissionRate < 0 ||
-    product.commissionRate > 100
-  )
-    reasons.push('INVALID_COMMISSION_RATE');
-  return reasons;
-};
-
 const rankCandidates = (
-  left: { product: ShopeeOfferRecord; score: number },
-  right: { product: ShopeeOfferRecord; score: number },
+  left: { product: ShopeeOfferRecord; score: CommercialPipelineScoreBreakdown },
+  right: {
+    product: ShopeeOfferRecord;
+    score: CommercialPipelineScoreBreakdown;
+  },
 ) =>
-  right.score - left.score ||
+  right.score.finalScore - left.score.finalScore ||
   right.product.commissionRate - left.product.commissionRate ||
   right.product.sales - left.product.sales ||
   right.product.discountRate - left.product.discountRate ||
@@ -227,6 +206,10 @@ export const sanitizeCommercialPipelineRun = (
   eligibleCount: run.eligibleCount,
   rejectedCount: run.rejectedCount,
   rejectionSummary: run.rejectionSummary,
+  scorePolicyVersion: run.scorePolicyVersion ?? null,
+  minimumScoreUsed: run.minimumScoreUsed ?? null,
+  maximumScoreObserved: run.maximumScoreObserved ?? null,
+  selectedScoreBreakdown: run.selectedScoreBreakdown ?? null,
   selectionReasons: run.selectionReasons,
   copyPreview: run.copyPreview,
   plannedSubIds: run.plannedSubIds,
@@ -252,9 +235,11 @@ export const sanitizeCommercialPipelineRun = (
 
 export class CommercialPipelineService {
   private readonly clock: () => Date;
+  private readonly scorePolicies: CommercialOfferScorePolicyResolver;
 
   constructor(private readonly options: CommercialPipelineServiceOptions) {
     this.clock = options.clock ?? (() => new Date());
+    this.scorePolicies = new CommercialOfferScorePolicyResolver(options.score);
   }
 
   async dryRun(
@@ -262,6 +247,8 @@ export class CommercialPipelineService {
   ): Promise<CommercialPipelineDryRunResult> {
     const input = normalizeInput(rawInput);
     const startedAt = this.clock();
+    const scorePolicy = this.scorePolicies.forSource(input.source);
+    let maximumScoreObserved = 0;
     const run = await this.options.runs.create({
       mode: 'DRY_RUN',
       status: 'STARTED',
@@ -294,6 +281,9 @@ export class CommercialPipelineService {
       await this.options.runs.update(run.id, {
         status: 'BLOCKED',
         ...state,
+        scorePolicyVersion: scorePolicy.policyVersion,
+        minimumScoreUsed: input.minimumScore,
+        maximumScoreObserved,
         failureCode: code,
         completedAt: this.clock(),
       });
@@ -325,29 +315,29 @@ export class CommercialPipelineService {
       const rejectionSummary: Partial<
         Record<CommercialPipelineRejectionCode, number>
       > = {};
-      const ranked: { product: ShopeeOfferRecord; score: number }[] = [];
+      const ranked: Array<{
+        product: ShopeeOfferRecord;
+        score: CommercialPipelineScoreBreakdown;
+      }> = [];
 
       for (const product of candidates) {
         const reasons = commercialProductRejections(product, startedAt);
-        const score = this.options.score.calculate({
-          id: product.id,
-          providerProductId: product.providerProductId,
-          nome: product.productName,
-          preco: Number(product.price),
-          desconto: product.discountRate,
-          nota: product.rating,
-          vendidos: product.sales,
-          comissao: product.commissionRate,
-          loja: product.shopName,
-          offerEndsAt: null,
-          unavailableAt: null,
-        });
-        if (score < input.minimumScore) reasons.push('SCORE_BELOW_MINIMUM');
         if (reasons.length > 0) {
-          reasons.forEach((reason) => addReason(rejectionSummary, reason));
-        } else {
-          ranked.push({ product, score });
+          reasons.forEach((reason) =>
+            incrementCommercialRejectionSummary(rejectionSummary, reason),
+          );
+          continue;
         }
+        const score = scorePolicy.score(product);
+        maximumScoreObserved = Math.max(maximumScoreObserved, score.finalScore);
+        if (score.finalScore < input.minimumScore) {
+          incrementCommercialRejectionSummary(
+            rejectionSummary,
+            'SCORE_BELOW_MINIMUM',
+          );
+          continue;
+        }
+        ranked.push({ product, score });
       }
       ranked.sort(rankCandidates);
       const initialRejectedCount = candidates.length - ranked.length;
@@ -396,7 +386,10 @@ export class CommercialPipelineService {
       const neverSent = ranked.filter((_, index) => !sentChecks[index]);
       const alreadySentCount = ranked.length - neverSent.length;
       for (let index = 0; index < alreadySentCount; index += 1)
-        addReason(rejectionSummary, 'ALREADY_SENT_TO_GROUP');
+        incrementCommercialRejectionSummary(
+          rejectionSummary,
+          'ALREADY_SENT_TO_GROUP',
+        );
       if (neverSent.length === 0) {
         return await block('PRODUCT_ALREADY_SENT', {
           candidateCount: candidates.length,
@@ -407,6 +400,9 @@ export class CommercialPipelineService {
       }
 
       const selected = neverSent[0];
+      const selectedScoreBreakdown = sanitizeCommercialScoreBreakdown(
+        selected.score,
+      );
       const affiliateLink = selected.product.affiliateLink as string;
       const copyPreview = this.options.copy.generate({
         productName: selected.product.productName,
@@ -425,7 +421,12 @@ export class CommercialPipelineService {
         tracking,
       );
       const selectionReasons = [
-        `Maior score elegivel: ${selected.score}`,
+        `Politica de score: ${selectedScoreBreakdown.policyVersion}`,
+        `Score final: ${selectedScoreBreakdown.finalScore}`,
+        `Score minimo: ${input.minimumScore}`,
+        ...Object.entries(selectedScoreBreakdown.components).map(
+          ([name, value]) => `${name}: ${value}`,
+        ),
         'Desempate deterministico por comissao, vendas, desconto, avaliacao e ID do provider',
         'Produto ainda nao enviado ao grupo autorizado',
       ];
@@ -439,7 +440,11 @@ export class CommercialPipelineService {
         productPrice: selected.product.price,
         groupName: group.name,
         groupFingerprint: group.fingerprint,
-        score: selected.score,
+        score: selected.score.finalScore,
+        scorePolicyVersion: scorePolicy.policyVersion,
+        minimumScoreUsed: input.minimumScore,
+        maximumScoreObserved,
+        selectedScoreBreakdown,
         candidateCount: candidates.length,
         eligibleCount: neverSent.length,
         rejectedCount,
@@ -465,18 +470,20 @@ export class CommercialPipelineService {
         mode: 'dry-run',
         status: 'ready',
         provider: input.source.toLocaleLowerCase() as
-          | 'mock'
-          | 'manual'
-          | 'official',
+          'mock' | 'manual' | 'official',
         candidateCount: candidates.length,
         eligibleCount: neverSent.length,
         rejectedCount,
         rejectionSummary,
+        scorePolicyVersion: scorePolicy.policyVersion,
+        minimumScoreUsed: input.minimumScore,
+        maximumScoreObserved,
+        selectedScoreBreakdown,
         selectedProduct: {
           id: selected.product.id,
           name: selected.product.productName,
           price: selected.product.price,
-          score: selected.score,
+          score: selected.score.finalScore,
           affiliateLinkPresent: true,
         },
         selectedGroup: {

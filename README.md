@@ -130,6 +130,9 @@ Filtros opcionais aceitos: `categoria`, `precoMin`, `precoMax`, `descontoMin`, `
 - `corepack pnpm commercial:automation:worker`: inicia somente o Scheduler e o
   consumer comerciais; com o default desabilitado, remove apenas seu proprio
   agendamento e permanece sem tick de bootstrap.
+- `corepack pnpm commercial:official:diagnose`: explica localmente a
+  elegibilidade e a distribuicao de score dos produtos `OFFICIAL` persistidos,
+  sem provider externo ou escrita no banco.
 - `pnpm build`: compila todos os pacotes e aplicações.
 - `pnpm lint`: executa ESLint.
 - `pnpm typecheck`: executa TypeScript sem emissão.
@@ -266,6 +269,26 @@ Resposta esperada:
 ```
 
 O processamento atualiza os campos `score` e `scoreUpdatedAt` em `ProductLead`.
+
+### Política comercial por origem
+
+O Score Engine legado permanece inalterado. O pipeline comercial usa
+`legacy-v1` para `MOCK` e `MANUAL`, com minimo padrao 70, e a politica
+deterministica `official-v2` para `OFFICIAL`, com minimo padrao 60. Um
+`minimumScore` explicito sempre prevalece.
+
+`official-v2` atribui 35 pontos a comissao normalizada ate 20%, 25 pontos a
+avaliacao ate 5, 20 pontos a vendas normalizadas por `log10(1 + vendas)` ate
+10.000 e 20 pontos ao desconto ate 100%. Somente o score final e arredondado.
+Preco, valor de comissao, nome/tipo da loja e categoria nao entram na formula.
+
+```powershell
+corepack pnpm commercial:official:diagnose
+```
+
+O diagnostico aceita zero argumentos, consulta somente o banco local em
+preview e grava o relatorio sanitizado em
+`.runtime/local-system/official-offer-diagnosis.json`.
 
 ## Relatório da Sprint - Score Engine
 
@@ -800,8 +823,8 @@ Seguranca:
 ## Pipeline comercial em dry-run
 
 A Task 16.1 adiciona um fluxo comercial independente do pipeline legado. Ele
-seleciona ofertas `MOCK` ou `MANUAL` elegiveis, reutiliza a formula existente do
-Score Engine, aplica ranking deterministico, bloqueia produtos ja enviados ao
+seleciona ofertas `MOCK`, `MANUAL` ou `OFFICIAL` persistidas, aplica a politica
+versionada da origem, ranking deterministico, bloqueia produtos ja enviados ao
 grupo, exige exatamente um grupo autorizado/disponivel e gera uma copy final
 sem cupom e sem comissao publica.
 
@@ -812,9 +835,9 @@ corepack pnpm commercial:dry-run -- --source=mock --minimum-score=70 --campaign=
 
 O comando acessa somente PostgreSQL e, no provider mock, sincroniza o catalogo
 ficticio local. Ele nao inicia API, worker ou Scheduler, nao acessa Redis, nao
-chama Evolution/Shopee e nao cria `WhatsAppDispatch` ou job. Provider official,
-flags de envio/confirmacao e ambientes com Scheduler ou group send ativos sao
-bloqueados.
+chama Evolution/Shopee e nao cria `WhatsAppDispatch` ou job. `source=official`
+usa exclusivamente registros ja persistidos; flags de envio/confirmacao e
+ambientes com Scheduler ou group send ativos sao bloqueados.
 
 API:
 

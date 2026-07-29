@@ -15,6 +15,15 @@ const safeResult = {
   eligibleCount: 1,
   rejectedCount: 0,
   rejectionSummary: {},
+  scorePolicyVersion: 'legacy-v1',
+  minimumScoreUsed: 70,
+  maximumScoreObserved: 80,
+  selectedScoreBreakdown: {
+    policyVersion: 'legacy-v1',
+    rawTotal: 80,
+    finalScore: 80,
+    components: {},
+  },
   selectedProduct: {
     id: 'product-safe',
     name: 'Produto ficticio',

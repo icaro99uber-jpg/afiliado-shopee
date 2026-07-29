@@ -11,6 +11,15 @@ const result = {
   eligibleCount: 1,
   rejectedCount: 1,
   rejectionSummary: { SCORE_BELOW_MINIMUM: 1 },
+  scorePolicyVersion: 'legacy-v1',
+  minimumScoreUsed: 70,
+  maximumScoreObserved: 82,
+  selectedScoreBreakdown: {
+    policyVersion: 'legacy-v1',
+    rawTotal: 82,
+    finalScore: 82,
+    components: {},
+  },
   selectedProduct: {
     id: 'product-safe-1',
     name: 'Produto ficticio',
@@ -42,6 +51,10 @@ const runHistory = {
   eligibleCount: 1,
   rejectedCount: 1,
   rejectionSummary: result.rejectionSummary,
+  scorePolicyVersion: result.scorePolicyVersion,
+  minimumScoreUsed: result.minimumScoreUsed,
+  maximumScoreObserved: result.maximumScoreObserved,
+  selectedScoreBreakdown: result.selectedScoreBreakdown,
   selectionReasons: result.selectionReasons,
   copyPreview: result.copyPreview,
   plannedSubIds: result.plannedSubIds,
@@ -207,6 +220,20 @@ describe('Commercial pipeline API', () => {
       campaign: 'teste-local',
       limitCandidates: 20,
     });
+  });
+
+  it('aceita source OFFICIAL sem compor provider externo', async () => {
+    const { app, commercialPipelineService, pipelineAdd } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/commercial-pipeline/dry-run',
+      payload: { source: 'official' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(commercialPipelineService.dryRun).toHaveBeenCalledWith({
+      source: 'OFFICIAL',
+    });
+    expect(pipelineAdd).not.toHaveBeenCalled();
   });
 
   it.each([

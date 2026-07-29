@@ -545,11 +545,14 @@ de copy, logger e relogio por injecao. Prisma permanece nos adaptadores; Fastify
 apenas valida e delega; BullMQ, Redis, Evolution, Sender e worker nao fazem
 parte da composicao.
 
-O catalogo e limitado a `MOCK` ou `MANUAL`, score minimo 70 e 20 candidatos por
-padrao, com teto 100. Elegibilidade exige oferta ativa, dados comerciais
-validos e `affiliateLink` HTTP/HTTPS. O ranking reutiliza
-`ScoreService.calculate` e desempata por comissao, vendas, desconto, avaliacao
-e ID do provider. Nao existe IA ou aleatoriedade.
+O catalogo aceita `MOCK`, `MANUAL` ou `OFFICIAL` persistido e 20 candidatos por
+padrao, com teto 100. `MOCK`/`MANUAL` preservam a politica `legacy-v1` e score
+minimo 70; `OFFICIAL` usa `official-v2` e minimo 60. Elegibilidade exige oferta
+ativa, dados comerciais validos e `affiliateLink` HTTP/HTTPS. O ranking
+reutiliza `ScoreService.calculate` somente no caminho legado; a politica
+oficial pondera comissao, avaliacao, vendas logaritmicas e desconto. O desempate
+continua por comissao, vendas, desconto, avaliacao e ID do provider. Nao existe
+IA ou aleatoriedade.
 
 Um unico grupo da instancia atual deve estar ativo, disponivel e possuir
 fingerprint valido. O historico de dispatch `SENT` e de execucoes futuras
@@ -561,9 +564,16 @@ preserva o link. Tracking retorna Sub_ids planejados separadamente.
 contagens, rejeicoes, snapshots sanitizados, copy e horario. As rotas
 `POST /commercial-pipeline/dry-run`, `GET /commercial-pipeline/runs` e
 `GET /commercial-pipeline/runs/:id` nao criam dispatch ou job. O CLI
-`corepack pnpm commercial:dry-run` tambem bloqueia official, Scheduler e group
-send. Esse endpoint permanece sem dispatch, job ou envio mesmo depois da Task
-16.2.
+`corepack pnpm commercial:dry-run` usa `OFFICIAL` somente sobre dados locais e
+bloqueia Scheduler e group send. Esse endpoint permanece sem dispatch, job ou
+envio mesmo depois da Task 16.2. Runs concluidos e bloqueados preservam a
+politica, o limite e o maior score; apenas uma selecao guarda breakdown.
+
+O diagnostico `corepack pnpm commercial:official:diagnose` consulta somente
+produtos `OFFICIAL` locais, nao escreve no banco e salva em `.runtime` ignorado
+uma distribuicao sanitizada com IDs internos, rejeicoes estruturais e
+componentes do `official-v2`. Ele exige zero argumentos, preview, automacao
+pausada/desabilitada, Schedulers e envio para grupos desligados.
 
 ## Pipeline comercial confirmado
 

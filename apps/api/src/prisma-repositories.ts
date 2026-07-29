@@ -385,7 +385,7 @@ export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
     const [records, total] = await Promise.all([
       this.prisma.productLead.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
         skip: (filters.page - 1) * filters.limit,
         take: filters.limit,
       }),
@@ -445,6 +445,9 @@ const mapCommercialPipelineRun = (
   rejectionSummary: record.rejectionSummary as Record<string, number>,
   selectionReasons: record.selectionReasons as string[],
   plannedSubIds: record.plannedSubIds as string[],
+  selectedScoreBreakdown:
+    (record.selectedScoreBreakdown as CommercialPipelineRunRecord['selectedScoreBreakdown']) ??
+    null,
 });
 
 const toPrismaCommercialPipelineRun = (

@@ -233,6 +233,99 @@ describe('CommercialPipelineService', () => {
     expect(runs.records[0].rejectionSummary.SCORE_BELOW_MINIMUM).toBe(1);
   });
 
+  it('aplica rejeicao estrutural antes do score minimo', async () => {
+    const { service, runs } = build({
+      candidates: [offer('a', { affiliateLink: undefined })],
+      scores: { a: 0 },
+    });
+    await expectCode(service.dryRun(), 'NO_ELIGIBLE_PRODUCT');
+    expect(runs.records[0].rejectionSummary).toEqual({
+      MISSING_AFFILIATE_LINK: 1,
+    });
+  });
+
+  it('registra SCORE_BELOW_MINIMUM uma unica vez por produto', async () => {
+    const { service, runs } = build({ scores: { 'product-a': 0 } });
+    await expectCode(service.dryRun(), 'NO_ELIGIBLE_PRODUCT');
+    expect(runs.records[0].rejectionSummary).toEqual({
+      SCORE_BELOW_MINIMUM: 1,
+    });
+  });
+
+  it('usa official-v2 e minimo padrao 60 para OFFICIAL', async () => {
+    const { service, runs } = build({
+      candidates: [offer('official-a', { source: 'OFFICIAL' })],
+    });
+    const result = await service.dryRun({ source: 'OFFICIAL' });
+    expect(result).toMatchObject({
+      scorePolicyVersion: 'official-v2',
+      minimumScoreUsed: 60,
+      maximumScoreObserved: 61,
+      selectedProduct: { id: 'official-a', score: 61 },
+      selectedScoreBreakdown: {
+        policyVersion: 'official-v2',
+        finalScore: 61,
+        components: {
+          commissionPoints: 17.5,
+          ratingPoints: 24,
+          discountPoints: 4,
+        },
+      },
+    });
+    expect(result.selectionReasons).toEqual(
+      expect.arrayContaining([
+        'Politica de score: official-v2',
+        'Score final: 61',
+        'Score minimo: 60',
+        'commissionPoints: 17.5',
+        'ratingPoints: 24',
+        expect.stringMatching(/^salesPoints: /),
+        'discountPoints: 4',
+      ]),
+    );
+    expect(runs.records[0]).toMatchObject({
+      status: 'COMPLETED',
+      scorePolicyVersion: 'official-v2',
+      minimumScoreUsed: 60,
+      maximumScoreObserved: 61,
+      selectedScoreBreakdown: { policyVersion: 'official-v2', finalScore: 61 },
+    });
+  });
+
+  it('respeita override explicito 70 para OFFICIAL e persiste o bloqueio', async () => {
+    const { service, runs } = build({
+      candidates: [offer('official-a', { source: 'OFFICIAL' })],
+    });
+    await expectCode(
+      service.dryRun({ source: 'OFFICIAL', minimumScore: 70 }),
+      'NO_ELIGIBLE_PRODUCT',
+    );
+    expect(runs.records[0]).toMatchObject({
+      status: 'BLOCKED',
+      scorePolicyVersion: 'official-v2',
+      minimumScoreUsed: 70,
+      maximumScoreObserved: 61,
+      rejectionSummary: { SCORE_BELOW_MINIMUM: 1 },
+    });
+    expect(runs.records[0].selectedScoreBreakdown).toBeUndefined();
+  });
+
+  it.each(['MOCK', 'MANUAL'] as const)(
+    'preserva legacy-v1 e minimo 70 para %s',
+    async (source) => {
+      const { service, runs } = build({
+        candidates: [offer('legacy-a', { source })],
+        scores: { 'legacy-a': 69 },
+      });
+      await expectCode(service.dryRun({ source }), 'NO_ELIGIBLE_PRODUCT');
+      expect(runs.records[0]).toMatchObject({
+        scorePolicyVersion: 'legacy-v1',
+        minimumScoreUsed: 70,
+        maximumScoreObserved: 69,
+      });
+    },
+  );
+
   it('rejeita produto ja enviado e escolhe o proximo', async () => {
     const { service } = build({
       candidates: [offer('a'), offer('b')],
