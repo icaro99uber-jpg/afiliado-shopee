@@ -322,6 +322,44 @@ describe('OfficialShopeeAffiliateOfferProvider', () => {
     });
   });
 
+  it.each([
+    ['seconds observado', 1_785_196_800, '2026-07-28T00:00:00.000Z'],
+    ['seconds far-future', 32_503_651_199, '2999-12-31T15:59:59.000Z'],
+    ['milliseconds atual', 1_785_196_800_000, '2026-07-28T00:00:00.000Z'],
+  ])(
+    'reconhece %s sem heuristica de 2100',
+    async (_label, periodEndTime, expected) => {
+      const { provider } = createProvider([officialNode({ periodEndTime })]);
+      const page = await provider.listProductOffers({ limit: 1 });
+      expect(page.rejected).toEqual([]);
+      expect(page.items[0].offerEndsAt?.toISOString()).toBe(expected);
+    },
+  );
+
+  it.each([
+    ['sem unidade deterministica', 500_000_000_000],
+    ['overflow', Number.MAX_SAFE_INTEGER],
+    ['anterior a 2000', 915_148_800],
+  ])('rejeita timestamp %s', async (_label, periodEndTime) => {
+    const { provider } = createProvider([officialNode({ periodEndTime })]);
+    const page = await provider.listProductOffers({ limit: 1 });
+    expect(page.items).toEqual([]);
+    expect(page.rejected).toEqual([
+      { index: 0, code: 'SHOPEE_OFFICIAL_PERIOD_END_INVALID' },
+    ]);
+  });
+
+  it('preserva periodEndTime far-future como Date no item completo', async () => {
+    const { provider } = createProvider([
+      officialNode({ periodEndTime: 32_503_651_199 }),
+    ]);
+    const page = await provider.listProductOffers({ limit: 1 });
+    expect(page.rejected).toEqual([]);
+    expect(page.items[0].offerEndsAt?.toISOString()).toBe(
+      '2999-12-31T15:59:59.000Z',
+    );
+  });
+
   it('preserva IDs Int64 textuais sem perda de precisao', async () => {
     const itemId = '9223372036854775807';
     const shopId = '9223372036854775806';

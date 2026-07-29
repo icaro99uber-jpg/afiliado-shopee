@@ -27,6 +27,7 @@ import {
   loadShopeeOfficialConfig,
 } from './shopee-official-preflight';
 import {
+  countShopeeOfferRejections,
   ShopeeOfferSyncService,
   type ShopeeOfferSyncReport,
 } from './shopee-offer-sync-service';
@@ -38,7 +39,11 @@ import {
   sanitizeOfficialUrl,
 } from './shopee-official-contract-sanitizer';
 
-export type ShopeeOfficialReadAttempt = 'first' | 'second' | 'final';
+export type ShopeeOfficialReadAttempt =
+  | 'first'
+  | 'second'
+  | 'final'
+  | 'mapping';
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const STATE_DIRECTORY = join(
   REPOSITORY_ROOT,
@@ -68,6 +73,15 @@ const READ_ATTEMPT_CONFIG = {
     ),
     justification:
       'EXPLORER_AUTHENTICATION_CONFIRMED_AFTER_CREDENTIAL_RECONFIGURATION',
+  },
+  mapping: {
+    flag: '--confirm-mapping-fix-real-read',
+    statePath: join(STATE_DIRECTORY, 'mapping-fix-real-read-state.json'),
+    diagnosticPath: join(
+      STATE_DIRECTORY,
+      'mapping-fix-real-read-diagnostic.sanitized.json',
+    ),
+    justification: 'FAR_FUTURE_TIMESTAMP_MAPPING_FIX_VERIFIED_OFFLINE',
   },
 } as const satisfies Record<
   ShopeeOfficialReadAttempt,
@@ -100,6 +114,7 @@ export type SanitizedShopeeOfficialSyncReport = Pick<
   | 'expired'
   | 'hasNextPage'
   | 'affiliateLinkPresentCount'
+  | 'rejectionSummary'
 > & {
   realRequests: 1;
   maximumProducts: 5;
@@ -109,6 +124,8 @@ export type ShopeeOfficialSyncRuntime = {
   preflight(): Promise<void>;
   firstReadState(): unknown;
   secondReadState(): unknown;
+  finalReadState(): unknown;
+  finalReadDiagnostic(): unknown;
   officialProductCount(): Promise<number>;
   protectedCounts(): Promise<ProtectedCounts>;
   sync(): Promise<ShopeeOfferSyncReport>;
@@ -152,7 +169,7 @@ const writeAtomicState = (path: string, value: Record<string, unknown>) => {
   renameSync(temporary, path);
 };
 
-const readAttemptState = (attempt: 'first' | 'second') => {
+const readAttemptState = (attempt: 'first' | 'second' | 'final') => {
   try {
     return JSON.parse(
       readFileSync(READ_ATTEMPT_CONFIG[attempt].statePath, 'utf8'),
@@ -161,8 +178,23 @@ const readAttemptState = (attempt: 'first' | 'second') => {
     throw blocked(
       attempt === 'first'
         ? 'SHOPEE_OFFICIAL_SECOND_READ_NOT_ELIGIBLE'
-        : 'SHOPEE_OFFICIAL_FINAL_READ_NOT_ELIGIBLE',
-      `Marcador sanitizado da ${attempt === 'first' ? 'primeira' : 'segunda'} tentativa indisponivel`,
+        : attempt === 'second'
+          ? 'SHOPEE_OFFICIAL_FINAL_READ_NOT_ELIGIBLE'
+          : 'SHOPEE_OFFICIAL_MAPPING_READ_NOT_ELIGIBLE',
+      `Marcador sanitizado da tentativa ${attempt} indisponivel`,
+    );
+  }
+};
+
+const readFinalDiagnostic = () => {
+  try {
+    return JSON.parse(
+      readFileSync(READ_ATTEMPT_CONFIG.final.diagnosticPath, 'utf8'),
+    ) as unknown;
+  } catch {
+    throw blocked(
+      'SHOPEE_OFFICIAL_MAPPING_READ_NOT_ELIGIBLE',
+      'Evidencia sanitizada da tentativa final indisponivel',
     );
   }
 };
@@ -601,6 +633,57 @@ export const assertFinalReadEligibility = ({
   }
 };
 
+export const assertMappingFixReadEligibility = ({
+  finalState,
+  finalDiagnostic,
+  officialProductCount,
+}: {
+  finalState: unknown;
+  finalDiagnostic: unknown;
+  officialProductCount: number;
+}) => {
+  const state =
+    finalState && typeof finalState === 'object' && !Array.isArray(finalState)
+      ? (finalState as Record<string, unknown>)
+      : {};
+  const diagnostic =
+    finalDiagnostic &&
+    typeof finalDiagnostic === 'object' &&
+    !Array.isArray(finalDiagnostic)
+      ? (finalDiagnostic as Record<string, unknown>)
+      : {};
+  const response =
+    diagnostic.response &&
+    typeof diagnostic.response === 'object' &&
+    !Array.isArray(diagnostic.response)
+      ? (diagnostic.response as Record<string, unknown>)
+      : {};
+  if (
+    state.status !== 'COMPLETED' ||
+    state.fetched !== 5 ||
+    state.valid !== 0 ||
+    state.created !== 0 ||
+    state.updated !== 0 ||
+    state.rejected !== 5 ||
+    state.realRequests !== 1 ||
+    response.httpStatus !== 200 ||
+    response.graphqlErrorCount !== 0 ||
+    response.nodeCount !== 5 ||
+    response.offerLinkPresentCount !== 5
+  ) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_MAPPING_READ_NOT_ELIGIBLE',
+      'Tentativa final anterior nao comprova cinco rejeicoes apos resposta valida',
+    );
+  }
+  if (officialProductCount !== 0) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_MAPPING_READ_PRODUCTS_EXIST',
+      'A tentativa final anterior persistiu produtos oficiais',
+    );
+  }
+};
+
 const protectedCountsEqual = (
   before: ProtectedCounts,
   after: ProtectedCounts,
@@ -637,6 +720,13 @@ export const executeShopeeOfficialSync = async ({
       officialProductCount: await runtime.officialProductCount(),
     });
   }
+  if (attempt === 'mapping') {
+    assertMappingFixReadEligibility({
+      finalState: runtime.finalReadState(),
+      finalDiagnostic: runtime.finalReadDiagnostic(),
+      officialProductCount: await runtime.officialProductCount(),
+    });
+  }
   const before = await runtime.protectedCounts();
   let report: ShopeeOfferSyncReport;
   try {
@@ -668,6 +758,12 @@ export const executeShopeeOfficialSync = async ({
       'A consulta excedeu o limite controlado',
     );
   }
+  if (countShopeeOfferRejections(report.rejectionSummary) !== report.rejected) {
+    throw blocked(
+      'SHOPEE_OFFICIAL_REJECTION_SUMMARY_INVALID',
+      'Resumo sanitizado de rejeicoes inconsistente',
+    );
+  }
   return {
     fetched: report.fetched,
     valid: report.valid,
@@ -677,6 +773,7 @@ export const executeShopeeOfficialSync = async ({
     expired: report.expired,
     hasNextPage: report.hasNextPage,
     affiliateLinkPresentCount: report.affiliateLinkPresentCount,
+    rejectionSummary: report.rejectionSummary,
     realRequests: 1,
     maximumProducts: SHOPEE_AFFILIATE_REAL_READ_LIMIT,
   };
@@ -734,6 +831,12 @@ export const createShopeeOfficialSyncRuntime = (
     },
     secondReadState() {
       return readAttemptState('second');
+    },
+    finalReadState() {
+      return readAttemptState('final');
+    },
+    finalReadDiagnostic() {
+      return readFinalDiagnostic();
     },
     async officialProductCount() {
       return prisma.productLead.count({ where: { source: 'OFFICIAL' } });

@@ -18,7 +18,22 @@ export type ShopeeOfferSyncReport = {
   expired: number;
   hasNextPage: boolean;
   affiliateLinkPresentCount: number;
+  rejectionSummary: Record<string, number>;
 };
+
+const incrementSanitizedRejection = (
+  summary: Record<string, number>,
+  code: string,
+) => {
+  const publicCode = /^[A-Z][A-Z0-9_]{0,99}$/.test(code)
+    ? code
+    : 'SHOPEE_ITEM_REJECTED';
+  summary[publicCode] = (summary[publicCode] ?? 0) + 1;
+};
+
+export const countShopeeOfferRejections = (
+  summary: Readonly<Record<string, number>>,
+) => Object.values(summary).reduce((total, count) => total + count, 0);
 
 const isHttpUrl = (value: string) => {
   try {
@@ -84,6 +99,7 @@ export class ShopeeOfferSyncService {
       expired: 0,
       hasNextPage: false,
       affiliateLinkPresentCount: 0,
+      rejectionSummary: {},
     };
 
     this.options.logger.info(
@@ -97,16 +113,29 @@ export class ShopeeOfferSyncService {
         limit,
       });
       report.fetched = page.fetchedCount ?? page.items.length;
-      report.rejected = page.rejected?.length ?? 0;
+      for (const rejection of page.rejected ?? []) {
+        incrementSanitizedRejection(report.rejectionSummary, rejection.code);
+      }
       report.hasNextPage = page.hasNextPage;
       const seen = new Set<string>();
       const now = this.options.now?.() ?? new Date();
 
       for (const offer of page.items.slice(0, limit)) {
         const logicalKey = `${offer.source}:${offer.providerProductId}`;
-        if (!isValidShopeeProductOffer(offer) || seen.has(logicalKey)) {
+        if (!isValidShopeeProductOffer(offer)) {
           report.skipped += 1;
-          report.rejected += 1;
+          incrementSanitizedRejection(
+            report.rejectionSummary,
+            'SHOPEE_OFFER_INVALID',
+          );
+          continue;
+        }
+        if (seen.has(logicalKey)) {
+          report.skipped += 1;
+          incrementSanitizedRejection(
+            report.rejectionSummary,
+            'SHOPEE_OFFER_DUPLICATE',
+          );
           continue;
         }
         seen.add(logicalKey);
@@ -130,6 +159,8 @@ export class ShopeeOfferSyncService {
           report.created += 1;
         }
       }
+
+      report.rejected = countShopeeOfferRejections(report.rejectionSummary);
 
       this.options.logger.info(
         { event: 'shopee.offers.sync.completed', ...report },

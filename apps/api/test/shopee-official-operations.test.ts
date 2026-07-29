@@ -15,6 +15,7 @@ import {
 } from '../src/shopee-official-preflight';
 import {
   assertFinalReadEligibility,
+  assertMappingFixReadEligibility,
   assertSecondReadEligibility,
   createSanitizedResponseEvidence,
   createSingleOfficialReadFetch,
@@ -201,6 +202,23 @@ describe('shopee:official:sync', () => {
       httpStatus: 200,
       graphqlErrorCodes: [10020],
     }),
+    finalReadState: vi.fn().mockReturnValue({
+      status: 'COMPLETED',
+      fetched: 5,
+      valid: 0,
+      created: 0,
+      updated: 0,
+      rejected: 5,
+      realRequests: 1,
+    }),
+    finalReadDiagnostic: vi.fn().mockReturnValue({
+      response: {
+        httpStatus: 200,
+        graphqlErrorCount: 0,
+        nodeCount: 5,
+        offerLinkPresentCount: 5,
+      },
+    }),
     officialProductCount: vi.fn().mockResolvedValue(0),
     protectedCounts: vi.fn().mockResolvedValue(counts),
     sync: vi.fn().mockResolvedValue({
@@ -214,6 +232,7 @@ describe('shopee:official:sync', () => {
       expired: 0,
       hasNextPage: true,
       affiliateLinkPresentCount: 4,
+      rejectionSummary: { SHOPEE_OFFICIAL_PERIOD_END_INVALID: 1 },
       ...reportOverrides,
     }),
     close: vi.fn().mockResolvedValue(undefined),
@@ -225,7 +244,7 @@ describe('shopee:official:sync', () => {
     );
   });
 
-  it('aceita somente as tres autorizacoes explicitas', () => {
+  it('aceita somente as quatro autorizacoes explicitas', () => {
     expect(parseShopeeOfficialSyncArgs(['--confirm-one-real-read'])).toBe(
       'first',
     );
@@ -241,6 +260,12 @@ describe('shopee:official:sync', () => {
         '--confirm-final-real-read-after-auth-fix',
       ]),
     ).toBe('final');
+    expect(
+      parseShopeeOfficialSyncArgs([
+        '--',
+        '--confirm-mapping-fix-real-read',
+      ]),
+    ).toBe('mapping');
     expect(() =>
       parseShopeeOfficialSyncArgs([
         '--confirm-one-real-read',
@@ -277,6 +302,7 @@ describe('shopee:official:sync', () => {
       expired: 0,
       hasNextPage: true,
       affiliateLinkPresentCount: 4,
+      rejectionSummary: { SHOPEE_OFFICIAL_PERIOD_END_INVALID: 1 },
       realRequests: 1,
       maximumProducts: 5,
     });
@@ -294,6 +320,27 @@ describe('shopee:official:sync', () => {
     });
     expect(fake.preflight).toHaveBeenCalledOnce();
     expect(fake.secondReadState).toHaveBeenCalledOnce();
+    expect(fake.officialProductCount).toHaveBeenCalledOnce();
+    expect(fake.sync).toHaveBeenCalledOnce();
+  });
+
+  it('revalida a resposta final antes da autorizacao de mapeamento', async () => {
+    const fake = runtime({
+      valid: 5,
+      created: 5,
+      updated: 0,
+      rejected: 0,
+      affiliateLinkPresentCount: 5,
+      rejectionSummary: {},
+    });
+    await executeShopeeOfficialSync({
+      attempt: 'mapping',
+      env: {},
+      runtime: fake,
+    });
+    expect(fake.preflight).toHaveBeenCalledOnce();
+    expect(fake.finalReadState).toHaveBeenCalledOnce();
+    expect(fake.finalReadDiagnostic).toHaveBeenCalledOnce();
     expect(fake.officialProductCount).toHaveBeenCalledOnce();
     expect(fake.sync).toHaveBeenCalledOnce();
   });
@@ -453,6 +500,55 @@ describe('shopee:official:sync', () => {
     ).toThrowError(
       expect.objectContaining({
         code: 'SHOPEE_OFFICIAL_FINAL_READ_PRODUCTS_EXIST',
+      }),
+    );
+  });
+
+  it('exige cinco rejeicoes da resposta final e zero produto para o mapping fix', () => {
+    const finalState = {
+      status: 'COMPLETED',
+      fetched: 5,
+      valid: 0,
+      created: 0,
+      updated: 0,
+      rejected: 5,
+      realRequests: 1,
+    };
+    const finalDiagnostic = {
+      response: {
+        httpStatus: 200,
+        graphqlErrorCount: 0,
+        nodeCount: 5,
+        offerLinkPresentCount: 5,
+      },
+    };
+    expect(() =>
+      assertMappingFixReadEligibility({
+        finalState,
+        finalDiagnostic,
+        officialProductCount: 0,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertMappingFixReadEligibility({
+        finalState: { ...finalState, rejected: 4 },
+        finalDiagnostic,
+        officialProductCount: 0,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_MAPPING_READ_NOT_ELIGIBLE',
+      }),
+    );
+    expect(() =>
+      assertMappingFixReadEligibility({
+        finalState,
+        finalDiagnostic,
+        officialProductCount: 1,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SHOPEE_OFFICIAL_MAPPING_READ_PRODUCTS_EXIST',
       }),
     );
   });

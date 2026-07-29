@@ -103,9 +103,10 @@ corepack pnpm shopee:official:preflight
 corepack pnpm shopee:official:sync -- --confirm-one-real-read
 corepack pnpm shopee:official:sync -- --confirm-second-real-read-after-fix
 corepack pnpm shopee:official:sync -- --confirm-final-real-read-after-auth-fix
+corepack pnpm shopee:official:sync -- --confirm-mapping-fix-real-read
 ```
 
-As três flags de sync registram autorizações históricas de uso único. Seus
+As quatro flags de sync registram autorizações históricas de uso único. Seus
 marcadores já existentes impedem reexecução; o bloco não é um roteiro para
 repetir chamadas consumidas.
 
@@ -139,9 +140,17 @@ Na validação observada em 29 de julho de 2026, o Explorer retornou um node com
 GraphQL, com cinco nodes e cinco `offerLink`. A resposta confirmou dinheiro e
 taxas como strings, contagens e IDs como números, `periodStartTime` em segundos
 e `scrollId` nulo. O mapeamento rejeitou os cinco nodes antes da persistência;
-o contrato sanitizado indica unidade não reconhecida para `periodEndTime`, mas
-não contém os valores nem os códigos individuais necessários para provar a
-causa exata. Nenhuma correção especulativa ou chamada adicional foi feita.
+o limite antigo de ano 2100 rejeitou `periodEndTime` válido em seconds no ano
+2999.
+
+O parser corrigido aceita timestamps Unix em seconds ou milliseconds somente
+quando exatamente uma unidade produz uma `Date` válida entre 2000 e 9999. Ele
+rejeita data anterior, overflow, resultado inválido e ambiguidade, sem tratar
+data distante como ausência de vencimento. A autorização terminal de
+mapeamento exigiu a evidência sanitizada anterior, zero produto `OFFICIAL`,
+preflight seguro e criou um quarto marcador antes de um único request. O
+resultado foi cinco itens válidos e criados, zero rejeições, cinco links
+afiliados presentes e `rejectionSummary` vazio.
 
 ## Importação manual
 
@@ -236,12 +245,13 @@ não coleta cupons e não inclui cupom automaticamente na copy nesta task.
 Contrato, signer, transporte, mapeamento, configuração e guardas operacionais
 foram implementados com fixtures oficiais e HTTP mockado. Os marcadores das
 duas tentativas com erro foram preservados. Depois da reconfiguração local, o
-Explorer e a leitura terminal comprovaram autenticação válida sem alteração do
-signer. A leitura terminal está consumida e bloqueia repetição. Cinco nodes
-foram recebidos, mas nenhum foi persistido porque todos foram rejeitados pelo
-mapeamento; a evidência sanitizada não permite atribuir um código individual
-sem adivinhação. Cupons continuam fora do escopo enquanto não houver endpoint
-oficial confirmado.
+Explorer e as leituras terminais comprovaram autenticação válida sem alteração
+do signer. O parser de timestamps preserva datas far-future válidas e a última
+autorização persistiu cinco produtos oficiais com seus links exatos. Todos os
+marcadores foram preservados e o marcador de mapping fix bloqueia repetição.
+O dry-run comercial local com score mínimo 70 terminou em
+`NO_ELIGIBLE_PRODUCT`, sem dispatch, outbox ou job. Cupons continuam fora do
+escopo enquanto não houver endpoint oficial confirmado.
 
 ## Pipeline comercial dry-run — Task 16.1
 

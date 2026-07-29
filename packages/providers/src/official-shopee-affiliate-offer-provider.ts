@@ -467,17 +467,48 @@ const httpUrl = (value: unknown, code: string) => {
 
 type TimestampUnit = 'seconds' | 'milliseconds';
 
-const parseEpochTimestamp = (value: unknown, code: string) => {
-  const raw = safeInteger(value, code);
-  const candidates = [
-    { unit: 'seconds' as const, date: new Date(raw * 1_000) },
-    { unit: 'milliseconds' as const, date: new Date(raw) },
-  ].filter(({ date }) => {
-    const year = date.getUTCFullYear();
-    return !Number.isNaN(date.getTime()) && year >= 2000 && year <= 2100;
-  });
+type TimestampCandidate = { unit: TimestampUnit; date: Date };
+
+const EARLIEST_SUPPORTED_TIMESTAMP_MS = Date.UTC(2000, 0, 1);
+const LATEST_SUPPORTED_TIMESTAMP_MS = Date.UTC(
+  9999,
+  11,
+  31,
+  23,
+  59,
+  59,
+  999,
+);
+
+const selectSingleEpochTimestampCandidate = (
+  candidates: readonly TimestampCandidate[],
+  code: string,
+) => {
   if (candidates.length !== 1) throw new Error(code);
   return candidates[0];
+};
+
+const parseEpochTimestamp = (value: unknown, code: string) => {
+  const raw = safeInteger(value, code);
+  const toCandidate = (
+    unit: TimestampUnit,
+    milliseconds: number,
+  ): TimestampCandidate | undefined => {
+    if (
+      !Number.isSafeInteger(milliseconds) ||
+      milliseconds < EARLIEST_SUPPORTED_TIMESTAMP_MS ||
+      milliseconds > LATEST_SUPPORTED_TIMESTAMP_MS
+    ) {
+      return undefined;
+    }
+    const date = new Date(milliseconds);
+    return date.getTime() === milliseconds ? { unit, date } : undefined;
+  };
+  const candidates = [
+    toCandidate('seconds', raw * 1_000),
+    toCandidate('milliseconds', raw),
+  ].filter((candidate): candidate is TimestampCandidate => Boolean(candidate));
+  return selectSingleEpochTimestampCandidate(candidates, code);
 };
 
 const optionalEpochTimestamp = (value: unknown, code: string) => {

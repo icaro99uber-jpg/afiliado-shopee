@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ManualShopeeAffiliateOfferProvider,
   MockShopeeAffiliateOfferProvider,
+  OfficialShopeeAffiliateOfferProvider,
+  SHOPEE_AFFILIATE_OFFICIAL_API_URL,
   type ShopeeProductOffer,
 } from '@shopee-auto-affiliate-ai/providers';
 import { ShopeeOfferSyncService } from '../src/shopee-offer-sync-service';
@@ -197,6 +199,81 @@ describe('ShopeeOfferSyncService', () => {
       expired: 0,
       hasNextPage: true,
       affiliateLinkPresentCount: 1,
+      rejectionSummary: { SHOPEE_OFFICIAL_PRICE_INVALID: 1 },
     });
+  });
+
+  it('sincroniza em memoria cinco ofertas oficiais com periodEndTime far-future', async () => {
+    const affiliateLink = 'https://example.invalid/affiliate-preserved';
+    const nodes = Array.from({ length: 5 }, (_, index) => ({
+      productName: `Produto sanitizado ${index}`,
+      itemId: 1_000 + index,
+      commissionRate: '0.10',
+      commission: '10.00',
+      price: '100.00',
+      sales: 100,
+      imageUrl: 'https://example.invalid/image',
+      shopName: 'Loja sanitizada',
+      productLink: 'https://example.invalid/product',
+      offerLink: affiliateLink,
+      periodStartTime: 1_785_196_800,
+      periodEndTime: 32_503_651_199,
+      priceMin: '100.00',
+      priceMax: '100.00',
+      productCatIds: [1],
+      ratingStar: '4.50',
+      priceDiscountRate: 10,
+      shopId: 2_000 + index,
+      shopType: [1],
+      sellerCommissionRate: '0.05',
+      shopeeCommissionRate: '0.05',
+    }));
+    const provider = new OfficialShopeeAffiliateOfferProvider({
+      apiEnabled: true,
+      apiUrl: SHOPEE_AFFILIATE_OFFICIAL_API_URL,
+      appId: 'fixture-app-id',
+      secret: 'fixture-secret',
+      transport: {
+        execute: vi.fn().mockResolvedValue({
+          data: {
+            productOfferV2: {
+              nodes,
+              pageInfo: {
+                page: 1,
+                limit: 5,
+                hasNextPage: false,
+                scrollId: null,
+              },
+            },
+          },
+        }),
+      },
+      clock: () => new Date('2026-07-28T12:00:00.000Z'),
+    });
+    const offers = new MemoryOfferRepository();
+    const service = new ShopeeOfferSyncService({
+      provider,
+      offers,
+      maxOffersPerSync: 5,
+      logger,
+    });
+
+    const report = await service.run({ limit: 5, page: 1 });
+
+    expect(report).toMatchObject({
+      fetched: 5,
+      valid: 5,
+      created: 5,
+      updated: 0,
+      rejected: 0,
+      rejectionSummary: {},
+      affiliateLinkPresentCount: 5,
+    });
+    expect(offers.store.size).toBe(5);
+    expect(
+      [...offers.store.values()].every(
+        (offer) => offer.affiliateLink === affiliateLink,
+      ),
+    ).toBe(true);
   });
 });
