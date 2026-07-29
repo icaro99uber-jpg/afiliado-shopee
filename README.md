@@ -238,6 +238,27 @@ Consulte [docs/shopee-affiliate.md](docs/shopee-affiliate.md) para os campos
 confirmados em `productOfferV2`, assinatura, transporte, formato JSON/CSV,
 configuração, score, Sub_ids, cupons e limitações operacionais da Sprint 18.1.
 
+### Histórico comercial das ofertas oficiais
+
+O sync de `OFFICIAL` persiste o estado atual e seu
+`CommercialOfferSnapshot` atomicamente. O fingerprint canônico considera
+preços, desconto, comissão, vigência e indisponibilidade: A → B → A cria as
+revisions 1, 2 e 3, mas A → A não duplica snapshot. Rating e vendas são
+observados no snapshot quando uma revision é criada e não causam revision
+isoladamente. `capturedAt` usa o `fetchedAt` original; revision representa uma
+mudança comercial, não uma nova coleta.
+
+Produtos oficiais anteriores à migration são inicializados somente pelo
+backfill local explícito e idempotente:
+
+```powershell
+corepack pnpm commercial:snapshots:backfill -- --confirm-local-official-backfill
+```
+
+O comando exige preview, automação pausada/desabilitada, ambos os Schedulers e
+group send desligados e zero worker de dispatch. Ele não chama a Shopee, Redis,
+Evolution ou WhatsApp. Mineração, sinais e filas continuam fora desta etapa.
+
 ## Score Engine
 
 O Score Engine calcula e persiste um score matemático de 0 a 100 para cada produto salvo, sem uso de IA, OpenAI, WhatsApp, Analytics ou ranking.

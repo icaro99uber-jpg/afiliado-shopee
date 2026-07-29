@@ -55,11 +55,24 @@ Persistência:
 - Preços e valores monetários novos usam `Decimal`; o domínio usa strings
   decimais. Atualizações preservam IDs, copies e dispatches.
 - `lastSeenAt` é atualizado; produtos não são apagados automaticamente.
+- Ofertas `OFFICIAL` usam `CommercialOfferSnapshot` para registrar somente
+  mudanças de preço, desconto, comissão, vigência ou indisponibilidade. O
+  `ProductLead` guarda a revision e o fingerprint do último snapshot.
+- O upsert oficial atualiza produto, revision, fingerprint e snapshot na mesma
+  transação. Estados A → B → A produzem revisions 1, 2 e 3; observações
+  consecutivas iguais não duplicam snapshot. Rating e vendas são capturados no
+  snapshot criado, mas mudanças isoladas nesses campos não abrem revision.
+- `capturedAt` usa o `fetchedAt` observado, enquanto revision representa uma
+  mudança comercial e não a quantidade de sincronizações.
+- O baseline local é explícito e idempotente por
+  `commercial:snapshots:backfill`; não chama a Shopee, não usa fila e processa
+  somente produtos `OFFICIAL` ainda na revision zero.
 
 Segurança operacional:
 
 - O sync não recebe dependências de Copy, BullMQ, Pipeline, Scheduler ou
   WhatsApp.
+- Mineração, sinais promocionais e filas não fazem parte dos snapshots.
 - O sync oficial controlado exige preflight, uma flag exata, no máximo uma
   página/cinco produtos e um marcador local que bloqueia repetição.
 - As duas leituras reais da Sprint 18.1 foram consumidas. A segunda retornou

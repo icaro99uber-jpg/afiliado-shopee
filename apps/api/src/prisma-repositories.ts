@@ -24,6 +24,7 @@ import type {
   CommercialNicheRecord,
   CommercialNicheRepository,
   CommercialOfferCandidateFilters,
+  CommercialOfferSnapshotBackfillRepository,
   CommercialPipelineRunData,
   CommercialPipelineRunFilters,
   CommercialPipelineRunRecord,
@@ -66,27 +67,31 @@ import {
   COMMERCIAL_EXECUTION_OWNERSHIP_LOST,
   isCommercialAutomationExecutionStale,
 } from './commercial-automation-execution-domain';
+import {
+  fingerprintCommercialOffer,
+  type CommercialOfferFingerprintInput,
+} from './commercial-offer-snapshot';
+
+const prismaErrorCode = (error: unknown) =>
+  typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
 
 const isUniqueConstraintError = (error: unknown) =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: string }).code === 'P2002';
+  prismaErrorCode(error) === 'P2002';
 
 const isRecordNotFoundError = (error: unknown) =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: string }).code === 'P2025';
+  prismaErrorCode(error) === 'P2025';
 
 const isTransactionConflictError = (error: unknown) =>
-  typeof error === 'object' &&
-  error !== null &&
-  'code' in error &&
-  (error as { code?: string }).code === 'P2034';
+  prismaErrorCode(error) === 'P2034';
+
+const isPrismaKnownError = (error: unknown) =>
+  /^P\d{4}$/.test(prismaErrorCode(error) ?? '');
 
 class CommercialConfirmationNotClaimedError extends Error {}
 class CommercialOutboxStateConflictError extends Error {}
+class OfficialOfferSnapshotConflictError extends Error {}
 
 type PrismaDecimalLike = { toString(): string } | number | string;
 
@@ -96,16 +101,21 @@ const decimalString = (value: PrismaDecimalLike | null | undefined) =>
 const decimalNumber = (value: PrismaDecimalLike | null | undefined) =>
   value === null || value === undefined ? 0 : Number(value.toString());
 
-const mapProductLead = (
-  record: Record<string, unknown>,
-): ProductLeadRecord => ({
-  ...(record as unknown as ProductLeadRecord),
-  preco: decimalNumber(record.preco as PrismaDecimalLike),
-  comissao: Number(record.comissao),
-  url: (record.productLink as string | null | undefined) ?? null,
-  commissionAmount:
-    decimalString(record.commissionAmount as PrismaDecimalLike | null) ?? null,
-});
+const mapProductLead = (record: Record<string, unknown>): ProductLeadRecord => {
+  const publicRecord = { ...record };
+  delete publicRecord.commercialSnapshotRevision;
+  delete publicRecord.commercialSnapshotFingerprint;
+  delete publicRecord.commercialOfferSnapshots;
+  return {
+    ...(publicRecord as unknown as ProductLeadRecord),
+    preco: decimalNumber(record.preco as PrismaDecimalLike),
+    comissao: Number(record.comissao),
+    url: (record.productLink as string | null | undefined) ?? null,
+    commissionAmount:
+      decimalString(record.commissionAmount as PrismaDecimalLike | null) ??
+      null,
+  };
+};
 
 const toPrismaProductData = (data: ProductLeadData) => ({
   source: 'MOCK' as const,
@@ -197,6 +207,90 @@ const toPrismaShopeeOffer = (offer: ShopeeProductOffer) => ({
   unavailableAt: null,
   title: offer.productName,
 });
+
+const officialSnapshotConflict = () =>
+  new AppError(
+    'Estado do snapshot oficial mudou durante a atualizacao',
+    'SHOPEE_OFFICIAL_SNAPSHOT_CONFLICT',
+  );
+
+type CommercialSnapshotMaterial = CommercialOfferFingerprintInput & {
+  observedRating: number;
+  observedSales: number;
+  capturedAt: Date;
+};
+
+const snapshotMaterialFromOffer = (
+  offer: ShopeeProductOffer,
+): CommercialSnapshotMaterial => ({
+  price: offer.price,
+  priceMin: offer.priceMin,
+  priceMax: offer.priceMax,
+  discountRate: offer.discountRate,
+  commissionRate: offer.commissionRate,
+  observedRating: offer.rating,
+  observedSales: offer.sales,
+  offerStartsAt: offer.offerStartsAt,
+  offerEndsAt: offer.offerEndsAt,
+  unavailableAt: null,
+  capturedAt: offer.fetchedAt,
+});
+
+const snapshotMaterialFromPersistedOffer = (
+  record: Record<string, unknown>,
+): CommercialSnapshotMaterial => ({
+  price: decimalString(record.preco as PrismaDecimalLike) as string,
+  priceMin: decimalString(record.precoMin as PrismaDecimalLike | null) ?? null,
+  priceMax: decimalString(record.precoMax as PrismaDecimalLike | null) ?? null,
+  discountRate: Number(record.desconto),
+  commissionRate: Number(record.comissao),
+  observedRating: Number(record.nota),
+  observedSales: Number(record.vendidos),
+  offerStartsAt: (record.offerStartsAt as Date | null) ?? null,
+  offerEndsAt: (record.offerEndsAt as Date | null) ?? null,
+  unavailableAt: (record.unavailableAt as Date | null) ?? null,
+  capturedAt: record.fetchedAt as Date,
+});
+
+const snapshotData = (
+  material: CommercialSnapshotMaterial,
+  productId: string,
+  revision: number,
+  fingerprint: string,
+) => ({
+  productId,
+  revision,
+  fingerprint,
+  price: material.price,
+  priceMin: material.priceMin,
+  priceMax: material.priceMax,
+  discountRate: material.discountRate,
+  commissionRate: material.commissionRate,
+  observedRating: material.observedRating,
+  observedSales: material.observedSales,
+  offerStartsAt: material.offerStartsAt,
+  offerEndsAt: material.offerEndsAt,
+  unavailableAt: material.unavailableAt,
+  capturedAt: material.capturedAt,
+});
+
+const throwOfficialSnapshotPersistenceError = (error: unknown): never => {
+  if (
+    error instanceof OfficialOfferSnapshotConflictError ||
+    isUniqueConstraintError(error) ||
+    isRecordNotFoundError(error) ||
+    isTransactionConflictError(error)
+  ) {
+    throw officialSnapshotConflict();
+  }
+  if (isPrismaKnownError(error)) {
+    throw new AppError(
+      'Falha ao persistir snapshot oficial',
+      'SHOPEE_OFFICIAL_SNAPSHOT_PERSISTENCE_FAILED',
+    );
+  }
+  throw error;
+};
 
 export class PrismaAnalyticsRepository implements AnalyticsRepository {
   constructor(
@@ -323,8 +417,10 @@ export class PrismaProductRepository implements ProductRepository {
   }
 }
 
-export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
-  constructor(private readonly prisma: Pick<DatabaseClient, 'productLead'>) {}
+export class PrismaShopeeOfferRepository
+  implements ShopeeOfferRepository, CommercialOfferSnapshotBackfillRepository
+{
+  constructor(private readonly prisma: DatabaseClient) {}
 
   async findBySourceAndProviderProductId(
     source: ShopeeOfferRecord['source'],
@@ -352,6 +448,177 @@ export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
       data: toPrismaShopeeOffer(offer),
     });
     return mapShopeeOffer(record as unknown as Record<string, unknown>);
+  }
+
+  async upsertOfficialOfferWithSnapshot(offer: ShopeeProductOffer) {
+    if (offer.source !== 'OFFICIAL') {
+      throw new AppError(
+        'Snapshot comercial exige oferta oficial',
+        'SHOPEE_OFFICIAL_SNAPSHOT_SOURCE_REQUIRED',
+      );
+    }
+    const material = snapshotMaterialFromOffer(offer);
+    const fingerprint = fingerprintCommercialOffer(material);
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await transaction.productLead.findUnique({
+            where: {
+              source_providerProductId: {
+                source: 'OFFICIAL',
+                providerProductId: offer.providerProductId,
+              },
+            },
+          });
+          if (!current) {
+            const product = await transaction.productLead.create({
+              data: {
+                ...toPrismaShopeeOffer(offer),
+                commercialSnapshotRevision: 1,
+                commercialSnapshotFingerprint: fingerprint,
+              },
+            });
+            await transaction.commercialOfferSnapshot.create({
+              data: snapshotData(material, product.id, 1, fingerprint),
+            });
+            return {
+              product: mapShopeeOffer(
+                product as unknown as Record<string, unknown>,
+              ),
+              productAction: 'created' as const,
+              commercialStateChanged: true,
+              snapshotCreated: true,
+              snapshotRevision: 1,
+            };
+          }
+
+          const currentRevision = current.commercialSnapshotRevision;
+          const currentFingerprint = current.commercialSnapshotFingerprint;
+          const lastSnapshot =
+            await transaction.commercialOfferSnapshot.findFirst({
+              where: { productId: current.id },
+              orderBy: { revision: 'desc' },
+              select: { revision: true, fingerprint: true },
+            });
+          const coherent =
+            currentRevision === 0
+              ? currentFingerprint === null && lastSnapshot === null
+              : currentFingerprint !== null &&
+                lastSnapshot?.revision === currentRevision &&
+                lastSnapshot.fingerprint === currentFingerprint;
+          if (!coherent) throw new OfficialOfferSnapshotConflictError();
+
+          const commercialStateChanged = currentFingerprint !== fingerprint;
+          const snapshotRevision = commercialStateChanged
+            ? currentRevision + 1
+            : currentRevision;
+          const product = await transaction.productLead.update({
+            where: {
+              id: current.id,
+              source: 'OFFICIAL',
+              commercialSnapshotRevision: currentRevision,
+              commercialSnapshotFingerprint: currentFingerprint,
+            },
+            data: {
+              ...toPrismaShopeeOffer(offer),
+              commercialSnapshotRevision: snapshotRevision,
+              commercialSnapshotFingerprint: commercialStateChanged
+                ? fingerprint
+                : currentFingerprint,
+            },
+          });
+          if (commercialStateChanged) {
+            await transaction.commercialOfferSnapshot.create({
+              data: snapshotData(
+                material,
+                current.id,
+                snapshotRevision,
+                fingerprint,
+              ),
+            });
+          }
+          return {
+            product: mapShopeeOffer(
+              product as unknown as Record<string, unknown>,
+            ),
+            productAction: 'updated' as const,
+            commercialStateChanged,
+            snapshotCreated: commercialStateChanged,
+            snapshotRevision,
+          };
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error) {
+      return throwOfficialSnapshotPersistenceError(error);
+    }
+  }
+
+  countOfficialProducts() {
+    return this.prisma.productLead.count({ where: { source: 'OFFICIAL' } });
+  }
+
+  countOfficialProductsPendingSnapshot() {
+    return this.prisma.productLead.count({
+      where: { source: 'OFFICIAL', commercialSnapshotRevision: 0 },
+    });
+  }
+
+  async listOfficialProductIdsPendingSnapshot(limit: number) {
+    const records = await this.prisma.productLead.findMany({
+      where: { source: 'OFFICIAL', commercialSnapshotRevision: 0 },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+      take: Math.min(Math.max(limit, 1), 100),
+    });
+    return records.map(({ id }) => id);
+  }
+
+  async initializeOfficialProductSnapshot(productId: string) {
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await transaction.productLead.findUnique({
+            where: { id: productId },
+          });
+          if (!current || current.source !== 'OFFICIAL') return false;
+          if (current.commercialSnapshotRevision > 0) return false;
+          if (current.commercialSnapshotFingerprint !== null) {
+            throw new OfficialOfferSnapshotConflictError();
+          }
+          const existingSnapshot =
+            await transaction.commercialOfferSnapshot.findFirst({
+              where: { productId },
+              select: { id: true },
+            });
+          if (existingSnapshot) throw new OfficialOfferSnapshotConflictError();
+
+          const record = current as unknown as Record<string, unknown>;
+          const material = snapshotMaterialFromPersistedOffer(record);
+          const fingerprint = fingerprintCommercialOffer(material);
+          const updated = await transaction.productLead.updateMany({
+            where: {
+              id: productId,
+              source: 'OFFICIAL',
+              commercialSnapshotRevision: 0,
+              commercialSnapshotFingerprint: null,
+            },
+            data: {
+              commercialSnapshotRevision: 1,
+              commercialSnapshotFingerprint: fingerprint,
+            },
+          });
+          if (updated.count !== 1) return false;
+          await transaction.commercialOfferSnapshot.create({
+            data: snapshotData(material, productId, 1, fingerprint),
+          });
+          return true;
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error) {
+      return throwOfficialSnapshotPersistenceError(error);
+    }
   }
 
   async findOfferById(id: string): Promise<ShopeeOfferRecord | null> {

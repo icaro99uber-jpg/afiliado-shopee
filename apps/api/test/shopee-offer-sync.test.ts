@@ -7,6 +7,7 @@ import {
   type ShopeeProductOffer,
 } from '@shopee-auto-affiliate-ai/providers';
 import { ShopeeOfferSyncService } from '../src/shopee-offer-sync-service';
+import { fingerprintCommercialOffer } from '../src/commercial-offer-snapshot';
 import type {
   ShopeeOfferFilters,
   ShopeeOfferRecord,
@@ -14,9 +15,14 @@ import type {
 } from '../src/repositories';
 
 const logger = { info: vi.fn(), error: vi.fn() };
+const observedAt = new Date('2026-07-29T15:00:00.000Z');
 
 class MemoryOfferRepository implements ShopeeOfferRepository {
   readonly store = new Map<string, ShopeeOfferRecord>();
+  readonly snapshots = new Map<
+    string,
+    { fingerprint: string; revision: number }
+  >();
 
   async findBySourceAndProviderProductId(
     source: ShopeeProductOffer['source'],
@@ -56,6 +62,55 @@ class MemoryOfferRepository implements ShopeeOfferRepository {
     return updated;
   }
 
+  async upsertOfficialOfferWithSnapshot(offer: ShopeeProductOffer) {
+    const existing = [...this.store.values()].find(
+      (item) =>
+        item.source === 'OFFICIAL' &&
+        item.providerProductId === offer.providerProductId,
+    );
+    const commercialFingerprint = fingerprintCommercialOffer({
+      price: offer.price,
+      priceMin: offer.priceMin,
+      priceMax: offer.priceMax,
+      discountRate: offer.discountRate,
+      commissionRate: offer.commissionRate,
+      offerStartsAt: offer.offerStartsAt,
+      offerEndsAt: offer.offerEndsAt,
+      unavailableAt: null,
+    });
+    if (!existing) {
+      const product = await this.createOffer(offer);
+      this.snapshots.set(product.id, {
+        fingerprint: commercialFingerprint,
+        revision: 1,
+      });
+      return {
+        product,
+        productAction: 'created' as const,
+        commercialStateChanged: true,
+        snapshotCreated: true,
+        snapshotRevision: 1,
+      };
+    }
+    const current = this.snapshots.get(existing.id) as {
+      fingerprint: string;
+      revision: number;
+    };
+    const changed = current.fingerprint !== commercialFingerprint;
+    const revision = changed ? current.revision + 1 : current.revision;
+    this.snapshots.set(existing.id, {
+      fingerprint: changed ? commercialFingerprint : current.fingerprint,
+      revision,
+    });
+    return {
+      product: await this.updateOffer(existing.id, offer),
+      productAction: 'updated' as const,
+      commercialStateChanged: changed,
+      snapshotCreated: changed,
+      snapshotRevision: revision,
+    };
+  }
+
   async findOfferById(id: string) {
     return this.store.get(id) ?? null;
   }
@@ -86,6 +141,109 @@ const manual = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('ShopeeOfferSyncService', () => {
+  it('usa somente o boundary atomico para OFFICIAL', async () => {
+    const product = await new MemoryOfferRepository().createOffer({
+      ...manual(),
+      source: 'OFFICIAL',
+      categoryIds: [],
+      priceMin: '99.90',
+      priceMax: '99.90',
+      fetchedAt: observedAt,
+    } as ShopeeProductOffer);
+    const atomicUpsert = vi.fn(async () => ({
+      product,
+      productAction: 'created' as const,
+      commercialStateChanged: true,
+      snapshotCreated: true,
+      snapshotRevision: 1,
+    }));
+    const separateFind = vi.fn();
+    const separateCreate = vi.fn();
+    const separateUpdate = vi.fn();
+    const repository = {
+      upsertOfficialOfferWithSnapshot: atomicUpsert,
+      findBySourceAndProviderProductId: separateFind,
+      createOffer: separateCreate,
+      updateOffer: separateUpdate,
+    } as unknown as ShopeeOfferRepository;
+    const provider = {
+      source: 'OFFICIAL' as const,
+      listProductOffers: async () => ({
+        items: [product],
+        page: 1,
+        limit: 1,
+        hasNextPage: false,
+      }),
+    };
+    const service = new ShopeeOfferSyncService({
+      provider,
+      offers: repository,
+      maxOffersPerSync: 1,
+      logger,
+    });
+
+    await expect(service.run()).resolves.toMatchObject({
+      created: 1,
+      snapshotsCreated: 1,
+      snapshotsUnchanged: 0,
+    });
+    expect(atomicUpsert).toHaveBeenCalledOnce();
+    expect(separateFind).not.toHaveBeenCalled();
+    expect(separateCreate).not.toHaveBeenCalled();
+    expect(separateUpdate).not.toHaveBeenCalled();
+  });
+
+  it('nao cria snapshot para oferta OFFICIAL invalida ou expirada', async () => {
+    const atomicUpsert = vi.fn();
+    const provider = {
+      source: 'OFFICIAL' as const,
+      listProductOffers: async () => ({
+        items: [
+          {
+            ...manual({
+              providerProductId: '',
+              priceMin: '99.90',
+              priceMax: '99.90',
+            }),
+            source: 'OFFICIAL' as const,
+            categoryIds: [],
+            fetchedAt: observedAt,
+          },
+          {
+            ...manual({
+              providerProductId: 'expired-official',
+              priceMin: '99.90',
+              priceMax: '99.90',
+            }),
+            source: 'OFFICIAL' as const,
+            categoryIds: [],
+            offerEndsAt: new Date('2026-07-28T00:00:00.000Z'),
+            fetchedAt: observedAt,
+          },
+        ] as unknown as ShopeeProductOffer[],
+        page: 1,
+        limit: 2,
+        hasNextPage: false,
+      }),
+    };
+    const service = new ShopeeOfferSyncService({
+      provider,
+      offers: {
+        upsertOfficialOfferWithSnapshot: atomicUpsert,
+      } as unknown as ShopeeOfferRepository,
+      maxOffersPerSync: 2,
+      logger,
+      now: () => new Date('2026-07-29T00:00:00.000Z'),
+    });
+    await expect(service.run()).resolves.toMatchObject({
+      skipped: 1,
+      expired: 1,
+      snapshotsCreated: 0,
+      snapshotsUnchanged: 0,
+    });
+    expect(atomicUpsert).not.toHaveBeenCalled();
+  });
+
   it('cria, deduplica e atualiza preco e comissao sem dispatch ou fila', async () => {
     const offers = new MemoryOfferRepository();
     const first = new ShopeeOfferSyncService({
@@ -195,6 +353,8 @@ describe('ShopeeOfferSyncService', () => {
       valid: 1,
       created: 1,
       updated: 0,
+      snapshotsCreated: 1,
+      snapshotsUnchanged: 0,
       rejected: 1,
       expired: 0,
       hasNextPage: true,
@@ -265,6 +425,8 @@ describe('ShopeeOfferSyncService', () => {
       valid: 5,
       created: 5,
       updated: 0,
+      snapshotsCreated: 5,
+      snapshotsUnchanged: 0,
       rejected: 0,
       rejectionSummary: {},
       affiliateLinkPresentCount: 5,
@@ -275,5 +437,13 @@ describe('ShopeeOfferSyncService', () => {
         (offer) => offer.affiliateLink === affiliateLink,
       ),
     ).toBe(true);
+
+    await expect(service.run({ limit: 5, page: 1 })).resolves.toMatchObject({
+      created: 0,
+      updated: 5,
+      snapshotsCreated: 0,
+      snapshotsUnchanged: 5,
+    });
+    expect(offers.snapshots.size).toBe(5);
   });
 });

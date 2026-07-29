@@ -17,6 +17,7 @@ export const APPLICATION_TABLES = [
   'CommercialDispatchOutbox',
   'CommercialAutomationSettings',
   'CommercialAutomationExecution',
+  'CommercialOfferSnapshot',
 ] as const;
 
 const BASELINE_COLUMNS = {

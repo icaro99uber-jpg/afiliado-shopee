@@ -216,6 +216,34 @@ numéricos. Produtos não são apagados automaticamente. `lastSeenAt` registra a
 última observação e `unavailableAt` fica disponível para uma política futura
 explícita.
 
+### Snapshots comerciais OFFICIAL
+
+O caminho `OFFICIAL` usa um upsert transacional exclusivo: `ProductLead`,
+`commercialSnapshotRevision`, `commercialSnapshotFingerprint` e o eventual
+`CommercialOfferSnapshot` são atualizados juntos. O fingerprint SHA-256
+canônico inclui preço/faixa, desconto, comissão, início, término e
+indisponibilidade. Ele não inclui rating, vendas, nomes, URLs, IDs ou horários
+operacionais.
+
+Revision representa uma mudança comercial, enquanto `fetchedAt` representa a
+observação recebida. Assim, A → A mantém a revision atual e A → B → A cria três
+revisions, preservando o retorno ao estado anterior. Rating e vendas são
+registrados no snapshot quando uma revision é criada, mas alterações isoladas
+nessas observações apenas atualizam o produto. `capturedAt` é sempre o
+`fetchedAt` da oferta, inclusive no baseline.
+
+Produtos `OFFICIAL` existentes na revision zero são inicializados em lotes de
+até 100 pelo comando local explícito e idempotente:
+
+```powershell
+corepack pnpm commercial:snapshots:backfill -- --confirm-local-official-backfill
+```
+
+O backfill exige preview, automação pausada e desabilitada, os dois Schedulers
+e group send desligados e zero worker de dispatch. Ele usa somente PostgreSQL
+local, não altera dados comerciais e não chama Shopee, Redis, Evolution ou
+WhatsApp. Mineração, sinais promocionais e filas permanecem fora desta task.
+
 A fórmula `legacy-v1` permanece para `MOCK` e `MANUAL`:
 
 - comissão: 35%, normalizada entre 0 e 20%;

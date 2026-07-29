@@ -17,7 +17,8 @@
     "shopee:official:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-preflight.ts",
     "shopee:official:sync": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-sync.ts",
     "commercial:dry-run": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-cli.ts",
-    "commercial:official:diagnose": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-official-diagnosis.ts"
+    "commercial:official:diagnose": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-official-diagnosis.ts",
+    "commercial:snapshots:backfill": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-offer-snapshot-backfill.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

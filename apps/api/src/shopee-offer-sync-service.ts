@@ -18,6 +18,8 @@ export type ShopeeOfferSyncReport = {
   expired: number;
   hasNextPage: boolean;
   affiliateLinkPresentCount: number;
+  snapshotsCreated: number;
+  snapshotsUnchanged: number;
   rejectionSummary: Record<string, number>;
 };
 
@@ -99,6 +101,8 @@ export class ShopeeOfferSyncService {
       expired: 0,
       hasNextPage: false,
       affiliateLinkPresentCount: 0,
+      snapshotsCreated: 0,
+      snapshotsUnchanged: 0,
       rejectionSummary: {},
     };
 
@@ -143,6 +147,15 @@ export class ShopeeOfferSyncService {
         if (offer.affiliateLink) report.affiliateLinkPresentCount += 1;
         if (offer.offerEndsAt && offer.offerEndsAt <= now) {
           report.expired += 1;
+          continue;
+        }
+
+        if (offer.source === 'OFFICIAL') {
+          const outcome =
+            await this.options.offers.upsertOfficialOfferWithSnapshot(offer);
+          report[outcome.productAction] += 1;
+          if (outcome.snapshotCreated) report.snapshotsCreated += 1;
+          else report.snapshotsUnchanged += 1;
           continue;
         }
 
