@@ -43,9 +43,10 @@ Providers:
   internet, com filtros/paginação e campos opcionais ausentes.
 - `ManualShopeeAffiliateOfferProvider`: exige dados completos, URLs HTTP/HTTPS
   e `affiliateLink` informado pelo usuário; preserva origem `MANUAL`.
-- `OfficialShopeeAffiliateOfferProvider`: aceita signer/transport injetáveis,
-  mas não chama nenhum deles. Sem configuração retorna
-  `SHOPEE_API_NOT_CONFIGURED`; autenticação e transporte aguardam a Task 15.2.
+- `OfficialShopeeAffiliateOfferProvider`: usa signer SHA-256 puro e transport
+  GraphQL com clock/fetch injetáveis, timeout, abort, resposta limitada e erros
+  sanitizados. Sem configuração retorna `SHOPEE_API_NOT_CONFIGURED`; a URL é
+  restrita ao endpoint oficial confirmado.
 
 Persistência:
 
@@ -59,10 +60,15 @@ Segurança operacional:
 
 - O sync não recebe dependências de Copy, BullMQ, Pipeline, Scheduler ou
   WhatsApp.
+- O sync oficial controlado exige preflight, uma flag exata, no máximo uma
+  página/cinco produtos e um marcador local que bloqueia repetição.
 - Importação CLI é dry-run por padrão e grava somente com `--confirm-import`.
 - `official` nunca inventa assinatura, headers, URL GraphQL ou rate limit.
 - Sub_ids são metadados separados; links manuais nunca são alterados.
-- Scraping, browser automation e endpoints privados/mobile são proibidos.
+- Scraping e endpoints privados/mobile são proibidos. A única automação de
+  navegador permitida é a captura documental local, efêmera e sanitizada nos
+  dois hosts oficiais; ela bloqueia POST GraphQL e não persiste credenciais,
+  storage, cookies, HAR, headers brutos ou screenshots.
 
 ## Coupons
 
@@ -782,7 +788,7 @@ Observabilidade:
   dashboard nao ganhou controles nesta sprint.
 - `commercial:execution:status` e somente leitura. A recuperacao aceita somente
   `commercial:execution:recover -- --execution-id=<id>
-  --confirm-stale-recovery`, exige preview, automacao desabilitada/pausada e os
+--confirm-stale-recovery`, exige preview, automacao desabilitada/pausada e os
   dois Schedulers desligados; nao inicia worker/provider nem publica outbox.
 - Recuperacao stale usa somente evidencia persistida e compare-and-set:
   ausencia segura de efeitos termina `FAILED`, job publicado comprovado termina

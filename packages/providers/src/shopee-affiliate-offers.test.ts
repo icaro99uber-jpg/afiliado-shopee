@@ -98,23 +98,32 @@ describe('Shopee affiliate offer providers', () => {
     expect(signer.sign).not.toHaveBeenCalled();
   });
 
-  it('nao chama boundaries injetados mesmo com placeholders completos', async () => {
-    const transport = { execute: vi.fn() };
-    const signer = { sign: vi.fn() };
+  it('usa o transport injetado somente quando a configuracao oficial e completa', async () => {
+    const transport = {
+      execute: vi.fn().mockResolvedValue({
+        data: {
+          productOfferV2: {
+            nodes: [],
+            pageInfo: { page: 1, limit: 5, hasNextPage: false, scrollId: '' },
+          },
+        },
+      }),
+    };
     const provider = new OfficialShopeeAffiliateOfferProvider({
       apiEnabled: true,
-      apiUrl: 'https://example.invalid/open-api',
+      apiUrl: 'https://open-api.affiliate.shopee.com.br/graphql',
       appId: 'placeholder-app-id',
       secret: 'placeholder-secret',
       transport,
-      signer,
     });
 
-    await expect(provider.listProductOffers()).rejects.toMatchObject({
-      code: 'SHOPEE_API_TRANSPORT_PENDING',
+    await expect(provider.listProductOffers()).resolves.toMatchObject({
+      items: [],
+      page: 1,
+      limit: 5,
+      hasNextPage: false,
     });
-    expect(transport.execute).not.toHaveBeenCalled();
-    expect(signer.sign).not.toHaveBeenCalled();
+    expect(transport.execute).toHaveBeenCalledOnce();
   });
 
   it('prepara Sub_ids como metadados separados sem alterar URL', () => {

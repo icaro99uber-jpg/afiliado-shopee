@@ -36,6 +36,7 @@ const POSTERIOR_MIGRATIONS = [
   '20260726200000_commercial_automation_scheduler',
   '20260728120000_commercial_dispatch_outbox',
   '20260728160000_commercial_execution_leases',
+  '20260728190000_shopee_official_shop_type',
 ] as const;
 
 const HISTORICAL_HASHES: Record<string, string> = {
@@ -59,6 +60,8 @@ const HISTORICAL_HASHES: Record<string, string> = {
     '08e10ab2a397c099ab5005ee4f614a5792379ba2a0b9950b93de075e769ba1c9',
   '20260728160000_commercial_execution_leases':
     '2305ac810e858a51496d3562dd0c522283b1443efdf261090c799ac0a27292e4',
+  '20260728190000_shopee_official_shop_type':
+    'a8e4cf128f2712d2b2855f4a1e4ab00806e0b2905133f115d40f96ddf2aac475',
 };
 
 const migration = (migrationName: string, finished = true) => ({

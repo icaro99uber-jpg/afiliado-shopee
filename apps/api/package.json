@@ -12,18 +12,23 @@
     "test": "vitest run",
     "test:runtime": "vitest run test/runtime-esm.test.ts",
     "shopee:import": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-import.ts",
+    "shopee:official:capture-contract": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-contract-capture.ts",
+    "shopee:official:configure": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-configure.ts",
+    "shopee:official:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-preflight.ts",
+    "shopee:official:sync": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-sync.ts",
     "commercial:dry-run": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@shopee-auto-affiliate-ai/config": "workspace:*",
-    "fastify": "^5.0.0",
     "@shopee-auto-affiliate-ai/database": "workspace:*",
     "@shopee-auto-affiliate-ai/providers": "workspace:*",
+    "@shopee-auto-affiliate-ai/queue": "workspace:*",
     "@shopee-auto-affiliate-ai/shared": "workspace:*",
-    "@shopee-auto-affiliate-ai/queue": "workspace:*"
+    "fastify": "^5.0.0"
   },
   "devDependencies": {
+    "playwright-core": "1.51.1",
     "tsx": "^4.16.0",
     "vitest": "^2.0.0"
   }

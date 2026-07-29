@@ -1,16 +1,17 @@
 # Fundação Shopee Affiliate Open API
 
-Esta fundação prepara ofertas, importação manual, cupons e preview de copy sem
-credenciais e sem chamadas reais à Shopee. Scraping, automação de navegador,
-endpoints privados/mobile e qualquer tentativa de contornar autenticação são
-proibidos.
+Esta fundação prepara ofertas, importação manual, cupons e preview de copy.
+Scraping, endpoints privados/mobile e qualquer tentativa de contornar
+autenticação são proibidos. A captura documental local da Sprint 18.1 limita a
+automação aos dois hosts oficiais, usa perfil efêmero e persiste somente
+evidência sanitizada em diretório ignorado pelo Git.
 
 ## Evidência oficial pública
 
-Em 24 de julho de 2026, o
+Em 28 de julho de 2026, o
 [Explorer oficial V2](https://open-api.affiliate.shopee.com.br/explorer/v2) e a
 [documentação oficial do programa](https://affiliate.shopee.com.br/open_api/document?type=overview)
-eram as fontes públicas consultadas. O Explorer permite observar a consulta
+foram renderizados nos hosts oficiais. O Explorer confirma a consulta
 `productOfferV2` com estes campos:
 
 - `nodes`: `productName`, `itemId`, `commissionRate`, `commission`, `price`,
@@ -20,15 +21,38 @@ eram as fontes públicas consultadas. O Explorer permite observar a consulta
   `sellerCommissionRate` e `shopeeCommissionRate`;
 - `pageInfo`: `page`, `limit`, `hasNextPage` e `scrollId`.
 
-Esses nomes observáveis fundamentam somente o mapeamento de domínio. Eles não
-confirmam semântica, unidade monetária, comportamento de cursor ou contrato de
-transporte.
+O contrato de
+[requisição e resposta](https://affiliate.shopee.com.br/open_api/document?type=request_response)
+confirma `POST https://open-api.affiliate.shopee.com.br/graphql`, body JSON com
+`query`, `operationName` opcional e `variables` opcionais, e envelope GraphQL
+`data`/`errors`, inclusive quando o HTTP é 200. O content type é
+`application/json`.
 
-Não estão confirmados para esta conta: URL GraphQL de transporte, algoritmo de
-assinatura, headers de autenticação, formato definitivo de App ID/Secret, rate
-limits, paginação real além dos campos visíveis e endpoint oficial de cupons.
+A página oficial de
+[autenticação](https://affiliate.shopee.com.br/open_api/document?type=authentication)
+confirma o header:
 
-**Autenticação e transporte real aguardam credenciais e documentação liberada para a conta.**
+```text
+Authorization: SHA256 Credential=<AppId>, Timestamp=<Unix-seconds>, Signature=<sha256-hex-lowercase>
+```
+
+O material assinado, sem separadores adicionais, é `AppId + Timestamp + body
+JSON exato + Secret`. O timestamp usa segundos Unix e pode diferir no máximo
+dez minutos do servidor. A fixture pública oficial foi reproduzida em teste
+determinístico; seus valores demonstrativos não são configuração local.
+
+O limite documentado é 8.000 chamadas por hora. `scrollId` é de uso único,
+expira em 30 segundos e deve ser usado na página seguinte; uma nova consulta
+sem cursor deve respeitar intervalo superior a 30 segundos. O limite oficial
+por página é 500, mas o comando controlado desta sprint fixa uma página e no
+máximo cinco produtos, concurrency 1 e nenhum retry.
+
+O Explorer descreve dinheiro como string na moeda local e taxas como razão
+decimal (`0.0123` representa `1.23%`). A unidade de `periodStartTime` e
+`periodEndTime` ainda precisa ser confirmada pela única resposta real
+sanitizada; ela não é deduzida da nomenclatura. A documentação observada não
+define restrições adicionais para o formato do App ID além do identificador
+fornecido pelo portal, nem confirmou endpoint de cupons nesta sprint.
 
 ## Arquitetura
 
@@ -43,10 +67,10 @@ Providers disponíveis:
   URLs `example.invalid`, com filtros e paginação local; nunca acessa internet.
 - `ManualShopeeAffiliateOfferProvider`: valida JSON/CSV local, exige link
   afiliado explícito e nunca consulta ou completa uma página de produto.
-- `OfficialShopeeAffiliateOfferProvider`: boundary com `transport` e `signer`
-  injetáveis. Sem configuração retorna `SHOPEE_API_NOT_CONFIGURED`; mesmo com
-  placeholders completos, o transporte permanece bloqueado por
-  `SHOPEE_API_TRANSPORT_PENDING` até a Task 15.2.
+- `OfficialShopeeAffiliateOfferProvider`: signer SHA-256 puro, clock e `fetch`
+  injetáveis, timeout/abort, limite de resposta e erros públicos sanitizados.
+  Sem configuração retorna `SHOPEE_API_NOT_CONFIGURED`; a URL aceita é apenas o
+  endpoint oficial confirmado.
 
 `ShopeeOfferSyncService` consulta no máximo
 `SHOPEE_AFFILIATE_SYNC_LIMIT` registros por execução, valida, ignora expirados,
@@ -66,9 +90,25 @@ SHOPEE_AFFILIATE_SYNC_LIMIT=20
 ```
 
 Valores de provider: `mock`, `manual` e `official`. `official` exige enabled,
-URL, App ID e Secret; nenhum desses valores é aceito por endpoint público ou
-renderizado no dashboard. Os nomes são internos e poderão ser mapeados ao
-contrato oficial depois da liberação da conta.
+URL oficial exata, App ID e Secret; nenhum desses valores é aceito por endpoint
+público ou renderizado no dashboard. `shopee:official:configure` grava somente
+o `.env` raiz ignorado, por entrada local oculta e escrita atômica.
+
+Comandos operacionais da Sprint 18.1:
+
+```powershell
+corepack pnpm shopee:official:capture-contract
+corepack pnpm shopee:official:configure
+corepack pnpm shopee:official:preflight
+corepack pnpm shopee:official:sync -- --confirm-one-real-read
+```
+
+O capture usa perfil efêmero, não salva screenshots, HAR, storage, cookies ou
+headers brutos e bloqueia POST GraphQL antes da rede. O preflight não lista
+produtos e exige preview, ambos os Schedulers desligados, automação desabilitada
+e pausada, envio em grupo desligado e nenhum worker/job ativo de dispatch. O
+sync mantém um marcador local ignorado antes do único request, limita a cinco
+itens e compara contagens comerciais antes/depois.
 
 ## Importação manual
 
@@ -158,16 +198,13 @@ está ativo. Cupom vencido, inativo ou com compra mínima não atendida é
 inelegível. O sistema não calcula preço final quando falta o valor da compra,
 não coleta cupons e não inclui cupom automaticamente na copy nesta task.
 
-## Task 15.2
+## Sprint 18.1
 
-Depois da liberação de credenciais e documentação da conta:
-
-1. confirmar contrato de autenticação, assinatura, headers e transporte;
-2. mapear os nomes internos de configuração sem expor segredo;
-3. implementar `transport` e `signer` oficiais com testes HTTP injetados;
-4. validar paginação, unidades, rate limits e erros documentados;
-5. executar uma única sincronização real controlada, sem pipeline ou envio;
-6. avaliar cupons somente se existir endpoint oficial documentado.
+Contrato, signer, transporte, mapeamento, configuração e guardas operacionais
+foram implementados com fixtures oficiais e HTTP mockado. A única sincronização
+real controlada permanece a etapa que confirma tipos opcionais e unidade dos
+timestamps; nenhuma segunda chamada pode ser feita por conveniência. Cupons
+continuam fora do escopo enquanto não houver endpoint oficial confirmado.
 
 ## Pipeline comercial dry-run — Task 16.1
 

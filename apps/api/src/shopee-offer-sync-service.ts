@@ -10,10 +10,14 @@ import type { ShopeeOfferRepository } from './repositories';
 export type ShopeeOfferSyncReport = {
   source: 'mock' | 'manual' | 'official';
   fetched: number;
+  valid: number;
   created: number;
   updated: number;
+  rejected: number;
   skipped: number;
   expired: number;
+  hasNextPage: boolean;
+  affiliateLinkPresentCount: number;
 };
 
 const isHttpUrl = (value: string) => {
@@ -72,10 +76,14 @@ export class ShopeeOfferSyncService {
     const report: ShopeeOfferSyncReport = {
       source,
       fetched: 0,
+      valid: 0,
       created: 0,
       updated: 0,
+      rejected: 0,
       skipped: 0,
       expired: 0,
+      hasNextPage: false,
+      affiliateLinkPresentCount: 0,
     };
 
     this.options.logger.info(
@@ -88,7 +96,9 @@ export class ShopeeOfferSyncService {
         ...input,
         limit,
       });
-      report.fetched = page.items.length;
+      report.fetched = page.fetchedCount ?? page.items.length;
+      report.rejected = page.rejected?.length ?? 0;
+      report.hasNextPage = page.hasNextPage;
       const seen = new Set<string>();
       const now = this.options.now?.() ?? new Date();
 
@@ -96,9 +106,12 @@ export class ShopeeOfferSyncService {
         const logicalKey = `${offer.source}:${offer.providerProductId}`;
         if (!isValidShopeeProductOffer(offer) || seen.has(logicalKey)) {
           report.skipped += 1;
+          report.rejected += 1;
           continue;
         }
         seen.add(logicalKey);
+        report.valid += 1;
+        if (offer.affiliateLink) report.affiliateLinkPresentCount += 1;
         if (offer.offerEndsAt && offer.offerEndsAt <= now) {
           report.expired += 1;
           continue;

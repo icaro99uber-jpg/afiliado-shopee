@@ -46,6 +46,7 @@ export type ProductLeadRecord = ProductLeadData & {
   source?: ShopeeAffiliateOfferSource;
   affiliateLink?: string | null;
   shopId?: string | null;
+  shopType?: number[];
   categoryIds?: string[];
   commissionAmount?: string | null;
   sellerCommissionRate?: number | null;

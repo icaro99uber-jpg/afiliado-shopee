@@ -728,6 +728,12 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
 
   app.post('/shopee/offers/sync', async (request, reply) => {
     try {
+      if (shopeeOfferProvider.source === 'OFFICIAL') {
+        throw new AppError(
+          'Sync official permitido somente pelo CLI controlado',
+          'SHOPEE_OFFICIAL_SYNC_CLI_REQUIRED',
+        );
+      }
       const body = (request.body ?? {}) as Record<string, unknown>;
       const input: ShopeeProductOfferListInput = {
         keyword:
@@ -764,14 +770,16 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       const code =
         error instanceof AppError ? error.code : 'SHOPEE_SYNC_FAILED';
       const status =
-        code === 'SHOPEE_API_NOT_CONFIGURED' ||
-        code === 'SHOPEE_API_TRANSPORT_PENDING'
-          ? 503
-          : code === 'SHOPEE_MANUAL_INPUT_REQUIRED' ||
-              code === 'INVALID_PAGINATION' ||
-              code === 'INVALID_HUNTER_FILTER'
-            ? 400
-            : 500;
+        code === 'SHOPEE_OFFICIAL_SYNC_CLI_REQUIRED'
+          ? 403
+          : code === 'SHOPEE_API_NOT_CONFIGURED' ||
+              code === 'SHOPEE_API_TRANSPORT_PENDING'
+            ? 503
+            : code === 'SHOPEE_MANUAL_INPUT_REQUIRED' ||
+                code === 'INVALID_PAGINATION' ||
+                code === 'INVALID_HUNTER_FILTER'
+              ? 400
+              : 500;
       return reply.status(status).send({
         error: code,
         message:

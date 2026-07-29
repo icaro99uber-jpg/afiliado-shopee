@@ -163,7 +163,7 @@ describe('Shopee offer API', () => {
     await app.close();
   });
 
-  it('retorna erro publico e nao chama HTTP no official incompleto', async () => {
+  it('bloqueia sync official pela API e nao chama transport ou signer', async () => {
     const transport = { execute: vi.fn() };
     const signer = { sign: vi.fn() };
     const { prisma } = createPrismaMock();
@@ -179,9 +179,9 @@ describe('Shopee offer API', () => {
       method: 'POST',
       url: '/shopee/offers/sync',
     });
-    expect(response.statusCode).toBe(503);
+    expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({
-      error: 'SHOPEE_API_NOT_CONFIGURED',
+      error: 'SHOPEE_OFFICIAL_SYNC_CLI_REQUIRED',
     });
     expect(transport.execute).not.toHaveBeenCalled();
     expect(signer.sign).not.toHaveBeenCalled();

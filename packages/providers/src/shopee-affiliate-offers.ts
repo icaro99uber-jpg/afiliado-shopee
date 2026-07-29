@@ -20,6 +20,7 @@ export type ShopeeProductOffer = {
   commissionAmount?: string;
   sellerCommissionRate?: number;
   shopeeCommissionRate?: number;
+  shopType?: number[];
   imageUrl: string;
   productLink: string;
   affiliateLink?: string;
@@ -49,6 +50,13 @@ export type ShopeeProductOfferPage = {
   limit: number;
   hasNextPage: boolean;
   nextCursor?: string;
+  fetchedCount?: number;
+  rejected?: ShopeeProductOfferRejection[];
+};
+
+export type ShopeeProductOfferRejection = {
+  index: number;
+  code: string;
 };
 
 export interface ShopeeAffiliateOfferProvider {

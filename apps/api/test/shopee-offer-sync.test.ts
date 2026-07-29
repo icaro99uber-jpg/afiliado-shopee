@@ -149,4 +149,54 @@ describe('ShopeeOfferSyncService', () => {
       created: 3,
     });
   });
+
+  it('consolida rejeicoes estruturadas e campos do relatorio controlado', async () => {
+    const offers = new MemoryOfferRepository();
+    const provider = {
+      source: 'OFFICIAL' as const,
+      listProductOffers: vi.fn().mockResolvedValue({
+        items: [
+          {
+            source: 'OFFICIAL' as const,
+            providerProductId: 'official-1',
+            productName: 'Produto oficial ficticio',
+            shopName: 'Loja ficticia',
+            categoryIds: [],
+            price: '10.00',
+            priceMin: '10.00',
+            priceMax: '10.00',
+            discountRate: 0,
+            rating: 5,
+            sales: 1,
+            commissionRate: 1,
+            imageUrl: 'https://example.invalid/image',
+            productLink: 'https://example.invalid/product',
+            affiliateLink: 'https://example.invalid/affiliate',
+            fetchedAt: new Date('2026-07-28T12:00:00.000Z'),
+          },
+        ],
+        page: 1,
+        limit: 5,
+        hasNextPage: true,
+        fetchedCount: 2,
+        rejected: [{ index: 1, code: 'SHOPEE_OFFICIAL_PRICE_INVALID' }],
+      }),
+    };
+    const service = new ShopeeOfferSyncService({
+      provider,
+      offers,
+      maxOffersPerSync: 5,
+      logger,
+    });
+    expect(await service.run({ limit: 5 })).toMatchObject({
+      fetched: 2,
+      valid: 1,
+      created: 1,
+      updated: 0,
+      rejected: 1,
+      expired: 0,
+      hasNextPage: true,
+      affiliateLinkPresentCount: 1,
+    });
+  });
 });
