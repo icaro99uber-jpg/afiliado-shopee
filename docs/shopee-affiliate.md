@@ -378,3 +378,18 @@ official, Scheduler, safe mode falso, master switch desligado, limites diferente
 de 1 e workers concorrentes. Ele inicia somente o consumer de dispatch. Cupons,
 scraping, API oficial da Shopee, Hunter, Score, Copy legado, pipeline-product e
 Scheduler continuam fora do fluxo.
+
+## Nichos comerciais e campanhas por grupo lógico
+
+Ofertas oficiais já persistidas podem ser avaliadas por `CommercialNiche` sem
+nova consulta à Shopee. A correspondência normaliza acentos, caixa, pontuação e
+espaços, usa sequência de tokens para palavras/frases, include `ANY`, exclusões
+e critérios numéricos. Evidências não incluem nome completo, URL ou ID externo.
+
+`CommercialGroupCampaign` usa o fingerprint do JID canônico como identidade
+lógica estável entre instâncias Evolution. O destino âncora é apenas uma
+referência interna atual. Cadência e janela determinam
+`floor((fim - início) / cadenceMinutes)` slots, limitando o total diário.
+
+Mineração, histórico de preço, IA, sender assignments, rotação de números,
+filas e qualquer envio permanecem para tasks futuras.

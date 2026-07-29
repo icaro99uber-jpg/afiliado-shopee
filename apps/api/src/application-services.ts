@@ -33,6 +33,8 @@ import {
   PrismaAnalyticsRepository,
   PrismaCommercialDeliveryHistoryRepository,
   PrismaCommercialDispatchOutboxRepository,
+  PrismaCommercialGroupCampaignRepository,
+  PrismaCommercialNicheRepository,
   PrismaCommercialPipelineRunRepository,
   PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
@@ -49,6 +51,8 @@ import type {
   CommercialAutomationSettingsRepository,
   CommercialDeliveryHistoryRepository,
   CommercialDispatchOutboxRepository,
+  CommercialGroupCampaignRepository,
+  CommercialNicheRepository,
   CommercialPipelineRunRepository,
   CouponRepository,
   GeneratedCopyRepository,
@@ -84,6 +88,8 @@ export type ApplicationRepositories = {
   commercialRuns: CommercialPipelineRunRepository;
   commercialDeliveryHistory: CommercialDeliveryHistoryRepository;
   commercialDispatchOutboxes: CommercialDispatchOutboxRepository;
+  commercialNiches: CommercialNicheRepository;
+  commercialGroupCampaigns: CommercialGroupCampaignRepository;
   commercialAutomationSettings: CommercialAutomationSettingsRepository;
   commercialAutomationHistory: CommercialAutomationHistoryRepository;
   commercialAutomationExecutions: CommercialAutomationExecutionRepository;
@@ -241,6 +247,8 @@ export const createPrismaRepositories = (
   commercialDispatchOutboxes: new PrismaCommercialDispatchOutboxRepository(
     prisma,
   ),
+  commercialNiches: new PrismaCommercialNicheRepository(prisma),
+  commercialGroupCampaigns: new PrismaCommercialGroupCampaignRepository(prisma),
   commercialAutomationSettings:
     new PrismaCommercialAutomationSettingsRepository(prisma),
   commercialAutomationHistory: new PrismaCommercialAutomationHistoryRepository(

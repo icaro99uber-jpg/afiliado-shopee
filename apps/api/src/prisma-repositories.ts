@@ -14,6 +14,15 @@ import type {
   CommercialDispatchOutboxPublicationContext,
   CommercialDispatchOutboxRecord,
   CommercialDispatchOutboxRepository,
+  CommercialGroupCampaignCreateData,
+  CommercialGroupCampaignFilters,
+  CommercialGroupCampaignRecord,
+  CommercialGroupCampaignRepository,
+  CommercialGroupCampaignUpdateData,
+  CommercialNicheData,
+  CommercialNicheFilters,
+  CommercialNicheRecord,
+  CommercialNicheRepository,
   CommercialOfferCandidateFilters,
   CommercialPipelineRunData,
   CommercialPipelineRunFilters,
@@ -47,7 +56,10 @@ import type {
   WhatsAppGroupRecord,
   WhatsAppGroupUpdate,
 } from './repositories';
-import type { ShopeeProductOffer } from '@shopee-auto-affiliate-ai/providers';
+import {
+  fingerprintWhatsAppGroupId,
+  type ShopeeProductOffer,
+} from '@shopee-auto-affiliate-ai/providers';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import { APPROVED_PRODUCT_MIN_SCORE } from './repositories';
 import {
@@ -60,6 +72,18 @@ const isUniqueConstraintError = (error: unknown) =>
   error !== null &&
   'code' in error &&
   (error as { code?: string }).code === 'P2002';
+
+const isRecordNotFoundError = (error: unknown) =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: string }).code === 'P2025';
+
+const isTransactionConflictError = (error: unknown) =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: string }).code === 'P2034';
 
 class CommercialConfirmationNotClaimedError extends Error {}
 class CommercialOutboxStateConflictError extends Error {}
@@ -433,6 +457,361 @@ export class PrismaShopeeOfferRepository implements ShopeeOfferRepository {
     return records.map((record) =>
       mapShopeeOffer(record as unknown as Record<string, unknown>),
     );
+  }
+}
+
+const mapCommercialNiche = (
+  record: Record<string, unknown>,
+): CommercialNicheRecord => ({
+  ...(record as unknown as CommercialNicheRecord),
+  minPrice: decimalString(record.minPrice as PrismaDecimalLike | null) ?? null,
+  maxPrice: decimalString(record.maxPrice as PrismaDecimalLike | null) ?? null,
+});
+
+export class PrismaCommercialNicheRepository implements CommercialNicheRepository {
+  constructor(
+    private readonly prisma: Pick<DatabaseClient, 'commercialNiche'>,
+  ) {}
+
+  async create(data: CommercialNicheData): Promise<CommercialNicheRecord> {
+    try {
+      const record = await this.prisma.commercialNiche.create({ data });
+      return mapCommercialNiche(record as unknown as Record<string, unknown>);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AppError(
+          'Ja existe um nicho com este slug',
+          'COMMERCIAL_NICHE_SLUG_CONFLICT',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async list(filters: CommercialNicheFilters) {
+    const where = { active: filters.active };
+    const [records, total] = await Promise.all([
+      this.prisma.commercialNiche.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.commercialNiche.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapCommercialNiche(record as unknown as Record<string, unknown>),
+      ),
+      total,
+    };
+  }
+
+  async findById(id: string) {
+    const record = await this.prisma.commercialNiche.findUnique({
+      where: { id },
+    });
+    return record
+      ? mapCommercialNiche(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async update(id: string, data: Partial<Omit<CommercialNicheData, 'slug'>>) {
+    try {
+      const record = await this.prisma.commercialNiche.update({
+        where: { id },
+        data,
+      });
+      return mapCommercialNiche(record as unknown as Record<string, unknown>);
+    } catch (error) {
+      if (isRecordNotFoundError(error)) return null;
+      throw error;
+    }
+  }
+}
+
+const commercialCampaignInclude = {
+  niche: { select: { id: true, name: true, slug: true, active: true } },
+  anchorDestination: {
+    select: {
+      id: true,
+      name: true,
+      fingerprint: true,
+      active: true,
+      available: true,
+    },
+  },
+};
+
+const mapCommercialGroupCampaign = (
+  record: Record<string, unknown>,
+): CommercialGroupCampaignRecord => {
+  const anchor = record.anchorDestination as Record<string, unknown> | null;
+  return {
+    ...(record as unknown as CommercialGroupCampaignRecord),
+    anchorDestination: anchor
+      ? {
+          id: String(anchor.id),
+          name: String(anchor.name),
+          fingerprint: (anchor.fingerprint as string | null) ?? null,
+          active: Boolean(anchor.active),
+          available: Boolean(anchor.available),
+        }
+      : null,
+  };
+};
+
+export class PrismaCommercialGroupCampaignRepository implements CommercialGroupCampaignRepository {
+  constructor(private readonly prisma: DatabaseClient) {}
+
+  async createForGroup(data: CommercialGroupCampaignCreateData) {
+    try {
+      const record = await this.prisma.$transaction(async (transaction) => {
+        const destination = await transaction.whatsAppDestination.findUnique({
+          where: { id: data.groupDestinationId },
+          select: {
+            id: true,
+            destination: true,
+            type: true,
+            fingerprint: true,
+          },
+        });
+        if (!destination) {
+          throw new AppError(
+            'Destino de grupo nao encontrado',
+            'COMMERCIAL_GROUP_DESTINATION_NOT_FOUND',
+          );
+        }
+        if (destination.type !== 'GROUP') {
+          throw new AppError(
+            'A campanha exige destino GROUP',
+            'COMMERCIAL_GROUP_DESTINATION_REQUIRED',
+          );
+        }
+        let logicalFingerprint: string;
+        try {
+          logicalFingerprint = fingerprintWhatsAppGroupId(
+            destination.destination,
+          );
+        } catch {
+          throw new AppError(
+            'Identidade logica do grupo e invalida',
+            'COMMERCIAL_GROUP_IDENTITY_INVALID',
+          );
+        }
+        if (
+          !destination.fingerprint ||
+          destination.fingerprint !== logicalFingerprint
+        ) {
+          throw new AppError(
+            'Identidade logica do grupo e inconsistente',
+            'COMMERCIAL_GROUP_IDENTITY_INVALID',
+          );
+        }
+        const niche = await transaction.commercialNiche.findUnique({
+          where: { id: data.nicheId },
+          select: { id: true },
+        });
+        if (!niche) {
+          throw new AppError(
+            'Nicho comercial nao encontrado',
+            'COMMERCIAL_NICHE_NOT_FOUND',
+          );
+        }
+        const configuration = {
+          name: data.name,
+          nicheId: data.nicheId,
+          cadenceMinutes: data.cadenceMinutes,
+          timezone: data.timezone,
+          allowedStartTime: data.allowedStartTime,
+          allowedEndTime: data.allowedEndTime,
+          dailyLimit: data.dailyLimit,
+          queueTargetSize: data.queueTargetSize,
+          dedupeDays: data.dedupeDays,
+        };
+        return transaction.commercialGroupCampaign.create({
+          data: {
+            ...configuration,
+            active: false,
+            logicalGroupFingerprint: logicalFingerprint,
+            anchorDestinationId: destination.id,
+          },
+          include: commercialCampaignInclude,
+        });
+      });
+      return mapCommercialGroupCampaign(
+        record as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AppError(
+          'Ja existe campanha para este grupo logico',
+          'COMMERCIAL_GROUP_CAMPAIGN_ALREADY_EXISTS',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async list(filters: CommercialGroupCampaignFilters) {
+    const where = { active: filters.active };
+    const [records, total] = await Promise.all([
+      this.prisma.commercialGroupCampaign.findMany({
+        where,
+        include: commercialCampaignInclude,
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.commercialGroupCampaign.count({ where }),
+    ]);
+    return {
+      items: records.map((record) =>
+        mapCommercialGroupCampaign(
+          record as unknown as Record<string, unknown>,
+        ),
+      ),
+      total,
+    };
+  }
+
+  async findById(id: string) {
+    const record = await this.prisma.commercialGroupCampaign.findUnique({
+      where: { id },
+      include: commercialCampaignInclude,
+    });
+    return record
+      ? mapCommercialGroupCampaign(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async update(id: string, data: CommercialGroupCampaignUpdateData) {
+    try {
+      const updateCampaign = async (client: DatabaseClient) => {
+        if (data.nicheId) {
+          const [campaign, niche] = await Promise.all([
+            client.commercialGroupCampaign.findUnique({
+              where: { id },
+              select: { active: true },
+            }),
+            client.commercialNiche.findUnique({
+              where: { id: data.nicheId },
+              select: { active: true },
+            }),
+          ]);
+          if (!campaign) return null;
+          if (!niche) {
+            throw new AppError(
+              'Nicho comercial nao encontrado',
+              'COMMERCIAL_NICHE_NOT_FOUND',
+            );
+          }
+          if (campaign.active && !niche.active) {
+            throw new AppError(
+              'Campanha ativa exige nicho ativo',
+              'COMMERCIAL_GROUP_CAMPAIGN_NICHE_INACTIVE',
+            );
+          }
+        }
+        return client.commercialGroupCampaign.update({
+          where: { id },
+          data,
+          include: commercialCampaignInclude,
+        });
+      };
+      const record = data.nicheId
+        ? await this.prisma.$transaction(updateCampaign as never, {
+            isolationLevel: 'Serializable',
+          })
+        : await updateCampaign(this.prisma);
+      if (!record) return null;
+      return mapCommercialGroupCampaign(
+        record as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      if (isRecordNotFoundError(error)) return null;
+      if (isTransactionConflictError(error)) {
+        throw new AppError(
+          'Estado da campanha mudou durante a atualizacao',
+          'COMMERCIAL_GROUP_CAMPAIGN_STATE_CONFLICT',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async hasEligibleDestination(logicalGroupFingerprint: string) {
+    const record = await this.prisma.whatsAppDestination.findFirst({
+      where: {
+        type: 'GROUP',
+        fingerprint: logicalGroupFingerprint,
+        active: true,
+        available: true,
+        sourceInstanceName: { not: null },
+      },
+      select: { id: true },
+    });
+    return Boolean(record);
+  }
+
+  async activateIfEligible(id: string) {
+    try {
+      const record = await this.prisma.$transaction(
+        async (transaction) => {
+          const campaign = await transaction.commercialGroupCampaign.findUnique(
+            {
+              where: { id },
+              select: {
+                logicalGroupFingerprint: true,
+                niche: { select: { active: true } },
+              },
+            },
+          );
+          if (!campaign) return null;
+          if (!campaign.niche.active) {
+            throw new AppError(
+              'Campanha exige nicho ativo',
+              'COMMERCIAL_GROUP_CAMPAIGN_NICHE_INACTIVE',
+            );
+          }
+          const eligible = await transaction.whatsAppDestination.findFirst({
+            where: {
+              type: 'GROUP',
+              fingerprint: campaign.logicalGroupFingerprint,
+              active: true,
+              available: true,
+              sourceInstanceName: { not: null },
+            },
+            select: { id: true },
+          });
+          if (!eligible) {
+            throw new AppError(
+              'Grupo logico nao possui destino elegivel',
+              'COMMERCIAL_GROUP_CAMPAIGN_GROUP_UNAVAILABLE',
+            );
+          }
+          return transaction.commercialGroupCampaign.update({
+            where: { id },
+            data: { active: true },
+            include: commercialCampaignInclude,
+          });
+        },
+        { isolationLevel: 'Serializable' },
+      );
+      return record
+        ? mapCommercialGroupCampaign(
+            record as unknown as Record<string, unknown>,
+          )
+        : null;
+    } catch (error) {
+      if (isTransactionConflictError(error)) {
+        throw new AppError(
+          'Estado da campanha mudou durante a ativacao',
+          'COMMERCIAL_GROUP_CAMPAIGN_STATE_CONFLICT',
+        );
+      }
+      throw error;
+    }
   }
 }
 

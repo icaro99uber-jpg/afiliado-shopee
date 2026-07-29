@@ -759,3 +759,18 @@ nenhum grupo ou `.env` é alterado.
 O relatório sanitizado fica em
 `.runtime/local-system/preview-stability-report.json`; o cleanup restaura a
 pausa, remove o Scheduler comercial conhecido e deixa o sistema parado.
+
+## Fundação de nichos e campanhas comerciais
+
+Nichos comerciais são configurações locais determinísticas para ofertas
+`OFFICIAL`. Slug, categorias e keywords são normalizados; o matcher trabalha
+por tokens/frases, sem regex do usuário, substring arbitrária ou IA.
+
+Uma campanha é identificada pelo fingerprint SHA-256 já existente do JID
+canônico do grupo, que não inclui a instância Evolution. O destino âncora é
+somente uma referência interna atual, permitindo que uma task futura associe
+vários números ao mesmo grupo lógico sem duplicar a campanha.
+
+Campanhas nascem inativas e a ativação explícita exige nicho e destino lógico
+elegíveis. Slots usam `floor((fim - início) / cadência)`. Mineração, IA, sender
+assignments, filas e envio permanecem fora desta fundação.
