@@ -38,6 +38,7 @@ import {
   PrismaCommercialNicheRepository,
   PrismaCommercialPipelineRunRepository,
   PrismaCommercialPromotionRepository,
+  PrismaCommercialPromotionCopyRepository,
   PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
   PrismaProductRepository,
@@ -58,6 +59,7 @@ import type {
   CommercialPipelineRunRepository,
   CommercialPromotionCandidateRepository,
   CommercialPromotionCatalogRepository,
+  CommercialPromotionCopyRepository,
   CouponRepository,
   GeneratedCopyRepository,
   ProductRepository,
@@ -71,6 +73,11 @@ import {
   type CommercialAutomationPolicyConfig,
 } from './commercial-automation-policy-service';
 import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
+import type { CommercialAiCopyProvider } from './commercial-ai-copy-provider';
+import {
+  CommercialPromotionCopyGenerationService,
+  type CommercialAiCopyConfig,
+} from './commercial-promotion-copy-generation-service';
 
 type DispatchQueue = {
   add: (
@@ -96,6 +103,7 @@ export type ApplicationRepositories = {
   commercialGroupCampaigns: CommercialGroupCampaignRepository;
   commercialPromotions: CommercialPromotionCatalogRepository &
     CommercialPromotionCandidateRepository;
+  commercialPromotionCopies: CommercialPromotionCopyRepository;
   commercialAutomationSettings: CommercialAutomationSettingsRepository;
   commercialAutomationHistory: CommercialAutomationHistoryRepository;
   commercialAutomationExecutions: CommercialAutomationExecutionRepository;
@@ -210,6 +218,27 @@ export const createCommercialPromotionMiningService = ({
     clock,
   });
 
+export const createCommercialPromotionCopyGenerationService = ({
+  repositories,
+  provider,
+  config,
+  logger,
+  clock,
+}: {
+  repositories: Pick<ApplicationRepositories, 'commercialPromotionCopies'>;
+  provider?: CommercialAiCopyProvider;
+  config: CommercialAiCopyConfig;
+  logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
+  clock?: () => Date;
+}) =>
+  new CommercialPromotionCopyGenerationService({
+    repository: repositories.commercialPromotionCopies,
+    provider,
+    config,
+    logger,
+    clock,
+  });
+
 export const createCommercialAutomationPolicyService = ({
   repositories,
   instanceName,
@@ -283,6 +312,9 @@ export const createPrismaRepositories = (
       prisma,
     ),
     commercialPromotions,
+    commercialPromotionCopies: new PrismaCommercialPromotionCopyRepository(
+      prisma,
+    ),
     commercialAutomationSettings:
       new PrismaCommercialAutomationSettingsRepository(prisma),
     commercialAutomationHistory:

@@ -151,6 +151,15 @@ export const envSchema = z
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
     OPENAI_API_KEY: z.string().optional(),
+    COMMERCIAL_AI_COPY_ENABLED: booleanFromEnv.default(false),
+    COMMERCIAL_AI_COPY_PROVIDER: z.enum(['openai']).default('openai'),
+    COMMERCIAL_AI_COPY_MODEL: optionalTrimmedString,
+    COMMERCIAL_AI_COPY_TIMEOUT_MS: positiveIntegerFromEnv
+      .pipe(z.number().min(1000).max(120000))
+      .default(30000),
+    COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS: positiveIntegerFromEnv
+      .pipe(z.number().min(50).max(1000))
+      .default(300),
     SHOPEE_PARTNER_ID: z.string().optional(),
     SHOPEE_PARTNER_KEY: z.string().optional(),
     SHOPEE_AFFILIATE_PROVIDER: z
@@ -223,6 +232,22 @@ export const envSchema = z
     SCHEDULER_TIMEZONE: z.string().trim().optional(),
   })
   .superRefine((env, context) => {
+    if (env.COMMERCIAL_AI_COPY_ENABLED) {
+      if (!env.OPENAI_API_KEY?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['OPENAI_API_KEY'],
+          message: 'COMMERCIAL_AI_COPY_PROVIDER_NOT_CONFIGURED',
+        });
+      }
+      if (!env.COMMERCIAL_AI_COPY_MODEL) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['COMMERCIAL_AI_COPY_MODEL'],
+          message: 'COMMERCIAL_AI_COPY_PROVIDER_NOT_CONFIGURED',
+        });
+      }
+    }
     if (!isValidTimezone(env.COMMERCIAL_TIMEZONE)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

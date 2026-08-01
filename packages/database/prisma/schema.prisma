@@ -73,6 +73,8 @@ model CommercialOfferSnapshot {
   capturedAt     DateTime
   createdAt      DateTime    @default(now())
   promotionCandidates CommercialPromotionCandidate[]
+  generatedCopies GeneratedCopy[]
+  copyGenerationAttempts CommercialCopyGenerationAttempt[]
 
   @@unique([productId, revision])
   @@index([productId, revision])
@@ -85,6 +87,20 @@ model GeneratedCopy {
   productId          String
   product            ProductLead        @relation(fields: [productId], references: [id], onDelete: Cascade)
   whatsappDispatches WhatsAppDispatch[]
+  source             GeneratedCopySource @default(LEGACY_TEMPLATE)
+  provider           String?
+  model              String?
+  promptVersion      String?
+  validationVersion  String?
+  inputFingerprint   String?             @unique
+  snapshotId         String?
+  snapshot           CommercialOfferSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  createdFromCandidateId String?
+  usageInputTokens   Int?
+  usageOutputTokens  Int?
+  usageTotalTokens   Int?
+  promotionCandidates CommercialPromotionCandidate[]
+  generationAttempts CommercialCopyGenerationAttempt[]
   titulo             String
   mensagem           String
   cta                String
@@ -92,6 +108,7 @@ model GeneratedCopy {
   createdAt          DateTime           @default(now())
 
   @@index([productId])
+  @@index([snapshotId])
 }
 
 model WhatsAppDestination {
@@ -171,6 +188,9 @@ model CommercialPromotionCandidate {
   product          ProductLead                        @relation(fields: [productId], references: [id], onDelete: Restrict)
   snapshotId       String
   snapshot         CommercialOfferSnapshot            @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  generatedCopyId  String?
+  generatedCopy    GeneratedCopy?                      @relation(fields: [generatedCopyId], references: [id], onDelete: SetNull)
+  copyGenerationAttempts CommercialCopyGenerationAttempt[]
   status           CommercialPromotionCandidateStatus @default(QUEUED)
   rankPosition     Int?
   commercialScore  Int
@@ -191,8 +211,39 @@ model CommercialPromotionCandidate {
   @@index([campaignId, status, rankPosition])
   @@index([campaignId, updatedAt])
   @@index([snapshotId])
+  @@index([generatedCopyId])
   @@index([expiresAt])
   @@index([dedupeUntil])
+}
+
+model CommercialCopyGenerationAttempt {
+  id                    String                                @id @default(cuid())
+  candidateId           String
+  candidate             CommercialPromotionCandidate          @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  snapshotId            String
+  snapshot              CommercialOfferSnapshot               @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  inputFingerprint      String                                @unique
+  provider              String
+  model                 String
+  promptVersion         String
+  validationVersion     String
+  status                CommercialCopyGenerationAttemptStatus
+  generatedCopyId       String?
+  generatedCopy         GeneratedCopy?                        @relation(fields: [generatedCopyId], references: [id], onDelete: SetNull)
+  failureCode           String?
+  requestMayHaveStarted Boolean                               @default(false)
+  inputTokens           Int?
+  outputTokens          Int?
+  totalTokens           Int?
+  startedAt             DateTime
+  completedAt           DateTime?
+  createdAt             DateTime                              @default(now())
+  updatedAt             DateTime                              @updatedAt
+
+  @@index([candidateId, createdAt])
+  @@index([snapshotId])
+  @@index([status, createdAt])
+  @@index([generatedCopyId])
 }
 
 model WhatsAppDispatch {
@@ -415,4 +466,16 @@ enum CommercialPromotionSignal {
   DISCOUNT_INCREASE
   NEWLY_OBSERVED
   CURRENT_DISCOUNT
+}
+
+enum GeneratedCopySource {
+  LEGACY_TEMPLATE
+  AI
+}
+
+enum CommercialCopyGenerationAttemptStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+  AMBIGUOUS
 }

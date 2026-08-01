@@ -816,8 +816,8 @@ na capacidade ativa. `DISPATCHED` fica fora da capacidade e só pode voltar a
 é devolvido com código público estável, sem retry.
 
 `protectedCount` reduz a capacidade e provoca rebalanço dos `QUEUED`. Cadência
-de 15 minutos ainda não registra Scheduler; IA e múltiplos remetentes ficam para
-depois da futura camada de copy.
+de 15 minutos ainda não registra Scheduler; múltiplos remetentes continuam fora
+desta etapa, e a IA é consumida somente pela camada validada abaixo.
 
 As rotas `POST /commercial/campaigns/:id/mining-preview`, `POST
 /commercial/campaigns/:id/mine` e `GET /commercial/campaigns/:id/queue` expõem
@@ -826,3 +826,33 @@ somente relatórios sanitizados. A confirmação de escrita é
 `commercial:campaign:mine` não compõem provider, fila ou worker; a escrita local
 exige `--confirm-local-promotion-mining`, preview, automação pausada/desabilitada,
 Schedulers e group send desligados, fora de CI e sem worker de dispatch.
+
+## Geração validada de copy promocional por IA
+
+O fluxo isolado é: preflight/configuração → contexto `QUEUED` → fingerprint
+canônico → cache ou claim `STARTED` → uma chamada à Responses API fora da
+transação → validação estrutural e factual → montagem determinística →
+revalidação serializável → `GeneratedCopy AI`, attempt `SUCCEEDED` e candidato
+`COPY_READY` atômicos.
+
+O provider usa Structured Output estrito, prompt
+`commercial-promotion-copy-v1`, validação
+`commercial-promotion-copy-validation-v1`, `store=false`, zero retry e nenhuma
+tool. Produto, loja e nicho são normalizados e delimitados como dados não
+confiáveis. A IA nunca recebe link, ID externo, fingerprint ou credencial e só
+gera `headline`, `body`, `cta` e hashtags sem números ou fatos comerciais. O
+sistema insere produto, loja, preço, desconto, sinal comprovado e exatamente o
+link afiliado atual.
+
+O fingerprint inclui versões, provider/modelo, campanha, nicho, candidato,
+produto, snapshot, fatos comerciais, limite e hash do link, nunca o link bruto.
+O cache exige origem AI, mesmo provider/modelo/versões/produto/snapshot e o
+limite atual. `FAILED` registra falha confirmada sem resultado utilizável;
+`AMBIGUOUS` preserva incerteza de chamada ou persistência. Ambos bloqueiam nova
+tentativa para o mesmo input, assim como `STARTED`; nenhuma tentativa é apagada.
+
+`CommercialCopyService`, confirmação comercial, Sender e os quatro campos
+históricos de `GeneratedCopy` permanecem compatíveis por meio do default
+`LEGACY_TEMPLATE`. Preview e respostas públicas substituem o link por
+`[LINK_AFILIADO]`, e nenhum caminho desta camada compõe fila, Redis, Scheduler,
+dispatch, outbox, WhatsApp ou Evolution.

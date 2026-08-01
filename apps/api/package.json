@@ -20,7 +20,10 @@
     "commercial:official:diagnose": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-official-diagnosis.ts",
     "commercial:snapshots:backfill": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-offer-snapshot-backfill.ts",
     "commercial:campaign:preview": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts preview",
-    "commercial:campaign:mine": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts mine"
+    "commercial:campaign:mine": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts mine",
+    "commercial:copy:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts preflight",
+    "commercial:copy:preview": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts preview",
+    "commercial:copy:generate": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts generate"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
@@ -30,7 +33,8 @@
     "@shopee-auto-affiliate-ai/queue": "workspace:*",
     "@shopee-auto-affiliate-ai/shared": "workspace:*",
     "decimal.js": "10.6.0",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "openai": "^7.3.0"
   },
   "devDependencies": {
     "playwright-core": "1.51.1",

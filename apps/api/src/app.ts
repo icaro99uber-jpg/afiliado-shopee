@@ -42,6 +42,7 @@ import {
   createCommercialPipelineConfirmationService,
   createCommercialPipelineService,
   createCommercialPromotionMiningService,
+  createCommercialPromotionCopyGenerationService,
   createPrismaRepositories,
 } from './application-services';
 import type { AnalyticsService } from './analytics-service';
@@ -70,6 +71,11 @@ import { CommercialNicheService } from './commercial-niche-service';
 import { CommercialGroupCampaignService } from './commercial-group-campaign-service';
 import type { CommercialPromotionMiningService } from './commercial-promotion-mining-service';
 import type { CommercialPromotionCandidateStatus } from './repositories';
+import type { CommercialAiCopyProvider } from './commercial-ai-copy-provider';
+import type {
+  CommercialAiCopyConfig,
+  CommercialPromotionCopyGenerationService,
+} from './commercial-promotion-copy-generation-service';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -149,6 +155,12 @@ type BuildAppOptions = {
     CommercialPromotionMiningService,
     'preview' | 'mine' | 'listQueue'
   >;
+  commercialPromotionCopyService?: Pick<
+    CommercialPromotionCopyGenerationService,
+    'preflight' | 'preview' | 'generate' | 'findCopy'
+  >;
+  commercialAiCopyProvider?: CommercialAiCopyProvider;
+  commercialAiCopyConfig?: CommercialAiCopyConfig;
   commercialAutomationSchedulerStatusServiceFactory?: () => {
     getStatus(): Promise<CommercialAutomationSchedulerStatusSnapshot>;
   };
@@ -277,6 +289,71 @@ const sendCommercialPromotionError = (reply: FastifyReply, error: unknown) => {
   const status = COMMERCIAL_PROMOTION_ERROR_STATUS[error.code] ?? 400;
   if (status === 500) return reply.code(500).send({ error: error.code });
   return reply.code(status).send({ error: error.code, message: error.message });
+};
+
+const COMMERCIAL_AI_COPY_ERROR_STATUS: Readonly<Record<string, number>> = {
+  COMMERCIAL_PROMOTION_CANDIDATE_NOT_FOUND: 404,
+  COMMERCIAL_AI_COPY_NOT_FOUND: 404,
+  COMMERCIAL_AI_COPY_CONFIRMATION_INVALID: 400,
+  COMMERCIAL_AI_COPY_REQUEST_INVALID: 400,
+  COMMERCIAL_AI_COPY_FACTS_INVALID: 400,
+  COMMERCIAL_AI_COPY_TOO_LONG: 400,
+  COMMERCIAL_AI_COPY_URL_INVALID: 400,
+  COMMERCIAL_AI_COPY_OUTPUT_INVALID: 422,
+  COMMERCIAL_AI_COPY_PROVIDER_DISABLED: 503,
+  COMMERCIAL_AI_COPY_PROVIDER_NOT_CONFIGURED: 503,
+  COMMERCIAL_AI_COPY_PROVIDER_FAILED: 503,
+  COMMERCIAL_AI_COPY_PROVIDER_REFUSED: 503,
+  COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE: 503,
+  COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID: 503,
+  COMMERCIAL_AI_COPY_CANDIDATE_NOT_QUEUED: 409,
+  COMMERCIAL_AI_COPY_ALREADY_READY: 409,
+  COMMERCIAL_AI_COPY_GENERATION_IN_PROGRESS: 409,
+  COMMERCIAL_AI_COPY_PREVIOUSLY_FAILED: 409,
+  COMMERCIAL_AI_COPY_RESULT_AMBIGUOUS: 409,
+  COMMERCIAL_AI_COPY_CONFIGURATION_CHANGED: 409,
+  COMMERCIAL_AI_COPY_CATALOG_CHANGED: 409,
+  COMMERCIAL_AI_COPY_CANDIDATE_CHANGED: 409,
+  COMMERCIAL_AI_COPY_SNAPSHOT_OUTDATED: 409,
+};
+
+const sendCommercialAiCopyError = (reply: FastifyReply, error: unknown) => {
+  if (!(error instanceof AppError)) {
+    return reply.code(500).send({ error: 'COMMERCIAL_AI_COPY_FAILED' });
+  }
+  const status = COMMERCIAL_AI_COPY_ERROR_STATUS[error.code] ?? 409;
+  return reply.code(status).send({ error: error.code, message: error.message });
+};
+
+const assertEmptyCopyPreviewBody = (body: unknown) => {
+  if (
+    body !== undefined &&
+    (body === null ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).length > 0)
+  ) {
+    throw new AppError(
+      'Body do preview de copy invalido',
+      'COMMERCIAL_AI_COPY_REQUEST_INVALID',
+    );
+  }
+};
+
+const parseCopyGenerateConfirmation = (body: unknown) => {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    Object.keys(body).length !== 1 ||
+    (body as Record<string, unknown>).confirm !== 'GERAR_COPY_COM_IA'
+  ) {
+    throw new AppError(
+      'Confirmacao de geracao invalida',
+      'COMMERCIAL_AI_COPY_CONFIRMATION_INVALID',
+    );
+  }
+  return 'GERAR_COPY_COM_IA';
 };
 
 const COMMERCIAL_PROMOTION_STATUSES =
@@ -522,6 +599,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     );
   let commercialPromotionMiningService =
     options.commercialPromotionMiningService;
+  let commercialPromotionCopyService = options.commercialPromotionCopyService;
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -551,6 +629,24 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       },
     );
     return commercialPromotionMiningService;
+  };
+  const getCommercialPromotionCopyService = () => {
+    commercialPromotionCopyService ??=
+      createCommercialPromotionCopyGenerationService({
+        repositories,
+        provider: options.commercialAiCopyProvider,
+        config: options.commercialAiCopyConfig ?? {
+          enabled: false,
+          provider: 'openai',
+          model: null,
+          apiKeyConfigured: false,
+          timeoutMs: 30000,
+          maxOutputTokens: 300,
+          maximumCopyLength: options.commercialCopyMaxLength ?? 1000,
+        },
+        logger: app.log,
+      });
+    return commercialPromotionCopyService;
   };
   let commercialPipelineConfirmationService =
     options.commercialPipelineConfirmationService;
@@ -739,6 +835,47 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       return sendCommercialPromotionError(reply, error);
     }
   });
+
+  app.post(
+    '/commercial/promotion-candidates/:id/copy-preview',
+    async (request, reply) => {
+      try {
+        assertEmptyCopyPreviewBody(request.body);
+        return await getCommercialPromotionCopyService().preview(
+          (request.params as { id: string }).id,
+        );
+      } catch (error) {
+        return sendCommercialAiCopyError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/commercial/promotion-candidates/:id/copy-generate',
+    async (request, reply) => {
+      try {
+        return await getCommercialPromotionCopyService().generate(
+          (request.params as { id: string }).id,
+          parseCopyGenerateConfirmation(request.body),
+        );
+      } catch (error) {
+        return sendCommercialAiCopyError(reply, error);
+      }
+    },
+  );
+
+  app.get(
+    '/commercial/promotion-candidates/:id/copy',
+    async (request, reply) => {
+      try {
+        return await getCommercialPromotionCopyService().findCopy(
+          (request.params as { id: string }).id,
+        );
+      } catch (error) {
+        return sendCommercialAiCopyError(reply, error);
+      }
+    },
+  );
 
   app.get('/analytics', async (request, reply) => {
     try {

@@ -215,7 +215,8 @@ Dependencias:
 Proximos passos previstos:
 
 - Adicionar templates apenas por sprint dedicada.
-- Avaliar integracao com IA somente quando houver decisao explicita de produto.
+- Manter este `CopyService` legado restrito a templates; a geracao por IA de
+  candidatos comerciais usa o servico isolado descrito ao fim deste arquivo.
 - Melhorar selecao de template se houver criterios de categoria, score ou canal.
 
 ## Sender
@@ -922,9 +923,41 @@ Comportamento operacional:
 - `POST /commercial/campaigns/:id/mining-preview` é somente leitura;
   `POST /commercial/campaigns/:id/mine` exige
   `{ "confirm": "MINERAR_PROMOCOES" }`; `GET
-  /commercial/campaigns/:id/queue` é paginado e sanitizado. Nenhuma rota publica
+/commercial/campaigns/:id/queue` é paginado e sanitizado. Nenhuma rota publica
   ou envia candidatos.
 - As CLIs `commercial:campaign:preview` e `commercial:campaign:mine` usam banco
   local; a segunda exige `--confirm-local-promotion-mining`, modo preview,
   automação desabilitada e pausada, ambos os Schedulers e group send desligados,
   fora de CI e zero worker de dispatch.
+
+## Geração validada de copies promocionais por IA
+
+- `CommercialPromotionCopyGenerationService` depende apenas de interfaces. O
+  provider OpenAI usa Responses API com Structured Output estrito,
+  `store=false`, sem streaming, background, tools ou retry automático.
+- O prompt `commercial-promotion-copy-v1` e a validação
+  `commercial-promotion-copy-validation-v1` recebem somente nome do produto,
+  loja, nicho, sinais, score, desconto, avaliação, vendas, queda opcional e
+  limites. Nunca recebem links, IDs externos, fingerprints, JID, credenciais ou
+  payload externo.
+- Strings do catálogo são dados não confiáveis: controles são removidos antes
+  do request, Unicode é normalizado em NFKC, espaços e tamanhos são limitados e
+  comandos embutidos nunca alteram as instruções.
+- A IA produz apenas `headline`, `body`, `cta` e até três hashtags. O validador
+  rejeita números, moeda, percentual, URLs, contatos, markdown, alegações não
+  comprovadas, controles, repetição, hashtags inválidas e excesso de emojis.
+  Produto, loja, preço em BRL, desconto, no máximo um sinal promocional e o
+  `affiliateLink` exato são montados deterministicamente depois da validação.
+- `GeneratedCopy.source=AI` guarda somente metadados versionados, usage e o
+  vínculo `RESTRICT` ao snapshot. Registros e fluxos legados continuam com
+  `LEGACY_TEMPLATE`; `CommercialCopyService`, Sender e seus quatro campos
+  públicos não mudam.
+- O candidato só passa de `QUEUED` para `COPY_READY` com `generatedCopyId` AI
+  coerente com o mesmo produto e snapshot. A chamada externa ocorre fora da
+  transação; a revalidação, criação da copy, conclusão da tentativa e transição
+  do candidato são atômicas em transação serializável.
+- Fingerprint SHA-256 canônico governa cache e claim único. `STARTED` bloqueia
+  concorrência, `SUCCEEDED` reutiliza a copy e `FAILED` ou `AMBIGUOUS` bloqueiam
+  repetição do mesmo input; nenhuma tentativa é apagada e não há retry.
+- Preflight e preview são somente leitura. Nenhuma rota ou CLI desta camada
+  cria pipeline run, automation execution, dispatch, outbox, job ou mensagem.

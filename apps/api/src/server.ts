@@ -6,6 +6,7 @@ import {
   OfficialShopeeAffiliateOfferProvider,
 } from '@shopee-auto-affiliate-ai/providers';
 import { buildApp } from './app';
+import { OpenAiCommercialAiCopyProvider } from './commercial-ai-copy-provider';
 
 const start = async () => {
   const config = loadConfig();
@@ -37,6 +38,26 @@ const start = async () => {
     shopeeMaxOffersPerSync: config.SHOPEE_AFFILIATE_SYNC_LIMIT,
     shopeeSubIdPrefix: config.SHOPEE_AFFILIATE_SUB_ID_PREFIX,
     commercialCopyMaxLength: config.COMMERCIAL_COPY_MAX_LENGTH,
+    commercialAiCopyProvider:
+      config.COMMERCIAL_AI_COPY_ENABLED &&
+      config.OPENAI_API_KEY &&
+      config.COMMERCIAL_AI_COPY_MODEL
+        ? new OpenAiCommercialAiCopyProvider({
+            apiKey: config.OPENAI_API_KEY,
+            model: config.COMMERCIAL_AI_COPY_MODEL,
+            timeoutMs: config.COMMERCIAL_AI_COPY_TIMEOUT_MS,
+            maxOutputTokens: config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS,
+          })
+        : undefined,
+    commercialAiCopyConfig: {
+      enabled: config.COMMERCIAL_AI_COPY_ENABLED,
+      provider: config.COMMERCIAL_AI_COPY_PROVIDER,
+      model: config.COMMERCIAL_AI_COPY_MODEL ?? null,
+      apiKeyConfigured: Boolean(config.OPENAI_API_KEY?.trim()),
+      timeoutMs: config.COMMERCIAL_AI_COPY_TIMEOUT_MS,
+      maxOutputTokens: config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS,
+      maximumCopyLength: config.COMMERCIAL_COPY_MAX_LENGTH,
+    },
     commercialConfirmationEnvironment: {
       groupSendEnabled: config.WHATSAPP_GROUP_SEND_ENABLED,
       safeMode: config.EVOLUTION_SAFE_MODE,
