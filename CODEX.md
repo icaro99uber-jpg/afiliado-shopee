@@ -790,5 +790,39 @@ somente uma referência interna atual, permitindo que uma task futura associe
 vários números ao mesmo grupo lógico sem duplicar a campanha.
 
 Campanhas nascem inativas e a ativação explícita exige nicho e destino lógico
-elegíveis. Slots usam `floor((fim - início) / cadência)`. Mineração, IA, sender
-assignments, filas e envio permanecem fora desta fundação.
+elegíveis. Slots usam `floor((fim - início) / cadência)`. IA, sender assignments,
+dispatches e envio permanecem fora desta fundação.
+
+## Mineração de promoções comerciais
+
+A mineração consome exclusivamente ofertas `OFFICIAL` e seus snapshots já
+persistidos. Ela reaproveita `CommercialNicheMatcher` e `official-v2`, detecta
+queda de preço, aumento de desconto, item recém-observado e desconto atual e
+ordena o top N de forma determinística. A leitura é paginada por cursor, com
+limites de 200 por página e 2.000 por avaliação; resultado truncado pode ser
+visualizado, mas não materializado.
+
+Desconto atual não prova queda de preço, e recém-observado descreve as primeiras
+24 horas no sistema, não novidade na Shopee. Os sinais não alteram o score de
+qualidade `official-v2`; revision, fingerprint e último snapshot precisam ser
+coerentes. O fingerprint lógico deduplica inclusive entre números remetentes.
+
+`CommercialPromotionCandidate` relaciona campanha, produto e snapshot e mantém
+score, sinais, posição e estados protegidos. A materialização usa transação
+serializável curta, lock da campanha, unique campanha + produto e atualizações
+condicionais. Candidatos `COPY_READY` e `RESERVED` não são rebaixados e contam
+na capacidade ativa. `DISPATCHED` fica fora da capacidade e só pode voltar a
+`QUEUED` após o dedupe, sem envio `SENT` recente ao fingerprint lógico. Conflito
+é devolvido com código público estável, sem retry.
+
+`protectedCount` reduz a capacidade e provoca rebalanço dos `QUEUED`. Cadência
+de 15 minutos ainda não registra Scheduler; IA e múltiplos remetentes ficam para
+depois da futura camada de copy.
+
+As rotas `POST /commercial/campaigns/:id/mining-preview`, `POST
+/commercial/campaigns/:id/mine` e `GET /commercial/campaigns/:id/queue` expõem
+somente relatórios sanitizados. A confirmação de escrita é
+`MINERAR_PROMOCOES`. As CLIs `commercial:campaign:preview` e
+`commercial:campaign:mine` não compõem provider, fila ou worker; a escrita local
+exige `--confirm-local-promotion-mining`, preview, automação pausada/desabilitada,
+Schedulers e group send desligados, fora de CI e sem worker de dispatch.

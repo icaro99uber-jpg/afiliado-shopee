@@ -18,7 +18,9 @@
     "shopee:official:sync": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-sync.ts",
     "commercial:dry-run": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-cli.ts",
     "commercial:official:diagnose": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-official-diagnosis.ts",
-    "commercial:snapshots:backfill": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-offer-snapshot-backfill.ts"
+    "commercial:snapshots:backfill": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-offer-snapshot-backfill.ts",
+    "commercial:campaign:preview": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts preview",
+    "commercial:campaign:mine": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts mine"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
@@ -27,6 +29,7 @@
     "@shopee-auto-affiliate-ai/providers": "workspace:*",
     "@shopee-auto-affiliate-ai/queue": "workspace:*",
     "@shopee-auto-affiliate-ai/shared": "workspace:*",
+    "decimal.js": "10.6.0",
     "fastify": "^5.0.0"
   },
   "devDependencies": {

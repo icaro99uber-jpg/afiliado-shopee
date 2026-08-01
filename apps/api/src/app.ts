@@ -41,6 +41,7 @@ import {
   createCommercialAutomationPolicyService,
   createCommercialPipelineConfirmationService,
   createCommercialPipelineService,
+  createCommercialPromotionMiningService,
   createPrismaRepositories,
 } from './application-services';
 import type { AnalyticsService } from './analytics-service';
@@ -67,6 +68,8 @@ import {
 import { CommercialDispatchOutboxService } from './commercial-dispatch-outbox-service';
 import { CommercialNicheService } from './commercial-niche-service';
 import { CommercialGroupCampaignService } from './commercial-group-campaign-service';
+import type { CommercialPromotionMiningService } from './commercial-promotion-mining-service';
+import type { CommercialPromotionCandidateStatus } from './repositories';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -141,6 +144,10 @@ type BuildAppOptions = {
   commercialGroupCampaignService?: Pick<
     CommercialGroupCampaignService,
     'create' | 'list' | 'find' | 'update' | 'activate' | 'deactivate'
+  >;
+  commercialPromotionMiningService?: Pick<
+    CommercialPromotionMiningService,
+    'preview' | 'mine' | 'listQueue'
   >;
   commercialAutomationSchedulerStatusServiceFactory?: () => {
     getStatus(): Promise<CommercialAutomationSchedulerStatusSnapshot>;
@@ -248,6 +255,76 @@ const sendCommercialConfigurationError = (
   const code = error.code;
   const status = COMMERCIAL_CONFIGURATION_ERROR_STATUS[code] ?? 400;
   return reply.code(status).send({ error: code, message: error.message });
+};
+
+const COMMERCIAL_PROMOTION_ERROR_STATUS: Readonly<Record<string, number>> = {
+  COMMERCIAL_GROUP_CAMPAIGN_NOT_FOUND: 404,
+  COMMERCIAL_NICHE_NOT_FOUND: 404,
+  CAMPAIGN_INACTIVE: 409,
+  NICHE_INACTIVE: 409,
+  COMMERCIAL_PROMOTION_CATALOG_CHANGED: 409,
+  COMMERCIAL_PROMOTION_CONFIGURATION_CHANGED: 409,
+  COMMERCIAL_PROMOTION_EVALUATION_TRUNCATED: 409,
+  COMMERCIAL_PROMOTION_MINING_CONFLICT: 409,
+  GROUP_UNAVAILABLE: 503,
+  COMMERCIAL_PROMOTION_PERSISTENCE_FAILED: 500,
+};
+
+const sendCommercialPromotionError = (reply: FastifyReply, error: unknown) => {
+  if (!(error instanceof AppError)) {
+    return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR' });
+  }
+  const status = COMMERCIAL_PROMOTION_ERROR_STATUS[error.code] ?? 400;
+  if (status === 500) return reply.code(500).send({ error: error.code });
+  return reply.code(status).send({ error: error.code, message: error.message });
+};
+
+const COMMERCIAL_PROMOTION_STATUSES =
+  new Set<CommercialPromotionCandidateStatus>([
+    'QUEUED',
+    'COPY_READY',
+    'RESERVED',
+    'DISPATCHED',
+    'EXPIRED',
+    'BLOCKED',
+  ]);
+
+const parseCommercialPromotionQueueQuery = (query: unknown) => {
+  if (!query || typeof query !== 'object' || Array.isArray(query)) {
+    throw new AppError(
+      'Query da fila promocional invalida',
+      'COMMERCIAL_PROMOTION_QUEUE_QUERY_INVALID',
+    );
+  }
+  const record = query as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => !['page', 'limit', 'status'].includes(key),
+    )
+  ) {
+    throw new AppError(
+      'A query da fila contem campos nao permitidos',
+      'COMMERCIAL_PROMOTION_QUEUE_QUERY_INVALID',
+    );
+  }
+  const status =
+    record.status === undefined ? undefined : String(record.status);
+  if (
+    status !== undefined &&
+    !COMMERCIAL_PROMOTION_STATUSES.has(
+      status as CommercialPromotionCandidateStatus,
+    )
+  ) {
+    throw new AppError(
+      'Status da fila promocional invalido',
+      'COMMERCIAL_PROMOTION_QUEUE_QUERY_INVALID',
+    );
+  }
+  return {
+    page: parsePositiveInteger(record.page, 1, 1_000_000),
+    limit: parsePositiveInteger(record.limit, 20, 100),
+    status: status as CommercialPromotionCandidateStatus | undefined,
+  };
 };
 
 const offerStatus = (offer: { unavailableAt?: Date; offerEndsAt?: Date }) =>
@@ -443,6 +520,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       repositories.commercialGroupCampaigns,
       repositories.commercialNiches,
     );
+  let commercialPromotionMiningService =
+    options.commercialPromotionMiningService;
   const getApplicationServices = () =>
     createApplicationServices({
       repositories,
@@ -462,6 +541,16 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       logger: app.log,
     });
     return commercialPipelineService;
+  };
+  const getCommercialPromotionMiningService = () => {
+    commercialPromotionMiningService ??= createCommercialPromotionMiningService(
+      {
+        repositories,
+        score: getApplicationServices().score,
+        logger: app.log,
+      },
+    );
+    return commercialPromotionMiningService;
   };
   let commercialPipelineConfirmationService =
     options.commercialPipelineConfirmationService;
@@ -612,6 +701,42 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       );
     } catch (error) {
       return sendCommercialConfigurationError(reply, error);
+    }
+  });
+
+  app.post(
+    '/commercial/campaigns/:id/mining-preview',
+    async (request, reply) => {
+      try {
+        return await getCommercialPromotionMiningService().preview(
+          (request.params as { id: string }).id,
+          request.body,
+        );
+      } catch (error) {
+        return sendCommercialPromotionError(reply, error);
+      }
+    },
+  );
+
+  app.post('/commercial/campaigns/:id/mine', async (request, reply) => {
+    try {
+      return await getCommercialPromotionMiningService().mine(
+        (request.params as { id: string }).id,
+        request.body,
+      );
+    } catch (error) {
+      return sendCommercialPromotionError(reply, error);
+    }
+  });
+
+  app.get('/commercial/campaigns/:id/queue', async (request, reply) => {
+    try {
+      return await getCommercialPromotionMiningService().listQueue(
+        (request.params as { id: string }).id,
+        parseCommercialPromotionQueueQuery(request.query),
+      );
+    } catch (error) {
+      return sendCommercialPromotionError(reply, error);
     }
   });
 

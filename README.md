@@ -1121,5 +1121,43 @@ Elas nascem inativas; a ativação exige `ATIVAR_CAMPANHA`, nicho ativo e destin
 correspondente elegível.
 
 A janela é `[allowedStartTime, allowedEndTime)` e os slots são
-`floor((fimEmMinutos - inicioEmMinutos) / cadenceMinutes)`. Esta etapa não
-implementa mineração, IA, sender assignments, filas, dispatches ou envio.
+`floor((fimEmMinutos - inicioEmMinutos) / cadenceMinutes)`. IA, sender
+assignments, dispatches e envio não fazem parte desta etapa.
+
+## Mineração de promoções por campanha
+
+A fila de candidatos é local e persistida em `CommercialPromotionCandidate`.
+Ela avalia somente produtos `OFFICIAL` já sincronizados, valida o snapshot atual,
+aplica o matcher do nicho e o score `official-v2`, detecta sinais promocionais e
+materializa o top N definido por `queueTargetSize`. Não há consulta à Shopee,
+Redis, BullMQ, Scheduler, copy, dispatch ou envio.
+
+Desconto corrente não prova queda histórica: `PRICE_DROP` e
+`DISCOUNT_INCREASE` comparam snapshots consecutivos, enquanto `NEWLY_OBSERVED`
+significa observado pelo sistema nas últimas 24 horas. Os sinais não adicionam
+pontos ao `official-v2`. `protectedCount` reduz a capacidade e força rebalanço;
+avaliação truncada nunca é materializada. Cadência de 15 minutos ainda não cria
+Scheduler; IA e múltiplos remetentes entram somente depois da camada de copy em
+sprint futura.
+
+Rotas disponíveis:
+
+- `POST /commercial/campaigns/:id/mining-preview`: avaliação somente leitura;
+- `POST /commercial/campaigns/:id/mine`: exige
+  `{ "confirm": "MINERAR_PROMOCOES" }`;
+- `GET /commercial/campaigns/:id/queue?page=1&limit=20`: fila paginada e
+  sanitizada, com filtro opcional `status`.
+
+Comandos locais:
+
+```powershell
+corepack pnpm commercial:campaign:preview -- --campaign-id=<id>
+corepack pnpm commercial:campaign:mine -- --campaign-id=<id> --confirm-local-promotion-mining
+```
+
+O comando de escrita é bloqueado em CI e exige modo `preview`, automação
+desabilitada e pausada, ambos os Schedulers desligados, group send desligado e
+zero worker de dispatch. A materialização é idempotente por campanha + produto,
+preserva `COPY_READY`/`RESERVED`, exclui `DISPATCHED` enquanto o dedupe está
+ativo, bloqueia envios `SENT` recentes ao mesmo grupo lógico e não faz retry em
+conflito concorrente.

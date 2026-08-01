@@ -560,6 +560,163 @@ export interface CommercialGroupCampaignRepository {
   activateIfEligible(id: string): Promise<CommercialGroupCampaignRecord | null>;
 }
 
+export type CommercialPromotionCandidateStatus =
+  'QUEUED' | 'COPY_READY' | 'RESERVED' | 'DISPATCHED' | 'EXPIRED' | 'BLOCKED';
+
+export type CommercialPromotionSignal =
+  'PRICE_DROP' | 'DISCOUNT_INCREASE' | 'NEWLY_OBSERVED' | 'CURRENT_DISCOUNT';
+
+export type CommercialPromotionRejectionCode =
+  | 'CAMPAIGN_INACTIVE'
+  | 'NICHE_INACTIVE'
+  | 'GROUP_UNAVAILABLE'
+  | 'OFFER_UNAVAILABLE'
+  | 'OFFER_EXPIRED'
+  | 'STRUCTURAL_REJECTION'
+  | 'NICHE_NOT_MATCHED'
+  | 'SCORE_BELOW_MINIMUM'
+  | 'SNAPSHOT_MISSING'
+  | 'SNAPSHOT_OUTDATED'
+  | 'NO_PROMOTION_SIGNAL'
+  | 'DEDUPE_ACTIVE'
+  | 'RECENTLY_SENT_TO_LOGICAL_GROUP'
+  | 'QUEUE_PROTECTED'
+  | 'QUEUE_NOT_SELECTED'
+  | 'COMMERCIAL_PROMOTION_EVALUATION_TRUNCATED';
+
+export type CommercialPromotionSnapshotRecord = {
+  id: string;
+  productId: string;
+  revision: number;
+  fingerprint: string;
+  price: string;
+  priceMin: string | null;
+  priceMax: string | null;
+  discountRate: number;
+  commissionRate: number;
+  observedRating: number;
+  observedSales: number;
+  offerStartsAt: Date | null;
+  offerEndsAt: Date | null;
+  unavailableAt: Date | null;
+  capturedAt: Date;
+  createdAt: Date;
+};
+
+export type CommercialPromotionCatalogItem = {
+  product: ShopeeOfferRecord;
+  commercialSnapshotRevision: number;
+  commercialSnapshotFingerprint: string | null;
+  latestSnapshotRevision: number | null;
+  currentSnapshot: CommercialPromotionSnapshotRecord | null;
+  previousSnapshot: CommercialPromotionSnapshotRecord | null;
+};
+
+export interface CommercialPromotionCatalogRepository {
+  listOfficialCatalogPage(input: { afterId?: string; limit: number }): Promise<{
+    items: CommercialPromotionCatalogItem[];
+    hasMore: boolean;
+  }>;
+}
+
+export type CommercialPromotionCandidateRecord = {
+  id: string;
+  campaignId: string;
+  productId: string;
+  snapshotId: string;
+  status: CommercialPromotionCandidateStatus;
+  rankPosition: number | null;
+  commercialScore: number;
+  scorePolicyVersion: string;
+  minimumScoreUsed: number;
+  scoreBreakdown: CommercialPipelineScoreBreakdown;
+  promotionSignals: CommercialPromotionSignal[];
+  priceDropPercent: string | null;
+  queuedAt: Date;
+  lastEvaluatedAt: Date;
+  expiresAt: Date | null;
+  dedupeUntil: Date | null;
+  blockedReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CommercialPromotionRankedCandidate = {
+  productId: string;
+  snapshotId: string;
+  snapshotRevision: number;
+  snapshotFingerprint: string;
+  expectedProductUpdatedAt: Date;
+  commercialScore: number;
+  scorePolicyVersion: CommercialOfferScorePolicyVersion;
+  minimumScoreUsed: number;
+  scoreBreakdown: CommercialPipelineScoreBreakdown;
+  promotionSignals: CommercialPromotionSignal[];
+  priceDropPercent: string | null;
+  discountRate: number;
+  commissionRate: number;
+  sales: number;
+  expiresAt: Date | null;
+  expectedCandidateStatus: CommercialPromotionCandidateStatus | null;
+  expectedDedupeUntil: Date | null;
+  expectedCandidateUpdatedAt: Date | null;
+};
+
+export type CommercialPromotionMaterializationInput = {
+  campaignId: string;
+  expectedCampaignUpdatedAt: Date;
+  nicheId: string;
+  expectedNicheUpdatedAt: Date;
+  logicalGroupFingerprint: string;
+  dedupeSince: Date;
+  now: Date;
+  rankedCandidates: CommercialPromotionRankedCandidate[];
+};
+
+export type CommercialPromotionMaterializationResult = {
+  protectedCount: number;
+  queueCapacity: number;
+  queuedBefore: number;
+  queuedCreated: number;
+  queuedReactivated: number;
+  queuedUpdated: number;
+  queuedBlocked: number;
+  queuedExpired: number;
+  queuedAfter: number;
+  queueTargetSize: number;
+  queueFull: boolean;
+};
+
+export type CommercialPromotionQueueItem = Omit<
+  CommercialPromotionCandidateRecord,
+  'scoreBreakdown'
+> & {
+  productName: string;
+  price: string;
+  discountRate: number;
+  snapshotRevision: number;
+};
+
+export interface CommercialPromotionCandidateRepository {
+  listCampaignCandidates(
+    campaignId: string,
+  ): Promise<CommercialPromotionCandidateRecord[]>;
+  findRecentlySentProductIds(input: {
+    productIds: string[];
+    logicalGroupFingerprint: string;
+    sentAtOrAfter: Date;
+  }): Promise<Set<string>>;
+  materialize(
+    input: CommercialPromotionMaterializationInput,
+  ): Promise<CommercialPromotionMaterializationResult>;
+  listQueue(input: {
+    campaignId: string;
+    page: number;
+    limit: number;
+    status?: CommercialPromotionCandidateStatus;
+  }): Promise<{ items: CommercialPromotionQueueItem[]; total: number }>;
+}
+
 export type CouponSource = 'MANUAL' | 'OFFICIAL';
 export type CouponDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 

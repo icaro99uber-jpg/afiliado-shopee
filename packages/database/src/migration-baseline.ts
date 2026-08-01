@@ -18,6 +18,9 @@ export const APPLICATION_TABLES = [
   'CommercialAutomationSettings',
   'CommercialAutomationExecution',
   'CommercialOfferSnapshot',
+  'CommercialNiche',
+  'CommercialGroupCampaign',
+  'CommercialPromotionCandidate',
 ] as const;
 
 const BASELINE_COLUMNS = {

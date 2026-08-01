@@ -25,6 +25,11 @@ import type {
   CommercialNicheRepository,
   CommercialOfferCandidateFilters,
   CommercialOfferSnapshotBackfillRepository,
+  CommercialPromotionCandidateRecord,
+  CommercialPromotionCandidateRepository,
+  CommercialPromotionCatalogRepository,
+  CommercialPromotionMaterializationInput,
+  CommercialPromotionSnapshotRecord,
   CommercialPipelineRunData,
   CommercialPipelineRunFilters,
   CommercialPipelineRunRecord,
@@ -89,9 +94,15 @@ const isTransactionConflictError = (error: unknown) =>
 const isPrismaKnownError = (error: unknown) =>
   /^P\d{4}$/.test(prismaErrorCode(error) ?? '');
 
+const databaseErrorCode = (error: unknown) =>
+  typeof error === 'object' && error !== null && 'meta' in error
+    ? String((error as { meta?: { code?: unknown } }).meta?.code ?? '')
+    : '';
+
 class CommercialConfirmationNotClaimedError extends Error {}
 class CommercialOutboxStateConflictError extends Error {}
 class OfficialOfferSnapshotConflictError extends Error {}
+class CommercialPromotionMiningConflictError extends Error {}
 
 type PrismaDecimalLike = { toString(): string } | number | string;
 
@@ -1079,6 +1090,524 @@ export class PrismaCommercialGroupCampaignRepository implements CommercialGroupC
       }
       throw error;
     }
+  }
+}
+
+const mapCommercialPromotionSnapshot = (
+  record: Record<string, unknown>,
+): CommercialPromotionSnapshotRecord => ({
+  id: String(record.id),
+  productId: String(record.productId),
+  revision: Number(record.revision),
+  fingerprint: String(record.fingerprint),
+  price: decimalString(record.price as PrismaDecimalLike) as string,
+  priceMin: decimalString(record.priceMin as PrismaDecimalLike | null) ?? null,
+  priceMax: decimalString(record.priceMax as PrismaDecimalLike | null) ?? null,
+  discountRate: Number(record.discountRate),
+  commissionRate: Number(record.commissionRate),
+  observedRating: Number(record.observedRating),
+  observedSales: Number(record.observedSales),
+  offerStartsAt: (record.offerStartsAt as Date | null) ?? null,
+  offerEndsAt: (record.offerEndsAt as Date | null) ?? null,
+  unavailableAt: (record.unavailableAt as Date | null) ?? null,
+  capturedAt: record.capturedAt as Date,
+  createdAt: record.createdAt as Date,
+});
+
+const mapCommercialPromotionCandidate = (
+  record: Record<string, unknown>,
+): CommercialPromotionCandidateRecord => ({
+  id: String(record.id),
+  campaignId: String(record.campaignId),
+  productId: String(record.productId),
+  snapshotId: String(record.snapshotId),
+  status: record.status as CommercialPromotionCandidateRecord['status'],
+  rankPosition: (record.rankPosition as number | null) ?? null,
+  commercialScore: Number(record.commercialScore),
+  scorePolicyVersion: String(record.scorePolicyVersion),
+  minimumScoreUsed: Number(record.minimumScoreUsed),
+  scoreBreakdown:
+    record.scoreBreakdown as CommercialPromotionCandidateRecord['scoreBreakdown'],
+  promotionSignals:
+    record.promotionSignals as CommercialPromotionCandidateRecord['promotionSignals'],
+  priceDropPercent:
+    decimalString(record.priceDropPercent as PrismaDecimalLike | null) ?? null,
+  queuedAt: record.queuedAt as Date,
+  lastEvaluatedAt: record.lastEvaluatedAt as Date,
+  expiresAt: (record.expiresAt as Date | null) ?? null,
+  dedupeUntil: (record.dedupeUntil as Date | null) ?? null,
+  blockedReason: (record.blockedReason as string | null) ?? null,
+  createdAt: record.createdAt as Date,
+  updatedAt: record.updatedAt as Date,
+});
+
+const sameInstant = (left: Date | null, right: Date | null) =>
+  left === null
+    ? right === null
+    : right !== null && left.getTime() === right.getTime();
+
+const promotionPersistenceError = (error: unknown): never => {
+  if (error instanceof AppError) throw error;
+  if (
+    error instanceof CommercialPromotionMiningConflictError ||
+    isTransactionConflictError(error) ||
+    isUniqueConstraintError(error) ||
+    (prismaErrorCode(error) === 'P2010' && databaseErrorCode(error) === '55P03')
+  ) {
+    throw new AppError(
+      'Outra mineracao alterou a campanha simultaneamente',
+      'COMMERCIAL_PROMOTION_MINING_CONFLICT',
+    );
+  }
+  throw new AppError(
+    'Falha ao persistir fila promocional',
+    'COMMERCIAL_PROMOTION_PERSISTENCE_FAILED',
+  );
+};
+
+export class PrismaCommercialPromotionRepository
+  implements
+    CommercialPromotionCatalogRepository,
+    CommercialPromotionCandidateRepository
+{
+  constructor(private readonly prisma: DatabaseClient) {}
+
+  async listOfficialCatalogPage(input: { afterId?: string; limit: number }) {
+    const limit = Math.min(Math.max(input.limit, 1), 200);
+    const records = await this.prisma.productLead.findMany({
+      where: {
+        source: 'OFFICIAL',
+        id: input.afterId ? { gt: input.afterId } : undefined,
+      },
+      orderBy: { id: 'asc' },
+      take: limit + 1,
+    });
+    const page = records.slice(0, limit);
+    const snapshotSelectors = page.flatMap((product) => {
+      const revisions = [product.commercialSnapshotRevision];
+      if (product.commercialSnapshotRevision > 1) {
+        revisions.push(product.commercialSnapshotRevision - 1);
+      }
+      return revisions
+        .filter((revision) => revision > 0)
+        .map((revision) => ({ productId: product.id, revision }));
+    });
+    const productIds = page.map(({ id }) => id);
+    const [snapshots, latestSnapshotRevisions] = await Promise.all([
+      snapshotSelectors.length === 0
+        ? Promise.resolve([])
+        : this.prisma.commercialOfferSnapshot.findMany({
+            where: { OR: snapshotSelectors },
+          }),
+      productIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.commercialOfferSnapshot.groupBy({
+            by: ['productId'],
+            where: { productId: { in: productIds } },
+            _max: { revision: true },
+          }),
+    ]);
+    const latestRevisionByProduct = new Map(
+      latestSnapshotRevisions.map(({ productId, _max }) => [
+        productId,
+        _max.revision,
+      ]),
+    );
+    const snapshotByProductRevision = new Map(
+      snapshots.map((snapshot) => [
+        `${snapshot.productId}:${snapshot.revision}`,
+        mapCommercialPromotionSnapshot(
+          snapshot as unknown as Record<string, unknown>,
+        ),
+      ]),
+    );
+    return {
+      items: page.map((product) => ({
+        product: mapShopeeOffer(product as unknown as Record<string, unknown>),
+        commercialSnapshotRevision: product.commercialSnapshotRevision,
+        commercialSnapshotFingerprint: product.commercialSnapshotFingerprint,
+        latestSnapshotRevision: latestRevisionByProduct.get(product.id) ?? null,
+        currentSnapshot:
+          snapshotByProductRevision.get(
+            `${product.id}:${product.commercialSnapshotRevision}`,
+          ) ?? null,
+        previousSnapshot:
+          product.commercialSnapshotRevision > 1
+            ? (snapshotByProductRevision.get(
+                `${product.id}:${product.commercialSnapshotRevision - 1}`,
+              ) ?? null)
+            : null,
+      })),
+      hasMore: records.length > limit,
+    };
+  }
+
+  async listCampaignCandidates(campaignId: string) {
+    const records = await this.prisma.commercialPromotionCandidate.findMany({
+      where: { campaignId },
+      orderBy: { id: 'asc' },
+    });
+    return records.map((record) =>
+      mapCommercialPromotionCandidate(
+        record as unknown as Record<string, unknown>,
+      ),
+    );
+  }
+
+  async findRecentlySentProductIds(input: {
+    productIds: string[];
+    logicalGroupFingerprint: string;
+    sentAtOrAfter: Date;
+  }) {
+    if (input.productIds.length === 0) return new Set<string>();
+    const rows = await this.prisma.whatsAppDispatch.findMany({
+      where: {
+        productId: { in: input.productIds },
+        status: 'SENT',
+        sentAt: { gte: input.sentAtOrAfter },
+        destination: {
+          type: 'GROUP',
+          fingerprint: input.logicalGroupFingerprint,
+        },
+      },
+      select: { productId: true },
+      distinct: ['productId'],
+    });
+    return new Set(rows.map(({ productId }) => productId));
+  }
+
+  async materialize(input: CommercialPromotionMaterializationInput) {
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const locked = await transaction.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "CommercialGroupCampaign"
+            WHERE "id" = ${input.campaignId}
+            FOR UPDATE NOWAIT
+          `;
+          if (locked.length !== 1) {
+            throw new AppError(
+              'Configuracao comercial mudou antes da materializacao',
+              'COMMERCIAL_PROMOTION_CONFIGURATION_CHANGED',
+            );
+          }
+          const campaign = await transaction.commercialGroupCampaign.findUnique(
+            {
+              where: { id: input.campaignId },
+              include: { niche: true },
+            },
+          );
+          if (
+            !campaign ||
+            campaign.nicheId !== input.nicheId ||
+            campaign.logicalGroupFingerprint !==
+              input.logicalGroupFingerprint ||
+            campaign.updatedAt.getTime() !==
+              input.expectedCampaignUpdatedAt.getTime() ||
+            campaign.niche.updatedAt.getTime() !==
+              input.expectedNicheUpdatedAt.getTime()
+          ) {
+            throw new AppError(
+              'Configuracao comercial mudou antes da materializacao',
+              'COMMERCIAL_PROMOTION_CONFIGURATION_CHANGED',
+            );
+          }
+          if (!campaign.active) {
+            throw new AppError('Campanha inativa', 'CAMPAIGN_INACTIVE');
+          }
+          if (!campaign.niche.active) {
+            throw new AppError('Nicho inativo', 'NICHE_INACTIVE');
+          }
+          const group = await transaction.whatsAppDestination.findFirst({
+            where: {
+              type: 'GROUP',
+              fingerprint: input.logicalGroupFingerprint,
+              active: true,
+              available: true,
+              sourceInstanceName: { not: null },
+            },
+            select: { id: true },
+          });
+          if (!group) {
+            throw new AppError(
+              'Grupo logico indisponivel',
+              'GROUP_UNAVAILABLE',
+            );
+          }
+
+          const currentCandidates =
+            await transaction.commercialPromotionCandidate.findMany({
+              where: { campaignId: input.campaignId },
+              include: {
+                product: {
+                  select: { unavailableAt: true, offerEndsAt: true },
+                },
+              },
+              orderBy: { id: 'asc' },
+            });
+          const protectedCount = currentCandidates.filter(
+            ({ status }) => status === 'COPY_READY' || status === 'RESERVED',
+          ).length;
+          const queuedBefore = currentCandidates.filter(
+            ({ status }) => status === 'QUEUED',
+          ).length;
+          const queueCapacity = Math.max(
+            campaign.queueTargetSize - protectedCount,
+            0,
+          );
+          const selected = input.rankedCandidates.slice(0, queueCapacity);
+          const currentByProduct = new Map(
+            currentCandidates.map((candidate) => [
+              candidate.productId,
+              candidate,
+            ]),
+          );
+
+          for (const candidate of selected) {
+            const current = currentByProduct.get(candidate.productId);
+            if (
+              (current?.status ?? null) !== candidate.expectedCandidateStatus ||
+              !sameInstant(
+                current?.dedupeUntil ?? null,
+                candidate.expectedDedupeUntil,
+              ) ||
+              !sameInstant(
+                current?.updatedAt ?? null,
+                candidate.expectedCandidateUpdatedAt,
+              ) ||
+              current?.status === 'COPY_READY' ||
+              current?.status === 'RESERVED'
+            ) {
+              throw new CommercialPromotionMiningConflictError();
+            }
+          }
+
+          const selectedProductIds = selected.map(({ productId }) => productId);
+          const [products, snapshots, recentlySent] = await Promise.all([
+            transaction.productLead.findMany({
+              where: { id: { in: selectedProductIds } },
+              select: {
+                id: true,
+                source: true,
+                commercialSnapshotRevision: true,
+                commercialSnapshotFingerprint: true,
+                updatedAt: true,
+              },
+            }),
+            transaction.commercialOfferSnapshot.findMany({
+              where: {
+                id: { in: selected.map(({ snapshotId }) => snapshotId) },
+              },
+              select: {
+                id: true,
+                productId: true,
+                revision: true,
+                fingerprint: true,
+              },
+            }),
+            transaction.whatsAppDispatch.findFirst({
+              where: {
+                productId: { in: selectedProductIds },
+                status: 'SENT',
+                sentAt: { gte: input.dedupeSince },
+                destination: {
+                  type: 'GROUP',
+                  fingerprint: input.logicalGroupFingerprint,
+                },
+              },
+              select: { id: true },
+            }),
+          ]);
+          if (recentlySent) throw new CommercialPromotionMiningConflictError();
+          const productById = new Map(
+            products.map((product) => [product.id, product]),
+          );
+          const snapshotById = new Map(
+            snapshots.map((snapshot) => [snapshot.id, snapshot]),
+          );
+          for (const candidate of selected) {
+            const product = productById.get(candidate.productId);
+            const snapshot = snapshotById.get(candidate.snapshotId);
+            if (
+              !product ||
+              product.source !== 'OFFICIAL' ||
+              product.commercialSnapshotRevision !==
+                candidate.snapshotRevision ||
+              product.commercialSnapshotFingerprint !==
+                candidate.snapshotFingerprint ||
+              product.updatedAt.getTime() !==
+                candidate.expectedProductUpdatedAt.getTime() ||
+              !snapshot ||
+              snapshot.productId !== candidate.productId ||
+              snapshot.revision !== candidate.snapshotRevision ||
+              snapshot.fingerprint !== candidate.snapshotFingerprint
+            ) {
+              throw new AppError(
+                'Produto ou snapshot mudou antes da materializacao',
+                'COMMERCIAL_PROMOTION_CATALOG_CHANGED',
+              );
+            }
+          }
+
+          let queuedCreated = 0;
+          let queuedReactivated = 0;
+          let queuedUpdated = 0;
+          for (const [index, candidate] of selected.entries()) {
+            const current = currentByProduct.get(candidate.productId);
+            const data = {
+              snapshotId: candidate.snapshotId,
+              status: 'QUEUED' as const,
+              rankPosition: index + 1,
+              commercialScore: candidate.commercialScore,
+              scorePolicyVersion: candidate.scorePolicyVersion,
+              minimumScoreUsed: candidate.minimumScoreUsed,
+              scoreBreakdown: candidate.scoreBreakdown as never,
+              promotionSignals: candidate.promotionSignals,
+              priceDropPercent: candidate.priceDropPercent,
+              lastEvaluatedAt: input.now,
+              expiresAt: candidate.expiresAt,
+              blockedReason: null,
+            };
+            if (!current) {
+              await transaction.commercialPromotionCandidate.create({
+                data: {
+                  ...data,
+                  campaignId: input.campaignId,
+                  productId: candidate.productId,
+                  queuedAt: input.now,
+                },
+              });
+              queuedCreated += 1;
+              continue;
+            }
+            const reactivated =
+              current.status === 'BLOCKED' ||
+              current.status === 'EXPIRED' ||
+              current.status === 'DISPATCHED';
+            const updated =
+              await transaction.commercialPromotionCandidate.updateMany({
+                where: {
+                  id: current.id,
+                  status: current.status,
+                  updatedAt: current.updatedAt,
+                },
+                data: {
+                  ...data,
+                  queuedAt: reactivated ? input.now : current.queuedAt,
+                },
+              });
+            if (updated.count !== 1) {
+              throw new CommercialPromotionMiningConflictError();
+            }
+            if (reactivated) queuedReactivated += 1;
+            else queuedUpdated += 1;
+          }
+
+          const selectedIds = new Set(
+            selected.map(({ productId }) => productId),
+          );
+          let queuedBlocked = 0;
+          let queuedExpired = 0;
+          for (const candidate of currentCandidates) {
+            if (
+              candidate.status !== 'QUEUED' ||
+              selectedIds.has(candidate.productId)
+            ) {
+              continue;
+            }
+            const expired =
+              candidate.product.unavailableAt !== null ||
+              (candidate.product.offerEndsAt !== null &&
+                candidate.product.offerEndsAt <= input.now);
+            const updated =
+              await transaction.commercialPromotionCandidate.updateMany({
+                where: {
+                  id: candidate.id,
+                  status: 'QUEUED',
+                  updatedAt: candidate.updatedAt,
+                },
+                data: {
+                  status: expired ? 'EXPIRED' : 'BLOCKED',
+                  rankPosition: null,
+                  blockedReason: expired ? null : 'QUEUE_NOT_SELECTED',
+                  lastEvaluatedAt: input.now,
+                },
+              });
+            if (updated.count !== 1) {
+              throw new CommercialPromotionMiningConflictError();
+            }
+            if (expired) queuedExpired += 1;
+            else queuedBlocked += 1;
+          }
+          const queuedAfter =
+            await transaction.commercialPromotionCandidate.count({
+              where: { campaignId: input.campaignId, status: 'QUEUED' },
+            });
+          return {
+            protectedCount,
+            queueCapacity,
+            queuedBefore,
+            queuedCreated,
+            queuedReactivated,
+            queuedUpdated,
+            queuedBlocked,
+            queuedExpired,
+            queuedAfter,
+            queueTargetSize: campaign.queueTargetSize,
+            queueFull: protectedCount + queuedAfter >= campaign.queueTargetSize,
+          };
+        },
+        { isolationLevel: 'Serializable', maxWait: 1_000, timeout: 10_000 },
+      );
+    } catch (error) {
+      return promotionPersistenceError(error);
+    }
+  }
+
+  async listQueue(input: {
+    campaignId: string;
+    page: number;
+    limit: number;
+    status?: CommercialPromotionCandidateRecord['status'];
+  }) {
+    const where = { campaignId: input.campaignId, status: input.status };
+    const [records, total] = await Promise.all([
+      this.prisma.commercialPromotionCandidate.findMany({
+        where,
+        include: {
+          product: { select: { nome: true, preco: true, desconto: true } },
+          snapshot: { select: { revision: true } },
+        },
+        orderBy: [
+          { status: 'asc' },
+          { rankPosition: 'asc' },
+          { queuedAt: 'asc' },
+          { id: 'asc' },
+        ],
+        skip: (input.page - 1) * input.limit,
+        take: input.limit,
+      }),
+      this.prisma.commercialPromotionCandidate.count({ where }),
+    ]);
+    return {
+      items: records.map((record) => {
+        const mapped = mapCommercialPromotionCandidate(
+          record as unknown as Record<string, unknown>,
+        );
+        const { scoreBreakdown: omittedScoreBreakdown, ...safeCandidate } =
+          mapped;
+        void omittedScoreBreakdown;
+        return {
+          ...safeCandidate,
+          productName: record.product.nome,
+          price: record.product.preco.toString(),
+          discountRate: record.product.desconto,
+          snapshotRevision: record.snapshot.revision,
+        };
+      }),
+      total,
+    };
   }
 }
 
