@@ -117,4 +117,31 @@ describe('commercial promotion copy routes', () => {
       message: 'Output rejeitado',
     });
   });
+
+  it('mapeia códigos sanitizados do provider para status HTTP estáveis', async () => {
+    const subject = await setup();
+    const cases = [
+      ['COMMERCIAL_AI_COPY_AUTHENTICATION_FAILED', 503],
+      ['COMMERCIAL_AI_COPY_ACCESS_DENIED', 503],
+      ['COMMERCIAL_AI_COPY_QUOTA_EXCEEDED', 503],
+      ['COMMERCIAL_AI_COPY_RATE_LIMITED', 503],
+      ['COMMERCIAL_AI_COPY_PROVIDER_SERVER_ERROR', 503],
+    ] as const;
+
+    for (const [code, statusCode] of cases) {
+      subject.generate.mockRejectedValueOnce(
+        new AppError('Provider falhou', code),
+      );
+      const response = await subject.app.inject({
+        method: 'POST',
+        url: '/commercial/promotion-candidates/candidate-internal/copy-generate',
+        payload: { confirm: 'GERAR_COPY_COM_IA' },
+      });
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toEqual({
+        error: code,
+        message: 'Provider falhou',
+      });
+    }
+  });
 });

@@ -3,6 +3,7 @@ import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import {
   CommercialAiCopyProviderError,
+  normalizeCommercialAiCopyModel,
   type CommercialAiCopyProvider,
   type CommercialAiCopyProviderResult,
 } from './commercial-ai-copy-provider';
@@ -513,6 +514,29 @@ export class CommercialPromotionCopyGenerationService {
               'COMMERCIAL_AI_COPY_PROVIDER_RESULT_AMBIGUOUS',
             );
       const ambiguous = providerError.kind === 'AMBIGUOUS';
+      this.options.logger?.error(
+        {
+          event: 'commercial-ai-copy.provider-failed',
+          candidateId: context.candidate.id,
+          provider: this.options.config.provider,
+          model: normalizeCommercialAiCopyModel(this.options.config.model),
+          publicCode: providerError.publicCode,
+          failureKind: providerError.kind,
+          ...(providerError.httpStatus !== undefined && {
+            httpStatus: providerError.httpStatus,
+          }),
+          ...(providerError.providerErrorCode && {
+            providerErrorCode: providerError.providerErrorCode,
+          }),
+          ...(providerError.providerErrorType && {
+            providerErrorType: providerError.providerErrorType,
+          }),
+          ...(providerError.providerErrorParam && {
+            providerErrorParam: providerError.providerErrorParam,
+          }),
+        },
+        'Commercial AI copy provider failed',
+      );
       await this.terminalFailure(
         fingerprint,
         ambiguous ? 'AMBIGUOUS' : 'FAILED',
@@ -621,11 +645,10 @@ export class CommercialPromotionCopyGenerationService {
         {
           event: 'commercial-ai-copy.persistence-ambiguous',
           candidateId: context.candidate.id,
-          inputFingerprint: fingerprint,
-          provider: providerResult.provider,
-          model: providerResult.model,
-          failureCode: 'COMMERCIAL_AI_COPY_PERSISTENCE_AMBIGUOUS',
-          requestMayHaveStarted: true,
+          provider: this.options.config.provider,
+          model: normalizeCommercialAiCopyModel(this.options.config.model),
+          publicCode: 'COMMERCIAL_AI_COPY_PERSISTENCE_AMBIGUOUS',
+          failureKind: 'AMBIGUOUS',
         },
         'Commercial AI copy persistence is ambiguous',
       );
@@ -644,9 +667,8 @@ export class CommercialPromotionCopyGenerationService {
       {
         event: 'commercial-ai-copy.generated',
         candidateId: context.candidate.id,
-        inputFingerprint: fingerprint,
         provider: providerResult.provider,
-        model: providerResult.model,
+        model: normalizeCommercialAiCopyModel(providerResult.model),
       },
       'Commercial AI copy generated',
     );
