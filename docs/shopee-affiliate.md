@@ -458,8 +458,8 @@ depois disso, um item novamente elegível pode voltar a `QUEUED`.
 rebalanceados e itens fora do novo top ficam `BLOCKED`.
 `evaluationTruncated=true` pode ser visto no preview, mas nunca materializado.
 Uma campanha com cadência de 15 minutos ainda não possui Scheduler nesta etapa.
-IA entra na próxima Sprint e o uso de múltiplos remetentes somente depois da
-camada de copy.
+O uso de múltiplos remetentes continua fora desta etapa; candidatos `QUEUED`
+podem seguir para a camada validada de copy descrita abaixo.
 
 ```powershell
 corepack pnpm commercial:campaign:preview -- --campaign-id=<id>
@@ -474,3 +474,29 @@ worker de dispatch. As rotas equivalentes são `POST
 /commercial/campaigns/:id/queue`. Respostas não incluem URL, ID externo, JID,
 telefone, segredo ou payload bruto. Nenhum desses caminhos chama Shopee,
 Evolution ou WhatsApp e nenhum deles cria job, dispatch ou outbox.
+
+## Copy validada para candidatos comerciais
+
+Somente candidato `OFFICIAL/QUEUED`, com produto disponível, score elegível e
+snapshot/revision/fingerprint ainda atuais, pode iniciar a geração. Produto,
+loja e nicho são normalizados como dados não confiáveis; a IA recebe ainda
+sinais, score, desconto, avaliação, vendas, queda opcional e limites, mas nunca
+`affiliateLink`, `productLink`, `providerProductId`, `shopId`, fingerprint,
+credencial ou identificador de mensageria.
+
+O Structured Output estrito produz apenas headline, body, CTA e hashtags. A
+validação impede que a IA gere ou repita números, preço, percentual, avaliação,
+vendas, link, contato, markdown ou alegações promocionais não comprovadas. O
+assembler insere deterministicamente nome e loja persistidos, preço em BRL,
+desconto positivo, no máximo um sinal prioritário e exatamente o
+`affiliateLink` atual. O link não é alterado, parametrizado, encurtado ou
+truncado.
+
+A `GeneratedCopy` AI fica vinculada ao snapshot exato e o candidato só então
+passa a `COPY_READY`. Fingerprint canônico, cache e claim único impedem chamada
+duplicada. `FAILED` preserva falha confirmada; `AMBIGUOUS` preserva incerteza;
+nenhum deles recebe retry automático para o mesmo input.
+
+Preflight e preview são read-only. A geração não consulta a Shopee, não altera
+signer, query, matcher ou score, e não cria pipeline run, automation execution,
+dispatch, outbox, job ou mensagem.

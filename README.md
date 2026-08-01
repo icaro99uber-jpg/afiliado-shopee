@@ -1137,8 +1137,8 @@ Desconto corrente não prova queda histórica: `PRICE_DROP` e
 significa observado pelo sistema nas últimas 24 horas. Os sinais não adicionam
 pontos ao `official-v2`. `protectedCount` reduz a capacidade e força rebalanço;
 avaliação truncada nunca é materializada. Cadência de 15 minutos ainda não cria
-Scheduler; IA e múltiplos remetentes entram somente depois da camada de copy em
-sprint futura.
+Scheduler; múltiplos remetentes continuam fora desta etapa, e candidatos
+`QUEUED` seguem para a camada validada de copy abaixo.
 
 Rotas disponíveis:
 
@@ -1161,3 +1161,53 @@ zero worker de dispatch. A materialização é idempotente por campanha + produt
 preserva `COPY_READY`/`RESERVED`, exclui `DISPATCHED` enquanto o dedupe está
 ativo, bloqueia envios `SENT` recentes ao mesmo grupo lógico e não faz retry em
 conflito concorrente.
+
+## Copy promocional validada por IA
+
+A geração para candidatos comerciais é separada do Copy Engine legado. Ela
+vincula o input ao snapshot atual, reutiliza cache por fingerprint, adquire um
+claim único e só altera o candidato para `COPY_READY` quando a copy AI validada,
+a tentativa e o vínculo forem persistidos atomicamente. A IA gera apenas texto
+estruturado; preço, desconto, sinal promocional e link são inseridos pelo
+sistema, e respostas públicas substituem o link por `[LINK_AFILIADO]`.
+
+Configuração local, sem incluir valores reais:
+
+```env
+OPENAI_API_KEY=
+COMMERCIAL_AI_COPY_ENABLED=false
+COMMERCIAL_AI_COPY_PROVIDER=openai
+COMMERCIAL_AI_COPY_MODEL=
+COMMERCIAL_AI_COPY_TIMEOUT_MS=30000
+COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS=300
+```
+
+A chave e o modelo ficam somente no `.env` ignorado; modelo e chave são
+obrigatórios apenas quando a feature está habilitada. Credenciais não são
+aceitas por argumento, log ou resposta.
+
+```powershell
+corepack pnpm commercial:copy:preflight
+corepack pnpm commercial:copy:preview -- --candidate-id=<id>
+corepack pnpm commercial:copy:generate -- --candidate-id=<id> --confirm-one-ai-copy
+```
+
+Preflight e preview não chamam IA nem escrevem. A geração manual exige banco
+local, execução fora de CI, modo preview, automação pausada e desabilitada, os
+dois Schedulers e group send desligados e zero worker de dispatch.
+
+Rotas disponíveis:
+
+- `POST /commercial/promotion-candidates/:id/copy-preview`, sem campos no body;
+- `POST /commercial/promotion-candidates/:id/copy-generate`, com
+  `{ "confirm": "GERAR_COPY_COM_IA" }`;
+- `GET /commercial/promotion-candidates/:id/copy`.
+
+O prompt `commercial-promotion-copy-v1` trata catálogo como dado não confiável;
+o schema estrito e a validação `commercial-promotion-copy-validation-v1`
+rejeitam números, URLs, contatos e alegações não demonstradas. O fingerprint
+não guarda o link bruto. Claims `STARTED`, `FAILED` e `AMBIGUOUS` impedem nova
+chamada para o mesmo input; `SUCCEEDED` reutiliza a copy, sem retry automático.
+
+Nenhuma chamada real à OpenAI foi executada nesta task. Scheduler de geração,
+envio, WhatsApp, Evolution e múltiplos números permanecem fora desta Sprint.

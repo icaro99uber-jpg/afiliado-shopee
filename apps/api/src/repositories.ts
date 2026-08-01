@@ -624,6 +624,7 @@ export type CommercialPromotionCandidateRecord = {
   campaignId: string;
   productId: string;
   snapshotId: string;
+  generatedCopyId?: string | null;
   status: CommercialPromotionCandidateStatus;
   rankPosition: number | null;
   commercialScore: number;
@@ -717,6 +718,130 @@ export interface CommercialPromotionCandidateRepository {
   }): Promise<{ items: CommercialPromotionQueueItem[]; total: number }>;
 }
 
+export type CommercialCopyGenerationAttemptStatus =
+  'STARTED' | 'SUCCEEDED' | 'FAILED' | 'AMBIGUOUS';
+
+export type CommercialCopyGenerationAttemptRecord = {
+  id: string;
+  candidateId: string;
+  snapshotId: string;
+  inputFingerprint: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  validationVersion: string;
+  status: CommercialCopyGenerationAttemptStatus;
+  generatedCopyId: string | null;
+  failureCode: string | null;
+  requestMayHaveStarted: boolean;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  startedAt: Date;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CommercialPromotionCopyContext = {
+  candidate: CommercialPromotionCandidateRecord;
+  campaign: CommercialGroupCampaignRecord;
+  niche: CommercialNicheRecord;
+  product: {
+    id: string;
+    source: ShopeeAffiliateOfferSource;
+    productName: string;
+    shopName: string;
+    price: string;
+    discountRate: number;
+    rating: number;
+    sales: number;
+    affiliateLink: string | null;
+    offerEndsAt: Date | null;
+    unavailableAt: Date | null;
+    commercialSnapshotRevision: number;
+    commercialSnapshotFingerprint: string | null;
+    updatedAt: Date;
+  };
+  snapshot: CommercialPromotionSnapshotRecord;
+  previousSnapshot: CommercialPromotionSnapshotRecord | null;
+};
+
+export type CommercialAiCopyClaimInput = {
+  candidateId: string;
+  snapshotId: string;
+  inputFingerprint: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  validationVersion: string;
+  startedAt: Date;
+  expected: CommercialPromotionCopyContext;
+  affiliateLinkHash: string;
+  validatedAt: Date;
+};
+
+export type CommercialAiCopyCompletionInput = {
+  expected: CommercialPromotionCopyContext;
+  inputFingerprint: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  validationVersion: string;
+  affiliateLinkHash: string;
+  copy: GeneratedCopyData;
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+  };
+  completedAt: Date;
+};
+
+export type CommercialAiCopyCompletionResult =
+  | { completed: true; copy: GeneratedCopyRecord }
+  | { completed: false; failureCode: string };
+
+export interface CommercialPromotionCopyRepository {
+  loadContext(
+    candidateId: string,
+  ): Promise<CommercialPromotionCopyContext | null>;
+  findCopyByInputFingerprint(
+    inputFingerprint: string,
+  ): Promise<GeneratedCopyRecord | null>;
+  findAttemptByInputFingerprint(
+    inputFingerprint: string,
+  ): Promise<CommercialCopyGenerationAttemptRecord | null>;
+  claim(input: CommercialAiCopyClaimInput): Promise<boolean>;
+  linkCachedCopy(input: {
+    expected: CommercialPromotionCopyContext;
+    copyId: string;
+    inputFingerprint: string;
+    affiliateLinkHash: string;
+    validatedAt: Date;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    validationVersion: string;
+    maximumLength: number;
+  }): Promise<boolean>;
+  complete(
+    input: CommercialAiCopyCompletionInput,
+  ): Promise<CommercialAiCopyCompletionResult>;
+  markAttemptTerminal(input: {
+    inputFingerprint: string;
+    status: 'FAILED' | 'AMBIGUOUS';
+    failureCode: string;
+    requestMayHaveStarted: boolean;
+    completedAt: Date;
+  }): Promise<boolean>;
+  findCopyForCandidate(candidateId: string): Promise<{
+    candidate: CommercialPromotionCandidateRecord;
+    copy: GeneratedCopyRecord;
+    snapshotRevision: number;
+  } | null>;
+}
+
 export type CouponSource = 'MANUAL' | 'OFFICIAL';
 export type CouponDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
 
@@ -758,6 +883,17 @@ export type GeneratedCopyData = {
   mensagem: string;
   cta: string;
   hashtags: string;
+  source?: 'LEGACY_TEMPLATE' | 'AI';
+  provider?: string | null;
+  model?: string | null;
+  promptVersion?: string | null;
+  validationVersion?: string | null;
+  inputFingerprint?: string | null;
+  snapshotId?: string | null;
+  createdFromCandidateId?: string | null;
+  usageInputTokens?: number | null;
+  usageOutputTokens?: number | null;
+  usageTotalTokens?: number | null;
 };
 
 export type GeneratedCopyRecord = GeneratedCopyData & {

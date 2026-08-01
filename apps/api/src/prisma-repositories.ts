@@ -28,6 +28,8 @@ import type {
   CommercialPromotionCandidateRecord,
   CommercialPromotionCandidateRepository,
   CommercialPromotionCatalogRepository,
+  CommercialPromotionCopyContext,
+  CommercialPromotionCopyRepository,
   CommercialPromotionMaterializationInput,
   CommercialPromotionSnapshotRecord,
   CommercialPipelineRunData,
@@ -76,6 +78,8 @@ import {
   fingerprintCommercialOffer,
   type CommercialOfferFingerprintInput,
 } from './commercial-offer-snapshot';
+import { sha256 } from './commercial-ai-copy-fingerprint';
+import { isSafeAssembledCommercialPromotionCopy } from './commercial-promotion-copy-assembler';
 
 const prismaErrorCode = (error: unknown) =>
   typeof error === 'object' && error !== null && 'code' in error
@@ -1121,6 +1125,7 @@ const mapCommercialPromotionCandidate = (
   campaignId: String(record.campaignId),
   productId: String(record.productId),
   snapshotId: String(record.snapshotId),
+  generatedCopyId: (record.generatedCopyId as string | null) ?? null,
   status: record.status as CommercialPromotionCandidateRecord['status'],
   rankPosition: (record.rankPosition as number | null) ?? null,
   commercialScore: Number(record.commercialScore),
@@ -1140,6 +1145,135 @@ const mapCommercialPromotionCandidate = (
   createdAt: record.createdAt as Date,
   updatedAt: record.updatedAt as Date,
 });
+
+const mapCommercialAiCopyAttempt = (record: Record<string, unknown>) => ({
+  id: String(record.id),
+  candidateId: String(record.candidateId),
+  snapshotId: String(record.snapshotId),
+  inputFingerprint: String(record.inputFingerprint),
+  provider: String(record.provider),
+  model: String(record.model),
+  promptVersion: String(record.promptVersion),
+  validationVersion: String(record.validationVersion),
+  status: record.status as 'STARTED' | 'SUCCEEDED' | 'FAILED' | 'AMBIGUOUS',
+  generatedCopyId: (record.generatedCopyId as string | null) ?? null,
+  failureCode: (record.failureCode as string | null) ?? null,
+  requestMayHaveStarted: Boolean(record.requestMayHaveStarted),
+  inputTokens: (record.inputTokens as number | null) ?? null,
+  outputTokens: (record.outputTokens as number | null) ?? null,
+  totalTokens: (record.totalTokens as number | null) ?? null,
+  startedAt: record.startedAt as Date,
+  completedAt: (record.completedAt as Date | null) ?? null,
+  createdAt: record.createdAt as Date,
+  updatedAt: record.updatedAt as Date,
+});
+
+const commercialPromotionCopyContextFromRecord = (
+  record: Record<string, unknown>,
+  previousSnapshot: CommercialPromotionSnapshotRecord | null,
+): CommercialPromotionCopyContext => {
+  const campaign = record.campaign as Record<string, unknown>;
+  const product = record.product as Record<string, unknown>;
+  const snapshot = record.snapshot as Record<string, unknown>;
+  return {
+    candidate: mapCommercialPromotionCandidate(record),
+    campaign: mapCommercialGroupCampaign(campaign),
+    niche: mapCommercialNiche(campaign.niche as Record<string, unknown>),
+    product: {
+      id: String(product.id),
+      source:
+        product.source as CommercialPromotionCopyContext['product']['source'],
+      productName: String(product.nome),
+      shopName: String(product.loja),
+      price: decimalString(product.preco as PrismaDecimalLike) as string,
+      discountRate: Number(product.desconto),
+      rating: Number(product.nota),
+      sales: Number(product.vendidos),
+      affiliateLink: (product.affiliateLink as string | null) ?? null,
+      offerEndsAt: (product.offerEndsAt as Date | null) ?? null,
+      unavailableAt: (product.unavailableAt as Date | null) ?? null,
+      commercialSnapshotRevision: Number(product.commercialSnapshotRevision),
+      commercialSnapshotFingerprint:
+        (product.commercialSnapshotFingerprint as string | null) ?? null,
+      updatedAt: product.updatedAt as Date,
+    },
+    snapshot: mapCommercialPromotionSnapshot(snapshot),
+    previousSnapshot,
+  };
+};
+
+const sameDate = (left: Date, right: Date) =>
+  left.getTime() === right.getTime();
+
+const copyContextFailure = (
+  current: CommercialPromotionCopyContext | null,
+  expected: CommercialPromotionCopyContext,
+  affiliateLinkHash: string,
+  validatedAt: Date,
+) => {
+  if (!current) return 'COMMERCIAL_AI_COPY_CANDIDATE_CHANGED';
+  if (
+    current.candidate.status !== 'QUEUED' ||
+    current.candidate.generatedCopyId !== null ||
+    !sameDate(current.candidate.updatedAt, expected.candidate.updatedAt)
+  ) {
+    return 'COMMERCIAL_AI_COPY_CANDIDATE_CHANGED';
+  }
+  if (
+    !current.campaign.active ||
+    !current.niche.active ||
+    !sameDate(current.campaign.updatedAt, expected.campaign.updatedAt) ||
+    !sameDate(current.niche.updatedAt, expected.niche.updatedAt)
+  ) {
+    return 'COMMERCIAL_AI_COPY_CONFIGURATION_CHANGED';
+  }
+  if (
+    current.product.source !== 'OFFICIAL' ||
+    current.product.unavailableAt ||
+    (current.product.offerEndsAt &&
+      current.product.offerEndsAt <= validatedAt) ||
+    (current.candidate.expiresAt &&
+      current.candidate.expiresAt <= validatedAt) ||
+    !sameDate(current.product.updatedAt, expected.product.updatedAt) ||
+    current.product.commercialSnapshotRevision !== current.snapshot.revision ||
+    current.product.commercialSnapshotFingerprint !==
+      current.snapshot.fingerprint ||
+    current.snapshot.id !== expected.snapshot.id ||
+    current.snapshot.fingerprint !== expected.snapshot.fingerprint ||
+    !current.product.affiliateLink ||
+    sha256(current.product.affiliateLink) !== affiliateLinkHash
+  ) {
+    return 'COMMERCIAL_AI_COPY_CATALOG_CHANGED';
+  }
+  return null;
+};
+
+const sameGeneratedCopy = (
+  record: Record<string, unknown>,
+  expected: GeneratedCopyData,
+) =>
+  [
+    'productId',
+    'titulo',
+    'mensagem',
+    'cta',
+    'hashtags',
+    'source',
+    'provider',
+    'model',
+    'promptVersion',
+    'validationVersion',
+    'inputFingerprint',
+    'snapshotId',
+    'createdFromCandidateId',
+    'usageInputTokens',
+    'usageOutputTokens',
+    'usageTotalTokens',
+  ].every(
+    (field) =>
+      (record[field] ?? null) ===
+      (expected[field as keyof GeneratedCopyData] ?? null),
+  );
 
 const sameInstant = (left: Date | null, right: Date | null) =>
   left === null
@@ -1607,6 +1741,433 @@ export class PrismaCommercialPromotionRepository
         };
       }),
       total,
+    };
+  }
+}
+
+type CommercialCopyPrismaClient = Pick<
+  DatabaseClient,
+  | 'commercialPromotionCandidate'
+  | 'commercialOfferSnapshot'
+  | 'commercialCopyGenerationAttempt'
+  | 'generatedCopy'
+>;
+
+const commercialCopyCampaignInclude = {
+  niche: true,
+  anchorDestination: commercialCampaignInclude.anchorDestination,
+};
+
+const loadCommercialPromotionCopyContext = async (
+  client: CommercialCopyPrismaClient,
+  candidateId: string,
+) => {
+  const record = await client.commercialPromotionCandidate.findUnique({
+    where: { id: candidateId },
+    include: {
+      campaign: { include: commercialCopyCampaignInclude },
+      product: true,
+      snapshot: true,
+    },
+  });
+  if (!record) return null;
+  const previous =
+    record.snapshot.revision > 1
+      ? await client.commercialOfferSnapshot.findUnique({
+          where: {
+            productId_revision: {
+              productId: record.productId,
+              revision: record.snapshot.revision - 1,
+            },
+          },
+        })
+      : null;
+  return commercialPromotionCopyContextFromRecord(
+    record as unknown as Record<string, unknown>,
+    previous
+      ? mapCommercialPromotionSnapshot(
+          previous as unknown as Record<string, unknown>,
+        )
+      : null,
+  );
+};
+
+export class PrismaCommercialPromotionCopyRepository implements CommercialPromotionCopyRepository {
+  constructor(private readonly prisma: DatabaseClient) {}
+
+  loadContext(candidateId: string) {
+    return loadCommercialPromotionCopyContext(this.prisma, candidateId);
+  }
+
+  async findCopyByInputFingerprint(inputFingerprint: string) {
+    return (await this.prisma.generatedCopy.findUnique({
+      where: { inputFingerprint },
+    })) as GeneratedCopyRecord | null;
+  }
+
+  async findAttemptByInputFingerprint(inputFingerprint: string) {
+    const record = await this.prisma.commercialCopyGenerationAttempt.findUnique(
+      {
+        where: { inputFingerprint },
+      },
+    );
+    return record
+      ? mapCommercialAiCopyAttempt(record as unknown as Record<string, unknown>)
+      : null;
+  }
+
+  async claim(
+    input: Parameters<CommercialPromotionCopyRepository['claim']>[0],
+  ) {
+    try {
+      await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await loadCommercialPromotionCopyContext(
+            transaction as CommercialCopyPrismaClient,
+            input.candidateId,
+          );
+          const failureCode = copyContextFailure(
+            current,
+            input.expected,
+            input.affiliateLinkHash,
+            input.validatedAt,
+          );
+          if (failureCode) {
+            throw new AppError(
+              'Contexto mudou antes da chamada ao provider',
+              failureCode,
+            );
+          }
+          await transaction.commercialCopyGenerationAttempt.create({
+            data: {
+              candidateId: input.candidateId,
+              snapshotId: input.snapshotId,
+              inputFingerprint: input.inputFingerprint,
+              provider: input.provider,
+              model: input.model,
+              promptVersion: input.promptVersion,
+              validationVersion: input.validationVersion,
+              startedAt: input.startedAt,
+              status: 'STARTED',
+            },
+          });
+        },
+        { isolationLevel: 'Serializable' },
+      );
+      return true;
+    } catch (error) {
+      if (isUniqueConstraintError(error)) return false;
+      if (isTransactionConflictError(error)) {
+        if (await this.findAttemptByInputFingerprint(input.inputFingerprint)) {
+          return false;
+        }
+        throw new AppError(
+          'Contexto mudou antes da chamada ao provider',
+          'COMMERCIAL_AI_COPY_CANDIDATE_CHANGED',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async linkCachedCopy(input: {
+    expected: CommercialPromotionCopyContext;
+    copyId: string;
+    inputFingerprint: string;
+    affiliateLinkHash: string;
+    validatedAt: Date;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    validationVersion: string;
+    maximumLength: number;
+  }) {
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const [current, copy] = await Promise.all([
+            loadCommercialPromotionCopyContext(
+              transaction as CommercialCopyPrismaClient,
+              input.expected.candidate.id,
+            ),
+            transaction.generatedCopy.findUnique({
+              where: { id: input.copyId },
+            }),
+          ]);
+          if (
+            copyContextFailure(
+              current,
+              input.expected,
+              input.affiliateLinkHash,
+              input.validatedAt,
+            ) ||
+            !copy ||
+            copy.source !== 'AI' ||
+            copy.inputFingerprint !== input.inputFingerprint ||
+            copy.productId !== input.expected.product.id ||
+            copy.snapshotId !== input.expected.snapshot.id ||
+            copy.provider !== input.provider ||
+            copy.model !== input.model ||
+            copy.promptVersion !== input.promptVersion ||
+            copy.validationVersion !== input.validationVersion ||
+            !current?.product.affiliateLink ||
+            !isSafeAssembledCommercialPromotionCopy(
+              copy,
+              current.product.affiliateLink,
+              input.maximumLength,
+            )
+          ) {
+            return false;
+          }
+          const updated =
+            await transaction.commercialPromotionCandidate.updateMany({
+              where: {
+                id: input.expected.candidate.id,
+                status: 'QUEUED',
+                generatedCopyId: null,
+                updatedAt: input.expected.candidate.updatedAt,
+              },
+              data: { status: 'COPY_READY', generatedCopyId: copy.id },
+            });
+          return updated.count === 1;
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error) {
+      if (isTransactionConflictError(error)) return false;
+      throw error;
+    }
+  }
+
+  private async reconcileCompletion(
+    input: Parameters<CommercialPromotionCopyRepository['complete']>[0],
+  ) {
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const [current, copy, attempt] = await Promise.all([
+          loadCommercialPromotionCopyContext(
+            transaction as CommercialCopyPrismaClient,
+            input.expected.candidate.id,
+          ),
+          transaction.generatedCopy.findUnique({
+            where: { inputFingerprint: input.inputFingerprint },
+          }),
+          transaction.commercialCopyGenerationAttempt.findUnique({
+            where: { inputFingerprint: input.inputFingerprint },
+          }),
+        ]);
+        if (!current || !copy || !sameGeneratedCopy(copy, input.copy)) {
+          return null;
+        }
+        if (
+          current.candidate.status === 'COPY_READY' &&
+          current.candidate.generatedCopyId === copy.id &&
+          attempt?.status === 'SUCCEEDED' &&
+          attempt.generatedCopyId === copy.id
+        ) {
+          return {
+            completed: true as const,
+            copy: copy as GeneratedCopyRecord,
+          };
+        }
+        if (
+          copyContextFailure(
+            current,
+            input.expected,
+            input.affiliateLinkHash,
+            input.completedAt,
+          ) ||
+          !attempt ||
+          attempt.status !== 'STARTED'
+        ) {
+          return null;
+        }
+        await transaction.commercialCopyGenerationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'SUCCEEDED',
+            generatedCopyId: copy.id,
+            failureCode: null,
+            inputTokens: input.usage.inputTokens,
+            outputTokens: input.usage.outputTokens,
+            totalTokens: input.usage.totalTokens,
+            completedAt: input.completedAt,
+          },
+        });
+        const updated =
+          await transaction.commercialPromotionCandidate.updateMany({
+            where: {
+              id: input.expected.candidate.id,
+              status: 'QUEUED',
+              generatedCopyId: null,
+              updatedAt: input.expected.candidate.updatedAt,
+            },
+            data: { status: 'COPY_READY', generatedCopyId: copy.id },
+          });
+        if (updated.count !== 1) {
+          throw new AppError(
+            'Candidato mudou durante a reconciliacao',
+            'COMMERCIAL_AI_COPY_CANDIDATE_CHANGED',
+          );
+        }
+        return { completed: true as const, copy: copy as GeneratedCopyRecord };
+      },
+      { isolationLevel: 'Serializable' },
+    );
+  }
+
+  async complete(
+    input: Parameters<CommercialPromotionCopyRepository['complete']>[0],
+  ) {
+    try {
+      return await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await loadCommercialPromotionCopyContext(
+            transaction as CommercialCopyPrismaClient,
+            input.expected.candidate.id,
+          );
+          const failureCode = copyContextFailure(
+            current,
+            input.expected,
+            input.affiliateLinkHash,
+            input.completedAt,
+          );
+          const attempt =
+            await transaction.commercialCopyGenerationAttempt.findUnique({
+              where: { inputFingerprint: input.inputFingerprint },
+            });
+          const attemptChanged =
+            !attempt ||
+            attempt.status !== 'STARTED' ||
+            attempt.candidateId !== input.expected.candidate.id ||
+            attempt.snapshotId !== input.expected.snapshot.id ||
+            attempt.provider !== input.provider ||
+            attempt.model !== input.model ||
+            attempt.promptVersion !== input.promptVersion ||
+            attempt.validationVersion !== input.validationVersion;
+          const terminalFailure =
+            failureCode ??
+            (attemptChanged
+              ? 'COMMERCIAL_AI_COPY_CONFIGURATION_CHANGED'
+              : null);
+          if (terminalFailure) {
+            if (attempt?.status === 'STARTED') {
+              await transaction.commercialCopyGenerationAttempt.update({
+                where: { id: attempt.id },
+                data: {
+                  status: 'FAILED',
+                  failureCode: terminalFailure,
+                  completedAt: input.completedAt,
+                },
+              });
+            }
+            return { completed: false as const, failureCode: terminalFailure };
+          }
+
+          let copy = await transaction.generatedCopy.findUnique({
+            where: { inputFingerprint: input.inputFingerprint },
+          });
+          if (copy && !sameGeneratedCopy(copy, input.copy)) {
+            await transaction.commercialCopyGenerationAttempt.update({
+              where: { id: attempt!.id },
+              data: {
+                status: 'FAILED',
+                failureCode: 'COMMERCIAL_AI_COPY_CACHE_INCONSISTENT',
+                completedAt: input.completedAt,
+              },
+            });
+            return {
+              completed: false as const,
+              failureCode: 'COMMERCIAL_AI_COPY_CACHE_INCONSISTENT',
+            };
+          }
+          copy ??= await transaction.generatedCopy.create({
+            data: input.copy,
+          });
+          await transaction.commercialCopyGenerationAttempt.update({
+            where: { id: attempt!.id },
+            data: {
+              status: 'SUCCEEDED',
+              generatedCopyId: copy.id,
+              failureCode: null,
+              inputTokens: input.usage.inputTokens,
+              outputTokens: input.usage.outputTokens,
+              totalTokens: input.usage.totalTokens,
+              completedAt: input.completedAt,
+            },
+          });
+          const updated =
+            await transaction.commercialPromotionCandidate.updateMany({
+              where: {
+                id: input.expected.candidate.id,
+                status: 'QUEUED',
+                generatedCopyId: null,
+                updatedAt: input.expected.candidate.updatedAt,
+              },
+              data: { status: 'COPY_READY', generatedCopyId: copy.id },
+            });
+          if (updated.count !== 1) {
+            throw new AppError(
+              'Candidato mudou durante a persistencia',
+              'COMMERCIAL_AI_COPY_CANDIDATE_CHANGED',
+            );
+          }
+          return {
+            completed: true as const,
+            copy: copy as GeneratedCopyRecord,
+          };
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (error) {
+      if (isTransactionConflictError(error) || isUniqueConstraintError(error)) {
+        const reconciled = await this.reconcileCompletion(input);
+        if (reconciled) return reconciled;
+        throw new AppError(
+          'Persistencia da copy ficou inconclusiva',
+          'COMMERCIAL_AI_COPY_PERSISTENCE_AMBIGUOUS',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async markAttemptTerminal(input: {
+    inputFingerprint: string;
+    status: 'FAILED' | 'AMBIGUOUS';
+    failureCode: string;
+    requestMayHaveStarted: boolean;
+    completedAt: Date;
+  }) {
+    const result = await this.prisma.commercialCopyGenerationAttempt.updateMany(
+      {
+        where: { inputFingerprint: input.inputFingerprint, status: 'STARTED' },
+        data: {
+          status: input.status,
+          failureCode: input.failureCode,
+          requestMayHaveStarted: input.requestMayHaveStarted,
+          completedAt: input.completedAt,
+        },
+      },
+    );
+    return result.count === 1;
+  }
+
+  async findCopyForCandidate(candidateId: string) {
+    const record = await this.prisma.commercialPromotionCandidate.findUnique({
+      where: { id: candidateId },
+      include: {
+        generatedCopy: true,
+        snapshot: { select: { revision: true } },
+      },
+    });
+    if (!record?.generatedCopy) return null;
+    return {
+      candidate: mapCommercialPromotionCandidate(
+        record as unknown as Record<string, unknown>,
+      ),
+      copy: record.generatedCopy as GeneratedCopyRecord,
+      snapshotRevision: record.snapshot.revision,
     };
   }
 }

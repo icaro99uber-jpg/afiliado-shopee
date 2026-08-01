@@ -15,6 +15,46 @@ describe('parseDotEnv', () => {
   });
 });
 
+describe('envSchema copy comercial por IA', () => {
+  it('permanece desabilitada com defaults seguros', () => {
+    const config = envSchema.parse(baseEnv);
+    expect(config.COMMERCIAL_AI_COPY_ENABLED).toBe(false);
+    expect(config.COMMERCIAL_AI_COPY_PROVIDER).toBe('openai');
+    expect(config.COMMERCIAL_AI_COPY_MODEL).toBeUndefined();
+    expect(config.COMMERCIAL_AI_COPY_TIMEOUT_MS).toBe(30000);
+    expect(config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS).toBe(300);
+  });
+
+  it('exige chave e modelo somente quando habilitada sem expor a chave', () => {
+    const missing = envSchema.safeParse({
+      ...baseEnv,
+      COMMERCIAL_AI_COPY_ENABLED: 'true',
+    });
+    expect(missing.success).toBe(false);
+    expect(JSON.stringify(missing)).not.toContain('sk-test-sensitive');
+
+    const enabled = envSchema.parse({
+      ...baseEnv,
+      COMMERCIAL_AI_COPY_ENABLED: 'true',
+      COMMERCIAL_AI_COPY_MODEL: 'model-selected-locally',
+      OPENAI_API_KEY: 'sk-test-sensitive',
+    });
+    expect(enabled.COMMERCIAL_AI_COPY_ENABLED).toBe(true);
+    expect(enabled.COMMERCIAL_AI_COPY_MODEL).toBe('model-selected-locally');
+  });
+
+  it.each([
+    ['COMMERCIAL_AI_COPY_TIMEOUT_MS', '999'],
+    ['COMMERCIAL_AI_COPY_TIMEOUT_MS', '120001'],
+    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '49'],
+    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '1001'],
+  ] as const)('rejeita %s fora dos limites: %s', (field, value) => {
+    expect(envSchema.safeParse({ ...baseEnv, [field]: value }).success).toBe(
+      false,
+    );
+  });
+});
+
 describe('envSchema automacao comercial', () => {
   it('usa bind local e defaults conservadores', () => {
     const config = envSchema.parse(baseEnv);
