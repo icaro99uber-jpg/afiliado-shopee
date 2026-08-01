@@ -166,7 +166,7 @@ mensagens.
 A infraestrutura isolada fica em `infra/evolution` e usa três containers:
 
 - `shopee-evolution-api`, com a imagem pública fixada
-  `evoapicloud/evolution-api:v2.3.6`;
+  `evoapicloud/evolution-api:v2.3.7`;
 - `shopee-evolution-postgres`, banco exclusivo sem porta publicada no host;
 - `shopee-evolution-redis`, cache exclusivo sem porta publicada no host.
 
@@ -181,12 +181,12 @@ pnpm evolution:status
 ```
 
 A API fica em `http://localhost:8080` e a rota pública `/` funciona como status
-oficial da versão 2.3.6. A configuração real fica somente em
+oficial da versão 2.3.7. A configuração real fica somente em
 `infra/evolution/.env.local`, que está ignorado pelo Git e nunca deve ser enviado
 ao GitHub. PostgreSQL, Redis, volumes e rede usam nomes próprios e não colidem
 com o compose principal.
 
-A 2.3.6 foi escolhida por ser a última release pública estável da linha 2.3.x,
+A 2.3.7 foi escolhida por ser a última release pública estável da linha 2.3.x,
 anterior à ativação remota obrigatória da 2.4.0, e por incorporar a correção da
 migração Kafka publicada na 2.3.5. Sua licença é Apache 2.0 com condições
 adicionais de preservação da marca/copyright no frontend e aviso visível de uso
@@ -541,7 +541,7 @@ nenhum segredo ou detalhe interno e renderizado.
 ### Evolution API preparada
 
 O `EvolutionApiWhatsAppProvider` usa o contrato confirmado da Evolution API
-2.3.6 fixada na infraestrutura local para
+2.3.7 fixada na infraestrutura local para
 `POST /message/sendText/{instanceName}`: payload plano
 `{ "number": "<destination>", "text": "<message>" }`, header `apikey`,
 `Content-Type: application/json`, timeout, mapeamento de erros e resposta
@@ -634,7 +634,7 @@ corepack pnpm whatsapp:e2e-test
 ```
 
 O comando carrega automaticamente o `.env` da raiz sem sobrescrever variaveis
-de processo, valida Evolution API 2.3.6, instancia `afiliado-shopee-local`,
+de processo, valida Evolution API 2.3.7, instancia `afiliado-shopee-local`,
 PostgreSQL e Redis principais e mostra somente um resumo mascarado. O dry-run
 nao cria registros, jobs ou workers e nao chama o endpoint de envio.
 
@@ -672,7 +672,7 @@ sanitizado: zero mensagens reais e nenhum segredo versionado.
 ### Diretorio seguro de grupos
 
 O diretorio usa exclusivamente o contrato read-only confirmado na tag oficial
-2.3.6:
+2.3.7:
 
 ```text
 GET /group/fetchAllGroups/:instanceName?getParticipants=false
@@ -688,7 +688,7 @@ convites e resposta bruta sao descartados. A rota oficial nao aplica um guard
 explicito de conexao; timeout, rede, HTTP 400/401/403/404/5xx ou resposta
 malformada interrompem a sincronizacao com erro sanitizado.
 
-O identificador externo e validado como um JID de grupo opaco da 2.3.6. A
+O identificador externo e validado como um JID de grupo opaco da 2.3.7. A
 normalizacao remove somente espacos externos e preserva `@g.us`; ela nunca usa a
 normalizacao de telefone. API, dashboard e logs recebem apenas um fingerprint
 SHA-256 no formato `grp_...`, nunca o identificador completo.
@@ -722,7 +722,7 @@ O comando abaixo e dry-run por padrao:
 corepack pnpm whatsapp:group-test
 ```
 
-Ele valida Evolution 2.3.6, instancia open, banco, Redis, diretorio remoto e
+Ele valida Evolution 2.3.7, instancia open, banco, Redis, diretorio remoto e
 autorizacoes persistidas sem escrever produto, copy, dispatch ou job, sem
 iniciar worker e sem enviar. A saida inclui somente contagem e, quando existe um
 unico grupo ativo/disponivel, nome e fingerprint. Master switch desligado e um

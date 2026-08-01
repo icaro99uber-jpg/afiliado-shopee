@@ -212,7 +212,7 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
           'Content-Type': 'application/json',
           apikey: this.apiKey,
         },
-        // Contrato plano da Evolution API 2.3.6 fixada na infraestrutura local.
+        // Contrato plano da Evolution API 2.3.7 fixada na infraestrutura local.
         // Nao tente formatos alternativos: um fallback pode duplicar o envio.
         body: JSON.stringify({
           number: destination,
