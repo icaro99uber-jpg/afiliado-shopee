@@ -33,6 +33,7 @@
     "commercial:copy:preflight": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:copy:preflight",
     "commercial:copy:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:copy:preview",
     "commercial:copy:generate": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:copy:generate",
+    "commercial:copy:attempt:status": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:copy:attempt:status",
     "commercial:confirm": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:confirm",
     "commercial:automation:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:preview",
     "commercial:automation:worker": "corepack pnpm --filter @shopee-auto-affiliate-ai/worker commercial:automation:worker",

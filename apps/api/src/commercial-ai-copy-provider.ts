@@ -9,7 +9,7 @@ import type { ResponseCreateParamsNonStreaming } from 'openai/resources/response
 import {
   buildCommercialAiCopyInput,
   buildCommercialAiCopyInstructions,
-  COMMERCIAL_AI_COPY_SCHEMA,
+  COMMERCIAL_AI_COPY_REMOTE_SCHEMA,
   type CommercialAiCopyFacts,
 } from './commercial-ai-copy-prompt';
 
@@ -89,6 +89,20 @@ export type CommercialAiCopyProviderErrorMetadata = {
   providerErrorParam?: string;
 };
 
+export const sanitizeCommercialAiCopyProviderErrorMetadata = (
+  metadata: CommercialAiCopyProviderErrorMetadata = {},
+): CommercialAiCopyProviderErrorMetadata => ({
+  httpStatus: sanitizeHttpStatus(metadata.httpStatus),
+  providerErrorCode: sanitizeProviderMetadataValue(
+    metadata.providerErrorCode,
+  ),
+  providerErrorType: sanitizeProviderMetadataValue(metadata.providerErrorType),
+  providerErrorParam: sanitizeProviderMetadataValue(
+    metadata.providerErrorParam,
+    true,
+  ),
+});
+
 export class CommercialAiCopyProviderError extends Error {
   readonly publicCode: string;
   readonly httpStatus?: number;
@@ -102,20 +116,14 @@ export class CommercialAiCopyProviderError extends Error {
     metadata: CommercialAiCopyProviderErrorMetadata = {},
   ) {
     const safePublicCode = normalizeCommercialAiCopyProviderPublicCode(publicCode);
+    const safeMetadata = sanitizeCommercialAiCopyProviderErrorMetadata(metadata);
     super(safePublicCode);
     this.name = 'CommercialAiCopyProviderError';
     this.publicCode = safePublicCode;
-    this.httpStatus = sanitizeHttpStatus(metadata.httpStatus);
-    this.providerErrorCode = sanitizeProviderMetadataValue(
-      metadata.providerErrorCode,
-    );
-    this.providerErrorType = sanitizeProviderMetadataValue(
-      metadata.providerErrorType,
-    );
-    this.providerErrorParam = sanitizeProviderMetadataValue(
-      metadata.providerErrorParam,
-      true,
-    );
+    this.httpStatus = safeMetadata.httpStatus;
+    this.providerErrorCode = safeMetadata.providerErrorCode;
+    this.providerErrorType = safeMetadata.providerErrorType;
+    this.providerErrorParam = safeMetadata.providerErrorParam;
   }
 }
 
@@ -307,7 +315,7 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
             type: 'json_schema',
             name: 'commercial_promotion_copy',
             strict: true,
-            schema: COMMERCIAL_AI_COPY_SCHEMA,
+            schema: COMMERCIAL_AI_COPY_REMOTE_SCHEMA,
           },
         },
       };

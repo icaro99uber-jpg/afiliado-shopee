@@ -5,6 +5,7 @@ import {
   CommercialAiCopyProviderError,
   normalizeCommercialAiCopyModel,
   type CommercialAiCopyProvider,
+  type CommercialAiCopyProviderErrorMetadata,
   type CommercialAiCopyProviderResult,
 } from './commercial-ai-copy-provider';
 import {
@@ -442,12 +443,17 @@ export class CommercialPromotionCopyGenerationService {
     status: 'FAILED' | 'AMBIGUOUS',
     failureCode: string,
     requestMayHaveStarted: boolean,
+    providerMetadata: CommercialAiCopyProviderErrorMetadata = {},
   ) {
     await this.options.repository.markAttemptTerminal({
       inputFingerprint: fingerprint,
       status,
       failureCode,
       requestMayHaveStarted,
+      providerHttpStatus: providerMetadata.httpStatus,
+      providerErrorCode: providerMetadata.providerErrorCode,
+      providerErrorType: providerMetadata.providerErrorType,
+      providerErrorParam: providerMetadata.providerErrorParam,
       completedAt: this.clock(),
     });
   }
@@ -542,6 +548,12 @@ export class CommercialPromotionCopyGenerationService {
         ambiguous ? 'AMBIGUOUS' : 'FAILED',
         providerError.publicCode,
         ambiguous,
+        {
+          httpStatus: providerError.httpStatus,
+          providerErrorCode: providerError.providerErrorCode,
+          providerErrorType: providerError.providerErrorType,
+          providerErrorParam: providerError.providerErrorParam,
+        },
       );
       throw new AppError(
         ambiguous ? 'Resultado do provider e ambiguo' : 'Provider de IA falhou',

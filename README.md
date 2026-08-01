@@ -1190,6 +1190,7 @@ aceitas por argumento, log ou resposta.
 corepack pnpm commercial:copy:preflight
 corepack pnpm commercial:copy:preview -- --candidate-id=<id>
 corepack pnpm commercial:copy:generate -- --candidate-id=<id> --confirm-one-ai-copy
+corepack pnpm commercial:copy:attempt:status -- --candidate-id=<id>
 ```
 
 Preflight e preview não chamam IA nem escrevem. A geração manual exige banco
@@ -1203,11 +1204,24 @@ Rotas disponíveis:
   `{ "confirm": "GERAR_COPY_COM_IA" }`;
 - `GET /commercial/promotion-candidates/:id/copy`.
 
-O prompt `commercial-promotion-copy-v1` trata catálogo como dado não confiável;
-o schema estrito e a validação `commercial-promotion-copy-validation-v1`
-rejeitam números, URLs, contatos e alegações não demonstradas. O fingerprint
-não guarda o link bruto. Claims `STARTED`, `FAILED` e `AMBIGUOUS` impedem nova
-chamada para o mesmo input; `SUCCEEDED` reutiliza a copy, sem retry automático.
+O prompt `commercial-promotion-copy-v1` trata catálogo como dado não confiável.
+O schema remoto Structured Outputs é a versão v2 conservadora: objeto estrito
+com propriedades obrigatórias, `additionalProperties: false`, strings, array
+de strings e `maxItems`; limites de comprimento e unicidade permanecem somente
+no validador local. Assim, a validação `commercial-promotion-copy-validation-v2`
+continua rejeitando números, URLs, contatos, alegações não demonstradas,
+comprimentos fora da política e hashtags duplicadas. O fingerprint não guarda
+o link bruto; v1 e v2 produzem fingerprints distintos, preservando tentativas
+antigas sem reutilizar cache entre versões. Claims `STARTED`, `FAILED` e
+`AMBIGUOUS` impedem nova chamada para o mesmo input; `SUCCEEDED` reutiliza a
+copy, sem retry automático.
+
+O diagnóstico terminal do provider é persistido apenas em campos sanitizados
+(status HTTP e códigos/tipo/parâmetro permitidos), mantendo `failureCode` como
+classificação pública. Para consulta somente leitura, o CLI de status retorna
+apenas identificadores internos, estado, classificação, provider/modelo
+normalizados, versões, metadados sanitizados e timestamps; não exibe prompt,
+output, fingerprint, produto, link ou credenciais.
 
 Nenhuma chamada real à OpenAI foi executada nesta task. Scheduler de geração,
 envio, WhatsApp, Evolution e múltiplos números permanecem fora desta Sprint.

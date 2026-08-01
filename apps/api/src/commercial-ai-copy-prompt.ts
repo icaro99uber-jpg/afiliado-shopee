@@ -1,28 +1,32 @@
 export const COMMERCIAL_AI_COPY_PROMPT_VERSION =
   'commercial-promotion-copy-v1' as const;
 export const COMMERCIAL_AI_COPY_VALIDATION_VERSION =
-  'commercial-promotion-copy-validation-v1' as const;
+  'commercial-promotion-copy-validation-v2' as const;
 
-// The official Structured Outputs subset documents `maxItems` for arrays, but
-// does not establish support for `minLength`, `maxLength` or `uniqueItems` on
-// this model family. Keep the request schema and local validator unchanged
-// until model-specific evidence is available (SCHEMA_COMPATIBILITY_UNPROVEN).
-export const COMMERCIAL_AI_COPY_SCHEMA = {
+// The remote schema intentionally contains only the strict Structured Outputs
+// subset documented for the configured model family: maxItems is supported;
+// minLength, maxLength and uniqueItems are not proven for this remote model
+// contract. Length and uniqueness constraints remain enforced by
+// CommercialAiCopyValidator after parsing.
+export const COMMERCIAL_AI_COPY_REMOTE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['headline', 'body', 'cta', 'hashtags'],
   properties: {
-    headline: { type: 'string', minLength: 5, maxLength: 90 },
-    body: { type: 'string', minLength: 10, maxLength: 260 },
-    cta: { type: 'string', minLength: 3, maxLength: 70 },
+    headline: { type: 'string' },
+    body: { type: 'string' },
+    cta: { type: 'string' },
     hashtags: {
       type: 'array',
       maxItems: 3,
-      uniqueItems: true,
-      items: { type: 'string', minLength: 2, maxLength: 40 },
+      items: { type: 'string' },
     },
   },
 } as const;
+
+// Kept as the stable export used by request tests and callers; it is the
+// schema sent to OpenAI, never the local validation policy.
+export const COMMERCIAL_AI_COPY_SCHEMA = COMMERCIAL_AI_COPY_REMOTE_SCHEMA;
 
 export type CommercialAiCopyFacts = {
   productName: string;

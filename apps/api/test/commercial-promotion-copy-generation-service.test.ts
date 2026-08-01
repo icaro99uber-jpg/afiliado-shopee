@@ -134,6 +134,11 @@ class MemoryCopyRepository implements CommercialPromotionCopyRepository {
   async findAttemptByInputFingerprint(fingerprint: string) {
     return this.attempts.get(fingerprint) ?? null;
   }
+  async listAttemptsByCandidateId(candidateId: string) {
+    return [...this.attempts.values()].filter(
+      (attempt) => attempt.candidateId === candidateId,
+    );
+  }
   async claim(input: CommercialAiCopyClaimInput) {
     if (this.attempts.has(input.inputFingerprint)) return false;
     this.attempts.set(input.inputFingerprint, {
@@ -150,6 +155,10 @@ class MemoryCopyRepository implements CommercialPromotionCopyRepository {
       generatedCopyId: null,
       failureCode: null,
       requestMayHaveStarted: false,
+      providerHttpStatus: null,
+      providerErrorCode: null,
+      providerErrorType: null,
+      providerErrorParam: null,
       inputTokens: null,
       outputTokens: null,
       totalTokens: null,
@@ -190,13 +199,11 @@ class MemoryCopyRepository implements CommercialPromotionCopyRepository {
     }
     return { completed: true as const, copy };
   }
-  async markAttemptTerminal(input: {
-    inputFingerprint: string;
-    status: 'FAILED' | 'AMBIGUOUS';
-    failureCode: string;
-    requestMayHaveStarted: boolean;
-    completedAt: Date;
-  }) {
+  async markAttemptTerminal(
+    input: Parameters<
+      CommercialPromotionCopyRepository['markAttemptTerminal']
+    >[0],
+  ) {
     const attempt = this.attempts.get(input.inputFingerprint);
     if (!attempt || attempt.status !== 'STARTED') return false;
     Object.assign(attempt, input);
@@ -414,6 +421,14 @@ describe('CommercialPromotionCopyGenerationService', () => {
     });
     expect(JSON.stringify(fields)).not.toContain('affiliate');
     expect(JSON.stringify(fields)).not.toContain('inputFingerprint');
+    expect([...repository.attempts.values()][0]).toMatchObject({
+      status: 'FAILED',
+      failureCode: 'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED',
+      providerHttpStatus: 429,
+      providerErrorCode: 'insufficient_quota',
+      providerErrorType: 'insufficient_quota',
+      providerErrorParam: 'model',
+    });
   });
 
   it('marca timeout/rede incerta como AMBIGUOUS e bloqueia repetição', async () => {
@@ -425,6 +440,12 @@ describe('CommercialPromotionCopyGenerationService', () => {
           new CommercialAiCopyProviderError(
             'AMBIGUOUS',
             'COMMERCIAL_AI_COPY_PROVIDER_RESULT_AMBIGUOUS',
+            {
+              httpStatus: 503,
+              providerErrorCode: 'server_error',
+              providerErrorType: 'server_error',
+              providerErrorParam: 'request',
+            },
           ),
         ),
     };
@@ -441,6 +462,10 @@ describe('CommercialPromotionCopyGenerationService', () => {
     expect([...repository.attempts.values()][0]).toMatchObject({
       status: 'AMBIGUOUS',
       requestMayHaveStarted: true,
+      providerHttpStatus: 503,
+      providerErrorCode: 'server_error',
+      providerErrorType: 'server_error',
+      providerErrorParam: 'request',
     });
   });
 

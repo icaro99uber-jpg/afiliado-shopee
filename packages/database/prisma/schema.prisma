@@ -232,6 +232,10 @@ model CommercialCopyGenerationAttempt {
   generatedCopy         GeneratedCopy?                        @relation(fields: [generatedCopyId], references: [id], onDelete: SetNull)
   failureCode           String?
   requestMayHaveStarted Boolean                               @default(false)
+  providerHttpStatus    Int?
+  providerErrorCode     String?                               @db.VarChar(100)
+  providerErrorType     String?                               @db.VarChar(100)
+  providerErrorParam    String?                               @db.VarChar(100)
   inputTokens           Int?
   outputTokens          Int?
   totalTokens           Int?
