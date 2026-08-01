@@ -56,6 +56,22 @@ const optionalUrlFromEnv = z.preprocess(
     .optional(),
 );
 
+export const COMMERCIAL_AI_COPY_REASONING_EFFORTS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+
+export type CommercialAiCopyReasoningEffort =
+  (typeof COMMERCIAL_AI_COPY_REASONING_EFFORTS)[number];
+
+export const COMMERCIAL_AI_COPY_DEFAULT_REASONING_EFFORT: CommercialAiCopyReasoningEffort =
+  'minimal';
+
 const destinationListFromEnv = z
   .string()
   .default('')
@@ -158,8 +174,11 @@ export const envSchema = z
       .pipe(z.number().min(1000).max(120000))
       .default(30000),
     COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS: positiveIntegerFromEnv
-      .pipe(z.number().min(50).max(1000))
-      .default(300),
+      .pipe(z.number().min(100).max(4000))
+      .default(1000),
+    COMMERCIAL_AI_COPY_REASONING_EFFORT: z
+      .enum(COMMERCIAL_AI_COPY_REASONING_EFFORTS)
+      .default(COMMERCIAL_AI_COPY_DEFAULT_REASONING_EFFORT),
     SHOPEE_PARTNER_ID: z.string().optional(),
     SHOPEE_PARTNER_KEY: z.string().optional(),
     SHOPEE_AFFILIATE_PROVIDER: z

@@ -47,6 +47,7 @@ const start = async () => {
             model: config.COMMERCIAL_AI_COPY_MODEL,
             timeoutMs: config.COMMERCIAL_AI_COPY_TIMEOUT_MS,
             maxOutputTokens: config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS,
+            reasoningEffort: config.COMMERCIAL_AI_COPY_REASONING_EFFORT,
           })
         : undefined,
     commercialAiCopyConfig: {
@@ -56,6 +57,7 @@ const start = async () => {
       apiKeyConfigured: Boolean(config.OPENAI_API_KEY?.trim()),
       timeoutMs: config.COMMERCIAL_AI_COPY_TIMEOUT_MS,
       maxOutputTokens: config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS,
+      reasoningEffort: config.COMMERCIAL_AI_COPY_REASONING_EFFORT,
       maximumCopyLength: config.COMMERCIAL_COPY_MAX_LENGTH,
     },
     commercialConfirmationEnvironment: {

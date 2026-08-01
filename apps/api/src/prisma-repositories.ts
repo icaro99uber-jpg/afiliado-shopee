@@ -1189,6 +1189,9 @@ const mapCommercialAiCopyAttemptStatus = (
   providerErrorCode: (record.providerErrorCode as string | null) ?? null,
   providerErrorType: (record.providerErrorType as string | null) ?? null,
   providerErrorParam: (record.providerErrorParam as string | null) ?? null,
+  inputTokens: (record.inputTokens as number | null) ?? null,
+  outputTokens: (record.outputTokens as number | null) ?? null,
+  totalTokens: (record.totalTokens as number | null) ?? null,
   startedAt: record.startedAt as Date,
   completedAt: (record.completedAt as Date | null) ?? null,
   createdAt: record.createdAt as Date,
@@ -1860,6 +1863,9 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
         providerErrorCode: true,
         providerErrorType: true,
         providerErrorParam: true,
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
         startedAt: true,
         completedAt: true,
         createdAt: true,
@@ -2117,6 +2123,9 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
                   providerErrorCode: null,
                   providerErrorType: null,
                   providerErrorParam: null,
+                  inputTokens: input.usage.inputTokens,
+                  outputTokens: input.usage.outputTokens,
+                  totalTokens: input.usage.totalTokens,
                   completedAt: input.completedAt,
                 },
               });
@@ -2137,6 +2146,9 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
                 providerErrorCode: null,
                 providerErrorType: null,
                 providerErrorParam: null,
+                inputTokens: input.usage.inputTokens,
+                outputTokens: input.usage.outputTokens,
+                totalTokens: input.usage.totalTokens,
                 completedAt: input.completedAt,
               },
             });
@@ -2205,6 +2217,9 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
     providerErrorCode?: string | null;
     providerErrorType?: string | null;
     providerErrorParam?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
     completedAt: Date;
   }) {
     const result = await this.prisma.commercialCopyGenerationAttempt.updateMany(
@@ -2218,6 +2233,9 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
           providerErrorCode: input.providerErrorCode ?? null,
           providerErrorType: input.providerErrorType ?? null,
           providerErrorParam: input.providerErrorParam ?? null,
+          inputTokens: input.inputTokens ?? null,
+          outputTokens: input.outputTokens ?? null,
+          totalTokens: input.totalTokens ?? null,
           completedAt: input.completedAt,
         },
       },

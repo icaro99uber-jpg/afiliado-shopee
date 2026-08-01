@@ -52,6 +52,7 @@ describeDatabase('validated AI promotion copy database fixture', () => {
         apiKeyConfigured: true,
         timeoutMs: 30_000,
         maxOutputTokens: 300,
+        reasoningEffort: 'minimal',
         maximumCopyLength: 1_000,
       },
       clock: () => NOW,
@@ -174,7 +175,12 @@ describeDatabase('validated AI promotion copy database fixture', () => {
           output: validOutput,
           provider: 'openai' as const,
           model: 'fixture-model',
-          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          usage: {
+            inputTokens: 10,
+            outputTokens: 20,
+            totalTokens: 30,
+            reasoningTokens: 4,
+          },
         };
       }),
     };
@@ -275,7 +281,12 @@ describeDatabase('validated AI promotion copy database fixture', () => {
           output: validOutput,
           provider: 'openai' as const,
           model: 'fixture-model',
-          usage: { inputTokens: null, outputTokens: null, totalTokens: null },
+          usage: {
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            reasoningTokens: null,
+          },
         };
       }),
     };
@@ -307,7 +318,12 @@ describeDatabase('validated AI promotion copy database fixture', () => {
           output: validOutput,
           provider: 'openai' as const,
           model: 'fixture-model',
-          usage: { inputTokens: null, outputTokens: null, totalTokens: null },
+          usage: {
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            reasoningTokens: null,
+          },
         };
       }),
     };

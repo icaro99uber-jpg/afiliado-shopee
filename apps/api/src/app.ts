@@ -2,6 +2,7 @@ import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import {
   COMMERCIAL_AUTOMATION_DEFAULTS,
+  COMMERCIAL_AI_COPY_DEFAULT_REASONING_EFFORT,
   COMMERCIAL_SCHEDULER_DEFAULTS,
 } from '@shopee-auto-affiliate-ai/config';
 import {
@@ -309,6 +310,8 @@ const COMMERCIAL_AI_COPY_ERROR_STATUS: Readonly<Record<string, number>> = {
   COMMERCIAL_AI_COPY_PROVIDER_DISABLED: 503,
   COMMERCIAL_AI_COPY_PROVIDER_NOT_CONFIGURED: 503,
   COMMERCIAL_AI_COPY_PROVIDER_FAILED: 503,
+  COMMERCIAL_AI_COPY_OUTPUT_TOKEN_LIMIT: 503,
+  COMMERCIAL_AI_COPY_CONTENT_FILTERED: 503,
   COMMERCIAL_AI_COPY_PROVIDER_REFUSED: 503,
   COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE: 503,
   COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID: 503,
@@ -647,7 +650,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           model: null,
           apiKeyConfigured: false,
           timeoutMs: 30000,
-          maxOutputTokens: 300,
+          maxOutputTokens: 1000,
+          reasoningEffort: COMMERCIAL_AI_COPY_DEFAULT_REASONING_EFFORT,
           maximumCopyLength: options.commercialCopyMaxLength ?? 1000,
         },
         logger: app.log,

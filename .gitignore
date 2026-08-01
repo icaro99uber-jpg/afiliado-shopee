@@ -9,3 +9,5 @@ dist
 coverage
 *.tsbuildinfo
 .runtime/
+.git_diff.txt
+docs/handoff_antigravity*.txt

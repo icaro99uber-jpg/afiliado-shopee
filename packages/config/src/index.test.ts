@@ -22,7 +22,8 @@ describe('envSchema copy comercial por IA', () => {
     expect(config.COMMERCIAL_AI_COPY_PROVIDER).toBe('openai');
     expect(config.COMMERCIAL_AI_COPY_MODEL).toBeUndefined();
     expect(config.COMMERCIAL_AI_COPY_TIMEOUT_MS).toBe(30000);
-    expect(config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS).toBe(300);
+    expect(config.COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS).toBe(1000);
+    expect(config.COMMERCIAL_AI_COPY_REASONING_EFFORT).toBe('minimal');
   });
 
   it('exige chave e modelo somente quando habilitada sem expor a chave', () => {
@@ -46,12 +47,21 @@ describe('envSchema copy comercial por IA', () => {
   it.each([
     ['COMMERCIAL_AI_COPY_TIMEOUT_MS', '999'],
     ['COMMERCIAL_AI_COPY_TIMEOUT_MS', '120001'],
-    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '49'],
-    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '1001'],
+    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '99'],
+    ['COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS', '4001'],
   ] as const)('rejeita %s fora dos limites: %s', (field, value) => {
     expect(envSchema.safeParse({ ...baseEnv, [field]: value }).success).toBe(
       false,
     );
+  });
+
+  it('rejeita reasoning effort fora do enum suportado', () => {
+    expect(
+      envSchema.safeParse({
+        ...baseEnv,
+        COMMERCIAL_AI_COPY_REASONING_EFFORT: 'unsupported',
+      }).success,
+    ).toBe(false);
   });
 });
 

@@ -762,6 +762,9 @@ export type CommercialCopyGenerationAttemptStatusRecord = Pick<
   | 'providerErrorCode'
   | 'providerErrorType'
   | 'providerErrorParam'
+  | 'inputTokens'
+  | 'outputTokens'
+  | 'totalTokens'
   | 'startedAt'
   | 'completedAt'
   | 'createdAt'
@@ -864,6 +867,9 @@ export interface CommercialPromotionCopyRepository {
     providerErrorCode?: string | null;
     providerErrorType?: string | null;
     providerErrorParam?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
     completedAt: Date;
   }): Promise<boolean>;
   findCopyForCandidate(candidateId: string): Promise<{
