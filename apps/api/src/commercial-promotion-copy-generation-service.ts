@@ -18,7 +18,10 @@ import {
   COMMERCIAL_AI_COPY_VALIDATION_VERSION,
   normalizeUntrustedCommercialText,
 } from './commercial-ai-copy-prompt';
-import { CommercialAiCopyValidator } from './commercial-ai-copy-validator';
+import {
+  CommercialAiCopyValidator,
+  sanitizeCommercialAiCopyValidationFailureCodes,
+} from './commercial-ai-copy-validator';
 import {
   CommercialPromotionCopyAssembler,
   isSafeAssembledCommercialPromotionCopy,
@@ -452,6 +455,7 @@ export class CommercialPromotionCopyGenerationService {
       outputTokens: number | null;
       totalTokens: number | null;
     },
+    validationFailureCodes: string[] = [],
   ) {
     await this.options.repository.markAttemptTerminal({
       inputFingerprint: fingerprint,
@@ -465,6 +469,7 @@ export class CommercialPromotionCopyGenerationService {
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       totalTokens: usage?.totalTokens ?? null,
+      validationFailureCodes,
       completedAt: this.clock(),
     });
   }
@@ -578,6 +583,24 @@ export class CommercialPromotionCopyGenerationService {
       providerFacts.shopName,
     ]);
     if (!validation.valid || !validation.sanitizedOutput) {
+      const validationFailureCodes =
+        sanitizeCommercialAiCopyValidationFailureCodes(
+          validation.publicFailureCodes,
+        );
+      this.options.logger?.error(
+        {
+          event: 'commercial-ai-copy.validation-failed',
+          candidateId: context.candidate.id,
+          provider: providerResult.provider,
+          model: normalizeCommercialAiCopyModel(providerResult.model),
+          failureCode: 'COMMERCIAL_AI_COPY_OUTPUT_INVALID',
+          validationFailureCodes,
+          inputTokens: providerResult.usage.inputTokens,
+          outputTokens: providerResult.usage.outputTokens,
+          totalTokens: providerResult.usage.totalTokens,
+        },
+        'Commercial AI copy validation failed',
+      );
       await this.terminalFailure(
         fingerprint,
         'FAILED',
@@ -585,6 +608,7 @@ export class CommercialPromotionCopyGenerationService {
         true,
         {},
         providerResult.usage,
+        validationFailureCodes,
       );
       throw new AppError(
         'Output da IA rejeitado',

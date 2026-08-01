@@ -342,4 +342,63 @@ describeDatabase('validated AI promotion copy database fixture', () => {
       }),
     ).toEqual({ status: 'QUEUED', generatedCopyId: null });
   });
+
+  it('markAttemptTerminal sanitiza códigos (malformado, desconhecido, duplicado, fora de ordem)', async () => {
+    const fingerprint = `${PREFIX}-mark-terminal-fingerprint`;
+    await prisma.commercialCopyGenerationAttempt.create({
+      data: {
+        id: `${PREFIX}-mark-terminal`,
+        candidateId: candidateId('failed'),
+        snapshotId: snapshotId('failed'),
+        inputFingerprint: fingerprint,
+        provider: 'openai',
+        model: 'fixture-model',
+        promptVersion: 'v1',
+        validationVersion: 'v1',
+        status: 'STARTED',
+        startedAt: NOW,
+      },
+    });
+
+    const result = await repository.markAttemptTerminal({
+      inputFingerprint: fingerprint,
+      status: 'FAILED',
+      failureCode: 'COMMERCIAL_AI_COPY_OUTPUT_INVALID',
+      requestMayHaveStarted: true,
+      validationFailureCodes: ['UNKNOWN', 'AI_HEADLINE_LENGTH', 'AI_HEADLINE_LENGTH', 'AI_BODY_LENGTH', null as unknown as string],
+      completedAt: NOW,
+    });
+    expect(result).toBe(true);
+
+    const attempts = await prisma.commercialCopyGenerationAttempt.findMany({
+      where: { candidateId: candidateId('failed') },
+    });
+    const attempt = attempts.find((a) => a.inputFingerprint === fingerprint);
+    expect(attempt?.status).toBe('FAILED');
+    expect(attempt?.validationFailureCodes).toEqual([
+      'AI_BODY_LENGTH',
+      'AI_HEADLINE_LENGTH',
+    ]);
+
+    // Attempt já terminal não é alterado
+    const result2 = await repository.markAttemptTerminal({
+      inputFingerprint: fingerprint,
+      status: 'AMBIGUOUS',
+      failureCode: 'COMMERCIAL_AI_COPY_PERSISTENCE_AMBIGUOUS',
+      requestMayHaveStarted: true,
+      validationFailureCodes: ['AI_CTA_LENGTH'],
+      completedAt: NOW,
+    });
+    expect(result2).toBe(false);
+
+    const attempts2 = await prisma.commercialCopyGenerationAttempt.findMany({
+      where: { candidateId: candidateId('failed') },
+    });
+    const attempt2 = attempts2.find((a) => a.inputFingerprint === fingerprint);
+    expect(attempt2?.status).toBe('FAILED');
+    expect(attempt2?.validationFailureCodes).toEqual([
+      'AI_BODY_LENGTH',
+      'AI_HEADLINE_LENGTH',
+    ]);
+  });
 });

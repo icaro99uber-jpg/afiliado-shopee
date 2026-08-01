@@ -741,6 +741,7 @@ export type CommercialCopyGenerationAttemptRecord = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  validationFailureCodes: string[];
   startedAt: Date;
   completedAt: Date | null;
   createdAt: Date;
@@ -765,6 +766,7 @@ export type CommercialCopyGenerationAttemptStatusRecord = Pick<
   | 'inputTokens'
   | 'outputTokens'
   | 'totalTokens'
+  | 'validationFailureCodes'
   | 'startedAt'
   | 'completedAt'
   | 'createdAt'
@@ -870,6 +872,7 @@ export interface CommercialPromotionCopyRepository {
     inputTokens?: number | null;
     outputTokens?: number | null;
     totalTokens?: number | null;
+    validationFailureCodes?: string[];
     completedAt: Date;
   }): Promise<boolean>;
   findCopyForCandidate(candidateId: string): Promise<{

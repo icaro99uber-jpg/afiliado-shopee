@@ -6,6 +6,42 @@ export type CommercialAiCopyValidationResult = {
   publicFailureCodes: string[];
 };
 
+export const COMMERCIAL_AI_COPY_VALIDATION_FAILURE_CODES = [
+  'AI_OUTPUT_STRUCTURE_INVALID',
+  'AI_OUTPUT_EXTRA_PROPERTY',
+  'AI_HEADLINE_LENGTH',
+  'AI_BODY_LENGTH',
+  'AI_CTA_LENGTH',
+  'AI_HASHTAGS_INVALID',
+  'AI_CONTROL_CHARACTER',
+  'AI_DIGIT_FORBIDDEN',
+  'AI_URL_OR_CONTACT_FORBIDDEN',
+  'AI_MARKDOWN_FORBIDDEN',
+  'AI_FACTUAL_VALUE_FORBIDDEN',
+  'AI_PROHIBITED_CLAIM',
+  'AI_REPETITION_INVALID',
+  'AI_CATALOG_FACT_REPEATED',
+  'AI_EMOJI_LIMIT',
+  'AI_HASHTAGS_DUPLICATED',
+] as const;
+
+export type CommercialAiCopyValidationFailureCode = (typeof COMMERCIAL_AI_COPY_VALIDATION_FAILURE_CODES)[number];
+
+export const sanitizeCommercialAiCopyValidationFailureCodes = (
+  input: unknown,
+): string[] => {
+  if (!Array.isArray(input)) return [];
+  const validCodes = new Set<string>();
+  for (const item of input) {
+    if (typeof item === 'string' && item.length > 0 && item.length <= 100) {
+      if ((COMMERCIAL_AI_COPY_VALIDATION_FAILURE_CODES as readonly string[]).includes(item)) {
+        validCodes.add(item);
+      }
+    }
+  }
+  return Array.from(validCodes).sort().slice(0, 20);
+};
+
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 const DIGIT = /[0-9]/u;
 const URL_OR_CONTACT =

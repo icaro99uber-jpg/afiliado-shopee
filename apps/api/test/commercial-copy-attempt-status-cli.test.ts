@@ -28,6 +28,7 @@ const attempt = (
   inputTokens: 12,
   outputTokens: 34,
   totalTokens: 46,
+  validationFailureCodes: [],
   startedAt: new Date('2026-08-01T12:00:00.000Z'),
   completedAt: new Date('2026-08-01T12:00:01.000Z'),
   createdAt: new Date('2026-08-01T12:00:00.000Z'),
@@ -110,6 +111,7 @@ describe('commercial copy attempt status CLI', () => {
         inputTokens: 12,
         outputTokens: 34,
         totalTokens: 46,
+        validationFailureCodes: [],
         startedAt: '2026-08-01T12:00:00.000Z',
         completedAt: '2026-08-01T12:00:01.000Z',
       },
@@ -130,6 +132,7 @@ describe('commercial copy attempt status CLI', () => {
         inputTokens: null,
         outputTokens: null,
         totalTokens: null,
+        validationFailureCodes: [],
         startedAt: '2026-08-01T12:00:00.000Z',
         completedAt: null,
       },
@@ -148,5 +151,26 @@ describe('commercial copy attempt status CLI', () => {
       }),
     ).resolves.toEqual([]);
     expect(listAttemptsByCandidateId).toHaveBeenCalledTimes(1);
+  });
+
+  it('filtra e ordena códigos de validação do banco (desconhecidos, duplicados, fora de ordem)', async () => {
+    const listAttemptsByCandidateId = vi.fn().mockResolvedValue([
+      attempt({
+        validationFailureCodes: [
+          'AI_HEADLINE_LENGTH',
+          'UNKNOWN',
+          'AI_HEADLINE_LENGTH',
+          'AI_BODY_LENGTH',
+        ],
+      }),
+    ]);
+    const result = await executeCommercialCopyAttemptStatusCli({
+      args: ['--candidate-id=candidate-1'],
+      repository: { listAttemptsByCandidateId },
+    });
+    expect(result[0]?.validationFailureCodes).toEqual([
+      'AI_BODY_LENGTH',
+      'AI_HEADLINE_LENGTH',
+    ]);
   });
 });

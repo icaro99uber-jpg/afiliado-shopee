@@ -10,6 +10,7 @@ import {
   normalizeCommercialAiCopyModel,
   sanitizeCommercialAiCopyProviderErrorMetadata,
 } from './commercial-ai-copy-provider';
+import { sanitizeCommercialAiCopyValidationFailureCodes } from './commercial-ai-copy-validator';
 import { PrismaCommercialPromotionCopyRepository } from './prisma-repositories';
 import type { CommercialCopyGenerationAttemptStatusRecord } from './repositories';
 
@@ -79,6 +80,7 @@ export type SanitizedCommercialCopyAttemptStatus = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  validationFailureCodes: string[];
   startedAt: string | null;
   completedAt: string | null;
 };
@@ -109,6 +111,9 @@ const sanitizeAttempt = (
     inputTokens: attempt.inputTokens ?? null,
     outputTokens: attempt.outputTokens ?? null,
     totalTokens: attempt.totalTokens ?? null,
+    validationFailureCodes: sanitizeCommercialAiCopyValidationFailureCodes(
+      attempt.validationFailureCodes,
+    ),
     startedAt: safeDate(attempt.startedAt),
     completedAt: safeDate(attempt.completedAt),
   };

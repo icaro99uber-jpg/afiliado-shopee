@@ -162,6 +162,7 @@ class MemoryCopyRepository implements CommercialPromotionCopyRepository {
       inputTokens: null,
       outputTokens: null,
       totalTokens: null,
+      validationFailureCodes: [],
       completedAt: null,
       createdAt: input.startedAt,
       updatedAt: input.startedAt,
@@ -545,5 +546,35 @@ describe('CommercialPromotionCopyGenerationService', () => {
       outputTokens: 20,
       totalTokens: 30,
     });
+  });
+
+  it('falha local persiste somente códigos permitidos, ordenados e deduplicados', async () => {
+    const repository = new MemoryCopyRepository();
+    const p = validProvider();
+    p.generate = vi.fn().mockResolvedValue({
+      output: {
+        headline: 'x'.repeat(91), // AI_HEADLINE_LENGTH
+        body: 'x'.repeat(261), // AI_BODY_LENGTH
+        cta: 'Valid CTA',
+        hashtags: ['#Valid'],
+        extra1: 1, // AI_OUTPUT_EXTRA_PROPERTY
+        extra2: 2,
+      },
+      provider: 'openai',
+      model: 'm',
+      usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+    });
+    const s = service(repository, p);
+    await expect(s.generate('candidate-internal', 'GERAR_COPY_COM_IA')).rejects.toThrow(
+      'Output da IA rejeitado',
+    );
+    const attempt = [...repository.attempts.values()][0];
+    expect(attempt?.status).toBe('FAILED');
+    expect(attempt?.failureCode).toBe('COMMERCIAL_AI_COPY_OUTPUT_INVALID');
+    expect(attempt?.validationFailureCodes).toEqual([
+      'AI_BODY_LENGTH',
+      'AI_HEADLINE_LENGTH',
+      'AI_OUTPUT_EXTRA_PROPERTY',
+    ]);
   });
 });
