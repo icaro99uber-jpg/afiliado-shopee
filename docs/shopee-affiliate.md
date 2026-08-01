@@ -419,5 +419,58 @@ lógica estável entre instâncias Evolution. O destino âncora é apenas uma
 referência interna atual. Cadência e janela determinam
 `floor((fim - início) / cadenceMinutes)` slots, limitando o total diário.
 
-Mineração, histórico de preço, IA, sender assignments, rotação de números,
-filas e qualquer envio permanecem para tasks futuras.
+IA, sender assignments, rotação de números, dispatches e qualquer envio
+permanecem fora deste fluxo.
+
+## Mineração local de promoções
+
+`CommercialPromotionMiningService` percorre por cursor somente ofertas
+`OFFICIAL` persistidas e compara o snapshot atual com o anterior quando existe.
+O matcher do nicho e o score `official-v2` continuam sendo as únicas políticas
+de elegibilidade e pontuação. Os sinais públicos são `PRICE_DROP`,
+`DISCOUNT_INCREASE`, `NEWLY_OBSERVED` e `CURRENT_DISCOUNT`; dinheiro e queda
+percentual são calculados com `Decimal`.
+
+`CURRENT_DISCOUNT` indica apenas desconto corrente e não comprova queda
+histórica. `PRICE_DROP` exige redução de preço entre os dois snapshots
+consecutivos; `DISCOUNT_INCREASE` compara o percentual desses snapshots.
+`NEWLY_OBSERVED` significa que produto e primeiro snapshot foram observados
+pelo sistema nas últimas 24 horas, não que o item seja novo na Shopee. Revision,
+fingerprint, produto e último snapshot precisam ser coerentes; divergência não é
+corrigida automaticamente.
+
+`official-v2` continua sendo somente o score de qualidade: sinais promocionais
+não acrescentam pontos. O ranking ordena queda de preço, percentual da queda,
+score, desconto, comissão, vendas e ID interno. O dedupe usa o fingerprint
+lógico do grupo e, portanto, abrange envios feitos por números Evolution
+diferentes.
+
+O preview é somente leitura e pode relatar avaliação parcial quando o teto de
+2.000 produtos é alcançado. A mineração confirmada bloqueia resultados
+truncados e materializa até `queueTargetSize` candidatos na tabela
+`CommercialPromotionCandidate`. A unique campanha + produto, o lock da campanha
+e atualizações condicionais tornam repetições idempotentes e protegem
+`COPY_READY`/`RESERVED`. `DISPATCHED` não ocupa capacidade ativa: dedupe futuro
+e dispatch `SENT` recente para o mesmo fingerprint lógico impedem reentrada;
+depois disso, um item novamente elegível pode voltar a `QUEUED`.
+
+`protectedCount` reduz `queueTargetSize`; os `QUEUED` restantes são
+rebalanceados e itens fora do novo top ficam `BLOCKED`.
+`evaluationTruncated=true` pode ser visto no preview, mas nunca materializado.
+Uma campanha com cadência de 15 minutos ainda não possui Scheduler nesta etapa.
+IA entra na próxima Sprint e o uso de múltiplos remetentes somente depois da
+camada de copy.
+
+```powershell
+corepack pnpm commercial:campaign:preview -- --campaign-id=<id>
+corepack pnpm commercial:campaign:mine -- --campaign-id=<id> --confirm-local-promotion-mining
+```
+
+A escrita exige banco local, execução fora de CI, modo preview, automação
+desabilitada e pausada, os dois Schedulers e o envio de grupo desligados e zero
+worker de dispatch. As rotas equivalentes são `POST
+/commercial/campaigns/:id/mining-preview`, `POST
+/commercial/campaigns/:id/mine` com confirmação `MINERAR_PROMOCOES` e `GET
+/commercial/campaigns/:id/queue`. Respostas não incluem URL, ID externo, JID,
+telefone, segredo ou payload bruto. Nenhum desses caminhos chama Shopee,
+Evolution ou WhatsApp e nenhum deles cria job, dispatch ou outbox.

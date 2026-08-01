@@ -72,7 +72,8 @@ Segurança operacional:
 
 - O sync não recebe dependências de Copy, BullMQ, Pipeline, Scheduler ou
   WhatsApp.
-- Mineração, sinais promocionais e filas não fazem parte dos snapshots.
+- O sync e o backfill de snapshots não executam mineração. A mineração comercial
+  consome somente produtos e snapshots `OFFICIAL` já persistidos.
 - O sync oficial controlado exige preflight, uma flag exata, no máximo uma
   página/cinco produtos e um marcador local que bloqueia repetição.
 - As duas leituras reais da Sprint 18.1 foram consumidas. A segunda retornou
@@ -894,5 +895,36 @@ Comportamento operacional:
 - A quantidade teórica de slots é
   `floor((fimEmMinutos - inicioEmMinutos) / cadenceMinutes)`; o limite diário
   não pode excedê-la.
-- Esta fundação não minera produtos, não cria copy por IA, sender assignments,
-  fila, dispatch, outbox, job ou mensagem. Esses fluxos dependem de tasks futuras.
+- Esta fundação não cria copy por IA, sender assignments, dispatch, outbox, job
+  ou mensagem.
+
+## Mineração de promoções por campanha
+
+- `CommercialPromotionMiningService` avalia somente o catálogo `OFFICIAL`
+  persistido, pelo matcher do nicho e pelo score `official-v2`; não consulta a
+  Shopee nem compõe providers, BullMQ, Redis, Scheduler, worker ou WhatsApp.
+- Os sinais determinísticos são `PRICE_DROP`, `DISCOUNT_INCREASE`,
+  `NEWLY_OBSERVED` e `CURRENT_DISCOUNT`. Comparações monetárias usam `Decimal`;
+  snapshot, revision e fingerprint devem corresponder ao produto atual.
+- A ordenação é estável: queda de preço, percentual da queda, score oficial,
+  desconto, comissão, vendas e ID interno. A avaliação usa cursor, no máximo
+  200 itens por página e 2.000 itens por execução; preview truncado é parcial e
+  mineração truncada não persiste.
+- `CommercialPromotionCandidate` guarda campanha, produto, snapshot, sinais,
+  score, posição e estado `QUEUED`, `COPY_READY`, `RESERVED`, `DISPATCHED`,
+  `EXPIRED` ou `BLOCKED`. A unique campanha + produto torna a materialização
+  idempotente.
+- `COPY_READY` e `RESERVED` são protegidos e contam na capacidade ativa.
+  `DISPATCHED` fica fora dessa capacidade, bloqueia enquanto `dedupeUntil` está
+  ativo e pode voltar a `QUEUED` depois, se não houver envio `SENT` recente ao
+  mesmo fingerprint lógico. Conflito concorrente é sanitizado e nunca recebe
+  retry.
+- `POST /commercial/campaigns/:id/mining-preview` é somente leitura;
+  `POST /commercial/campaigns/:id/mine` exige
+  `{ "confirm": "MINERAR_PROMOCOES" }`; `GET
+  /commercial/campaigns/:id/queue` é paginado e sanitizado. Nenhuma rota publica
+  ou envia candidatos.
+- As CLIs `commercial:campaign:preview` e `commercial:campaign:mine` usam banco
+  local; a segunda exige `--confirm-local-promotion-mining`, modo preview,
+  automação desabilitada e pausada, ambos os Schedulers e group send desligados,
+  fora de CI e zero worker de dispatch.

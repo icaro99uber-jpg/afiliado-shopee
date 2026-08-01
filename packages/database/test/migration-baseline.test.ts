@@ -40,6 +40,7 @@ const POSTERIOR_MIGRATIONS = [
   '20260729100000_official_offer_scoring_v2',
   '20260729150000_niche_group_campaign_foundation',
   '20260729190000_official_offer_snapshots',
+  '20260729210000_campaign_promotion_mining_queue',
 ] as const;
 
 const HISTORICAL_HASHES: Record<string, string> = {
@@ -71,6 +72,8 @@ const HISTORICAL_HASHES: Record<string, string> = {
     'ff97df171b7278eb9cfd17b16d09fe3fd23e413721363a978373c4f8d01b0767',
   '20260729190000_official_offer_snapshots':
     '075ec6a4977f7bb9913da33c292d41e20a457f6e616991981b0aca874aef9a93',
+  '20260729210000_campaign_promotion_mining_queue':
+    'c0e0812bb9cc77e4cdf4e79254d0e1f0380e1d5fdef5807dec4110ddfba9275e',
 };
 
 const migration = (migrationName: string, finished = true) => ({

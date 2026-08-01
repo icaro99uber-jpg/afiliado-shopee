@@ -13,6 +13,7 @@ model ProductLead {
   coupons                Coupon[]
   commercialPipelineRuns CommercialPipelineRun[]
   commercialOfferSnapshots CommercialOfferSnapshot[]
+  commercialPromotionCandidates CommercialPromotionCandidate[]
   id                     String                  @id @default(cuid())
   source                 ShopeeOfferSource       @default(MOCK)
   providerProductId      String
@@ -71,6 +72,7 @@ model CommercialOfferSnapshot {
   unavailableAt  DateTime?
   capturedAt     DateTime
   createdAt      DateTime    @default(now())
+  promotionCandidates CommercialPromotionCandidate[]
 
   @@unique([productId, revision])
   @@index([productId, revision])
@@ -153,11 +155,44 @@ model CommercialGroupCampaign {
   dailyLimit              Int                  @default(60)
   queueTargetSize         Int                  @default(40)
   dedupeDays              Int                  @default(30)
+  promotionCandidates     CommercialPromotionCandidate[]
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
 
   @@index([active])
   @@index([nicheId])
+}
+
+model CommercialPromotionCandidate {
+  id               String                             @id @default(cuid())
+  campaignId       String
+  campaign         CommercialGroupCampaign            @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  productId        String
+  product          ProductLead                        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  snapshotId       String
+  snapshot         CommercialOfferSnapshot            @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  status           CommercialPromotionCandidateStatus @default(QUEUED)
+  rankPosition     Int?
+  commercialScore  Int
+  scorePolicyVersion String
+  minimumScoreUsed Int
+  scoreBreakdown   Json
+  promotionSignals CommercialPromotionSignal[]
+  priceDropPercent Decimal?                           @db.Decimal(7, 4)
+  queuedAt         DateTime
+  lastEvaluatedAt  DateTime
+  expiresAt        DateTime?
+  dedupeUntil      DateTime?
+  blockedReason    String?
+  createdAt        DateTime                           @default(now())
+  updatedAt        DateTime                           @updatedAt
+
+  @@unique([campaignId, productId])
+  @@index([campaignId, status, rankPosition])
+  @@index([campaignId, updatedAt])
+  @@index([snapshotId])
+  @@index([expiresAt])
+  @@index([dedupeUntil])
 }
 
 model WhatsAppDispatch {
@@ -364,4 +399,20 @@ enum CommercialAutomationExecutionStatus {
   QUEUED
   FAILED
   AMBIGUOUS
+}
+
+enum CommercialPromotionCandidateStatus {
+  QUEUED
+  COPY_READY
+  RESERVED
+  DISPATCHED
+  EXPIRED
+  BLOCKED
+}
+
+enum CommercialPromotionSignal {
+  PRICE_DROP
+  DISCOUNT_INCREASE
+  NEWLY_OBSERVED
+  CURRENT_DISCOUNT
 }

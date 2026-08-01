@@ -18,6 +18,7 @@ import { CouponService } from './coupon-service';
 import { CopyPreviewService } from './copy-preview-service';
 import { CommercialCopyService } from './commercial-copy-service';
 import { CommercialPipelineService } from './commercial-pipeline-service';
+import { createCommercialPromotionMiningDomainService } from './commercial-promotion-mining-service';
 import {
   CommercialPipelineConfirmationService,
   type CommercialConfirmationEnvironment,
@@ -36,6 +37,7 @@ import {
   PrismaCommercialGroupCampaignRepository,
   PrismaCommercialNicheRepository,
   PrismaCommercialPipelineRunRepository,
+  PrismaCommercialPromotionRepository,
   PrismaCouponRepository,
   PrismaGeneratedCopyRepository,
   PrismaProductRepository,
@@ -54,6 +56,8 @@ import type {
   CommercialGroupCampaignRepository,
   CommercialNicheRepository,
   CommercialPipelineRunRepository,
+  CommercialPromotionCandidateRepository,
+  CommercialPromotionCatalogRepository,
   CouponRepository,
   GeneratedCopyRepository,
   ProductRepository,
@@ -90,6 +94,8 @@ export type ApplicationRepositories = {
   commercialDispatchOutboxes: CommercialDispatchOutboxRepository;
   commercialNiches: CommercialNicheRepository;
   commercialGroupCampaigns: CommercialGroupCampaignRepository;
+  commercialPromotions: CommercialPromotionCatalogRepository &
+    CommercialPromotionCandidateRepository;
   commercialAutomationSettings: CommercialAutomationSettingsRepository;
   commercialAutomationHistory: CommercialAutomationHistoryRepository;
   commercialAutomationExecutions: CommercialAutomationExecutionRepository;
@@ -181,6 +187,29 @@ export const createCommercialPipelineConfirmationService = ({
     logger,
   });
 
+export const createCommercialPromotionMiningService = ({
+  repositories,
+  score,
+  logger,
+  clock,
+}: {
+  repositories: Pick<
+    ApplicationRepositories,
+    'commercialGroupCampaigns' | 'commercialNiches' | 'commercialPromotions'
+  >;
+  score: Pick<ScoreService, 'calculate'>;
+  logger: Pick<FastifyBaseLogger, 'info'>;
+  clock?: () => Date;
+}) =>
+  createCommercialPromotionMiningDomainService({
+    campaigns: repositories.commercialGroupCampaigns,
+    niches: repositories.commercialNiches,
+    promotions: repositories.commercialPromotions,
+    score,
+    logger,
+    clock,
+  });
+
 export const createCommercialAutomationPolicyService = ({
   repositories,
   instanceName,
@@ -231,32 +260,37 @@ export const createSenderService = ({
 
 export const createPrismaRepositories = (
   prisma: DatabaseClient,
-): ApplicationRepositories => ({
-  analytics: new PrismaAnalyticsRepository(prisma),
-  products: new PrismaProductRepository(prisma),
-  generatedCopies: new PrismaGeneratedCopyRepository(prisma),
-  whatsappDestinations: new PrismaWhatsAppDestinationRepository(prisma),
-  whatsappDispatches: new PrismaWhatsAppDispatchRepository(prisma),
-  whatsappGroups: new PrismaWhatsAppGroupDirectoryRepository(prisma),
-  shopeeOffers: new PrismaShopeeOfferRepository(prisma),
-  coupons: new PrismaCouponRepository(prisma),
-  commercialRuns: new PrismaCommercialPipelineRunRepository(prisma),
-  commercialDeliveryHistory: new PrismaCommercialDeliveryHistoryRepository(
-    prisma,
-  ),
-  commercialDispatchOutboxes: new PrismaCommercialDispatchOutboxRepository(
-    prisma,
-  ),
-  commercialNiches: new PrismaCommercialNicheRepository(prisma),
-  commercialGroupCampaigns: new PrismaCommercialGroupCampaignRepository(prisma),
-  commercialAutomationSettings:
-    new PrismaCommercialAutomationSettingsRepository(prisma),
-  commercialAutomationHistory: new PrismaCommercialAutomationHistoryRepository(
-    prisma,
-  ),
-  commercialAutomationExecutions:
-    new PrismaCommercialAutomationExecutionRepository(prisma),
-});
+): ApplicationRepositories => {
+  const commercialPromotions = new PrismaCommercialPromotionRepository(prisma);
+  return {
+    analytics: new PrismaAnalyticsRepository(prisma),
+    products: new PrismaProductRepository(prisma),
+    generatedCopies: new PrismaGeneratedCopyRepository(prisma),
+    whatsappDestinations: new PrismaWhatsAppDestinationRepository(prisma),
+    whatsappDispatches: new PrismaWhatsAppDispatchRepository(prisma),
+    whatsappGroups: new PrismaWhatsAppGroupDirectoryRepository(prisma),
+    shopeeOffers: new PrismaShopeeOfferRepository(prisma),
+    coupons: new PrismaCouponRepository(prisma),
+    commercialRuns: new PrismaCommercialPipelineRunRepository(prisma),
+    commercialDeliveryHistory: new PrismaCommercialDeliveryHistoryRepository(
+      prisma,
+    ),
+    commercialDispatchOutboxes: new PrismaCommercialDispatchOutboxRepository(
+      prisma,
+    ),
+    commercialNiches: new PrismaCommercialNicheRepository(prisma),
+    commercialGroupCampaigns: new PrismaCommercialGroupCampaignRepository(
+      prisma,
+    ),
+    commercialPromotions,
+    commercialAutomationSettings:
+      new PrismaCommercialAutomationSettingsRepository(prisma),
+    commercialAutomationHistory:
+      new PrismaCommercialAutomationHistoryRepository(prisma),
+    commercialAutomationExecutions:
+      new PrismaCommercialAutomationExecutionRepository(prisma),
+  };
+};
 
 export const createApplicationServices = ({
   repositories,
