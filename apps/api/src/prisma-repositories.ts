@@ -80,6 +80,7 @@ import {
   type CommercialOfferFingerprintInput,
 } from './commercial-offer-snapshot';
 import { sha256 } from './commercial-ai-copy-fingerprint';
+import { sanitizeCommercialAiCopyValidationFailureCodes } from './commercial-ai-copy-validator';
 import { isSafeAssembledCommercialPromotionCopy } from './commercial-promotion-copy-assembler';
 
 const prismaErrorCode = (error: unknown) =>
@@ -1167,6 +1168,7 @@ const mapCommercialAiCopyAttempt = (record: Record<string, unknown>) => ({
   inputTokens: (record.inputTokens as number | null) ?? null,
   outputTokens: (record.outputTokens as number | null) ?? null,
   totalTokens: (record.totalTokens as number | null) ?? null,
+  validationFailureCodes: sanitizeCommercialAiCopyValidationFailureCodes(record.validationFailureCodes),
   startedAt: record.startedAt as Date,
   completedAt: (record.completedAt as Date | null) ?? null,
   createdAt: record.createdAt as Date,
@@ -1192,6 +1194,7 @@ const mapCommercialAiCopyAttemptStatus = (
   inputTokens: (record.inputTokens as number | null) ?? null,
   outputTokens: (record.outputTokens as number | null) ?? null,
   totalTokens: (record.totalTokens as number | null) ?? null,
+  validationFailureCodes: sanitizeCommercialAiCopyValidationFailureCodes(record.validationFailureCodes),
   startedAt: record.startedAt as Date,
   completedAt: (record.completedAt as Date | null) ?? null,
   createdAt: record.createdAt as Date,
@@ -1866,6 +1869,7 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
         inputTokens: true,
         outputTokens: true,
         totalTokens: true,
+        validationFailureCodes: true,
         startedAt: true,
         completedAt: true,
         createdAt: true,
@@ -2220,6 +2224,7 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
     inputTokens?: number | null;
     outputTokens?: number | null;
     totalTokens?: number | null;
+    validationFailureCodes?: string[];
     completedAt: Date;
   }) {
     const result = await this.prisma.commercialCopyGenerationAttempt.updateMany(
@@ -2236,6 +2241,7 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
           inputTokens: input.inputTokens ?? null,
           outputTokens: input.outputTokens ?? null,
           totalTokens: input.totalTokens ?? null,
+          validationFailureCodes: sanitizeCommercialAiCopyValidationFailureCodes(input.validationFailureCodes),
           completedAt: input.completedAt,
         },
       },

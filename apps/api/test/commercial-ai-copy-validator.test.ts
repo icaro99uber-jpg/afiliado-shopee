@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { CommercialAiCopyValidator } from '../src/commercial-ai-copy-validator';
+import {
+  COMMERCIAL_AI_COPY_VALIDATION_FAILURE_CODES,
+  CommercialAiCopyValidator,
+  sanitizeCommercialAiCopyValidationFailureCodes,
+} from '../src/commercial-ai-copy-validator';
 
 const valid = {
   headline: 'Oferta para escolher bem ✨',
@@ -95,5 +99,60 @@ describe('CommercialAiCopyValidator', () => {
     );
     expect(result.valid).toBe(false);
     expect(result.publicFailureCodes).toContain('AI_CATALOG_FACT_REPEATED');
+  });
+});
+
+describe('sanitizeCommercialAiCopyValidationFailureCodes', () => {
+  it('handles non-arrays', () => {
+    expect(sanitizeCommercialAiCopyValidationFailureCodes(undefined)).toEqual([]);
+    expect(sanitizeCommercialAiCopyValidationFailureCodes(null)).toEqual([]);
+    expect(sanitizeCommercialAiCopyValidationFailureCodes('not array')).toEqual([]);
+    expect(sanitizeCommercialAiCopyValidationFailureCodes(123)).toEqual([]);
+    expect(sanitizeCommercialAiCopyValidationFailureCodes({})).toEqual([]);
+  });
+  it('handles empty array', () => {
+    expect(sanitizeCommercialAiCopyValidationFailureCodes([])).toEqual([]);
+  });
+  it('keeps valid codes and removes duplicates and sorts', () => {
+    expect(
+      sanitizeCommercialAiCopyValidationFailureCodes([
+        'AI_OUTPUT_EXTRA_PROPERTY',
+        'AI_HEADLINE_LENGTH',
+        'AI_OUTPUT_EXTRA_PROPERTY',
+      ]),
+    ).toEqual(['AI_HEADLINE_LENGTH', 'AI_OUTPUT_EXTRA_PROPERTY']);
+  });
+  it('removes invalid types or empty or long strings', () => {
+    expect(
+      sanitizeCommercialAiCopyValidationFailureCodes([
+        'AI_HEADLINE_LENGTH',
+        '',
+        'x'.repeat(101),
+        123,
+        null,
+      ]),
+    ).toEqual(['AI_HEADLINE_LENGTH']);
+  });
+  it('removes unknown codes', () => {
+    expect(
+      sanitizeCommercialAiCopyValidationFailureCodes([
+        'AI_HEADLINE_LENGTH',
+        'UNKNOWN_CODE',
+      ]),
+    ).toEqual(['AI_HEADLINE_LENGTH']);
+  });
+  it('limits to 20 codes', () => {
+    const all = [...COMMERCIAL_AI_COPY_VALIDATION_FAILURE_CODES];
+    const limited = sanitizeCommercialAiCopyValidationFailureCodes(all);
+    expect(limited.length).toBeLessThanOrEqual(20);
+    expect(limited).toEqual(all.sort().slice(0, 20));
+  });
+  it('does not throw on malformed mixed input', () => {
+    expect(() =>
+      sanitizeCommercialAiCopyValidationFailureCodes(['AI_HEADLINE_LENGTH', { foo: 'bar' }, undefined, 'UNKNOWN']),
+    ).not.toThrow();
+    expect(
+      sanitizeCommercialAiCopyValidationFailureCodes(['AI_HEADLINE_LENGTH', { foo: 'bar' }, undefined, 'UNKNOWN']),
+    ).toEqual(['AI_HEADLINE_LENGTH']);
   });
 });
