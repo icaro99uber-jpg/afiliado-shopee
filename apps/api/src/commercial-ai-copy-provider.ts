@@ -28,8 +28,12 @@ export type CommercialAiCopyProviderResult = {
     inputTokens: number | null;
     outputTokens: number | null;
     totalTokens: number | null;
+    reasoningTokens: number | null;
   };
 };
+
+export type CommercialAiCopyProviderUsage =
+  CommercialAiCopyProviderResult['usage'];
 
 export interface CommercialAiCopyProvider {
   generate(
@@ -73,6 +77,8 @@ const PROVIDER_PUBLIC_CODES = new Set([
   'COMMERCIAL_AI_COPY_RATE_LIMITED',
   'COMMERCIAL_AI_COPY_PROVIDER_SERVER_ERROR',
   'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE',
+  'COMMERCIAL_AI_COPY_OUTPUT_TOKEN_LIMIT',
+  'COMMERCIAL_AI_COPY_CONTENT_FILTERED',
   'COMMERCIAL_AI_COPY_PROVIDER_REFUSED',
   'COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID',
 ]);
@@ -88,6 +94,21 @@ export type CommercialAiCopyProviderErrorMetadata = {
   providerErrorType?: string;
   providerErrorParam?: string;
 };
+
+type CommercialAiCopyProviderUsageInput =
+  Partial<CommercialAiCopyProviderUsage>;
+
+const sanitizeUsageToken = (value: unknown) =>
+  Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+
+const sanitizeProviderUsage = (
+  usage: CommercialAiCopyProviderUsageInput | null | undefined,
+): CommercialAiCopyProviderUsage => ({
+  inputTokens: sanitizeUsageToken(usage?.inputTokens),
+  outputTokens: sanitizeUsageToken(usage?.outputTokens),
+  totalTokens: sanitizeUsageToken(usage?.totalTokens),
+  reasoningTokens: sanitizeUsageToken(usage?.reasoningTokens),
+});
 
 export const sanitizeCommercialAiCopyProviderErrorMetadata = (
   metadata: CommercialAiCopyProviderErrorMetadata = {},
@@ -109,11 +130,19 @@ export class CommercialAiCopyProviderError extends Error {
   readonly providerErrorCode?: string;
   readonly providerErrorType?: string;
   readonly providerErrorParam?: string;
+  readonly requestMayHaveStarted: boolean;
+  readonly usage: CommercialAiCopyProviderUsage;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly totalTokens: number | null;
+  readonly reasoningTokens: number | null;
 
   constructor(
     readonly kind: CommercialAiCopyProviderFailureKind,
     publicCode: string,
     metadata: CommercialAiCopyProviderErrorMetadata = {},
+    usage?: CommercialAiCopyProviderUsageInput,
+    requestMayHaveStarted = kind === 'AMBIGUOUS',
   ) {
     const safePublicCode = normalizeCommercialAiCopyProviderPublicCode(publicCode);
     const safeMetadata = sanitizeCommercialAiCopyProviderErrorMetadata(metadata);
@@ -124,6 +153,12 @@ export class CommercialAiCopyProviderError extends Error {
     this.providerErrorCode = safeMetadata.providerErrorCode;
     this.providerErrorType = safeMetadata.providerErrorType;
     this.providerErrorParam = safeMetadata.providerErrorParam;
+    this.requestMayHaveStarted = requestMayHaveStarted;
+    this.usage = sanitizeProviderUsage(usage);
+    this.inputTokens = this.usage.inputTokens;
+    this.outputTokens = this.usage.outputTokens;
+    this.totalTokens = this.usage.totalTokens;
+    this.reasoningTokens = this.usage.reasoningTokens;
   }
 }
 
@@ -256,10 +291,13 @@ type ResponseLike = {
   status?: string;
   output_text?: string;
   output?: Array<{ type?: string; content?: Array<{ type?: string }> }>;
+  incomplete_details?: { reason?: string } | null;
+  error?: { code?: string } | null;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
     total_tokens?: number;
+    output_tokens_details?: { reasoning_tokens?: number } | null;
   } | null;
 };
 
@@ -274,8 +312,13 @@ export type OpenAiCommercialAiCopyProviderOptions = {
   model: string;
   timeoutMs: number;
   maxOutputTokens: number;
+  reasoningEffort: CommercialAiCopyReasoningEffort;
   client?: OpenAiResponsesClient;
 };
+
+export type CommercialAiCopyReasoningEffort = NonNullable<
+  NonNullable<ResponseCreateParamsNonStreaming['reasoning']>['effort']
+>;
 
 const hasRefusal = (response: ResponseLike) =>
   response.output?.some(
@@ -283,6 +326,40 @@ const hasRefusal = (response: ResponseLike) =>
       item.type === 'message' &&
       item.content?.some((content) => content.type === 'refusal'),
   ) ?? false;
+
+const responseUsage = (response: ResponseLike): CommercialAiCopyProviderUsage =>
+  sanitizeProviderUsage({
+    inputTokens: response.usage?.input_tokens,
+    outputTokens: response.usage?.output_tokens,
+    totalTokens: response.usage?.total_tokens,
+    reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens,
+  });
+
+const incompleteReason = (response: ResponseLike) =>
+  sanitizeProviderMetadataValue(response.incomplete_details?.reason);
+
+const responseFailureCode = (
+  response: ResponseLike,
+  reason: string | undefined,
+  refusal: boolean,
+) => {
+  if (response.status === 'incomplete') {
+    if (reason === 'max_output_tokens') {
+      return 'COMMERCIAL_AI_COPY_OUTPUT_TOKEN_LIMIT';
+    }
+    if (reason === 'content_filter') {
+      return 'COMMERCIAL_AI_COPY_CONTENT_FILTERED';
+    }
+    return 'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE';
+  }
+  if (response.status === 'failed') {
+    return 'COMMERCIAL_AI_COPY_PROVIDER_FAILED';
+  }
+  if (response.status === 'completed' && refusal) {
+    return 'COMMERCIAL_AI_COPY_PROVIDER_REFUSED';
+  }
+  return 'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE';
+};
 
 export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider {
   private readonly client: OpenAiResponsesClient;
@@ -307,6 +384,7 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
         instructions: buildCommercialAiCopyInstructions(),
         input: buildCommercialAiCopyInput(input),
         max_output_tokens: this.options.maxOutputTokens,
+        reasoning: { effort: this.options.reasoningEffort },
         store: false,
         stream: false,
         background: false,
@@ -321,12 +399,22 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
       };
       requestStarted = true;
       const response = await this.client.responses.create(request);
-      if (response.status !== 'completed' || hasRefusal(response)) {
+      const usage = responseUsage(response);
+      const refusal = hasRefusal(response);
+      if (response.status !== 'completed' || refusal) {
+        const reason = incompleteReason(response);
+        const publicCode = responseFailureCode(response, reason, refusal);
         throw new CommercialAiCopyProviderError(
           'FAILED_CONFIRMED',
-          response.status === 'incomplete'
-            ? 'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE'
-            : 'COMMERCIAL_AI_COPY_PROVIDER_REFUSED',
+          publicCode,
+          {
+            providerErrorCode:
+              response.status === 'incomplete'
+                ? reason
+                : sanitizeProviderMetadataValue(response.error?.code),
+          },
+          usage,
+          true,
         );
       }
       let output: CommercialAiCopyOutput;
@@ -338,17 +426,16 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
         throw new CommercialAiCopyProviderError(
           'FAILED_CONFIRMED',
           'COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID',
+          {},
+          usage,
+          true,
         );
       }
       return {
         output,
         provider: 'openai',
         model: this.options.model,
-        usage: {
-          inputTokens: response.usage?.input_tokens ?? null,
-          outputTokens: response.usage?.output_tokens ?? null,
-          totalTokens: response.usage?.total_tokens ?? null,
-        },
+        usage,
       };
     } catch (error) {
       if (error instanceof CommercialAiCopyProviderError) throw error;
@@ -362,6 +449,9 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
           requestStarted
             ? 'COMMERCIAL_AI_COPY_PROVIDER_RESULT_AMBIGUOUS'
             : 'COMMERCIAL_AI_COPY_PROVIDER_NOT_STARTED',
+          {},
+          undefined,
+          requestStarted,
         );
       }
       if (error instanceof APIError) {
@@ -370,6 +460,8 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
           'FAILED_CONFIRMED',
           classification.publicCode,
           classification.metadata,
+          undefined,
+          requestStarted,
         );
       }
       throw new CommercialAiCopyProviderError(
@@ -377,6 +469,9 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
         requestStarted
           ? 'COMMERCIAL_AI_COPY_PROVIDER_RESULT_AMBIGUOUS'
           : 'COMMERCIAL_AI_COPY_PROVIDER_NOT_STARTED',
+        {},
+        undefined,
+        requestStarted,
       );
     }
   }

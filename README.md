@@ -1179,7 +1179,8 @@ COMMERCIAL_AI_COPY_ENABLED=false
 COMMERCIAL_AI_COPY_PROVIDER=openai
 COMMERCIAL_AI_COPY_MODEL=
 COMMERCIAL_AI_COPY_TIMEOUT_MS=30000
-COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS=300
+COMMERCIAL_AI_COPY_MAX_OUTPUT_TOKENS=1000
+COMMERCIAL_AI_COPY_REASONING_EFFORT=minimal
 ```
 
 A chave e o modelo ficam somente no `.env` ignorado; modelo e chave são
@@ -1196,6 +1197,15 @@ corepack pnpm commercial:copy:attempt:status -- --candidate-id=<id>
 Preflight e preview não chamam IA nem escrevem. A geração manual exige banco
 local, execução fora de CI, modo preview, automação pausada e desabilitada, os
 dois Schedulers e group send desligados e zero worker de dispatch.
+
+O orçamento padrão de `max_output_tokens` é 1000 (faixa aceita: 100–4000) e
+inclui tokens de raciocínio. `COMMERCIAL_AI_COPY_REASONING_EFFORT` é validado
+por enum e usa `minimal` por padrão. Respostas `incomplete` são falhas
+terminais: `max_output_tokens` vira
+`COMMERCIAL_AI_COPY_OUTPUT_TOKEN_LIMIT`, `content_filter` vira
+`COMMERCIAL_AI_COPY_CONTENT_FILTERED` e outras razões permanecem em
+`COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE`. O attempt registra somente usage
+sanitizado e nunca persiste saída parcial.
 
 Rotas disponíveis:
 

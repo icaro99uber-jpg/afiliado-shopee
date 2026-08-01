@@ -117,13 +117,19 @@ describe('OpenAiCommercialAiCopyProvider', () => {
         hashtags: ['#Oferta'],
       }),
       output: [],
-      usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        total_tokens: 30,
+        output_tokens_details: { reasoning_tokens: 4 },
+      },
     });
     const provider = new OpenAiCommercialAiCopyProvider({
       apiKey: 'not-a-real-key',
       model: 'model-from-environment',
       timeoutMs: 4321,
       maxOutputTokens: 222,
+      reasoningEffort: 'minimal',
       client: { responses: { create } },
     });
     const result = await provider.generate(facts);
@@ -134,6 +140,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       stream: false,
       background: false,
       max_output_tokens: 222,
+      reasoning: { effort: 'minimal' },
       text: {
         format: {
           type: 'json_schema',
@@ -146,6 +153,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
     expect(request).not.toHaveProperty('metadata');
     expect(request.input).not.toContain('affiliateLink');
     expect(result.usage.totalTokens).toBe(30);
+    expect(result.usage.reasoningTokens).toBe(4);
   });
 
   it.each([
@@ -165,12 +173,131 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       model: 'model',
       timeoutMs: 1000,
       maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
       client: { responses: { create: vi.fn().mockResolvedValue(response) } },
     });
     await expect(provider.generate(facts)).rejects.toMatchObject({
       kind: 'FAILED_CONFIRMED',
       publicCode: code,
+      requestMayHaveStarted: true,
     });
+  });
+
+  it.each([
+    [
+      'max_output_tokens',
+      'COMMERCIAL_AI_COPY_OUTPUT_TOKEN_LIMIT',
+    ],
+    ['content_filter', 'COMMERCIAL_AI_COPY_CONTENT_FILTERED'],
+    ['reason_not_yet_documented', 'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE'],
+  ] as const)('classifica incomplete reason %s sem perder usage', async (reason, publicCode) => {
+    const provider = new OpenAiCommercialAiCopyProvider({
+      apiKey: 'not-a-real-key',
+      model: 'model',
+      timeoutMs: 1000,
+      maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
+      client: {
+        responses: {
+          create: vi.fn().mockResolvedValue({
+            status: 'incomplete',
+            incomplete_details: { reason },
+            usage: {
+              input_tokens: 11,
+              output_tokens: 22,
+              total_tokens: 33,
+              output_tokens_details: { reasoning_tokens: 7 },
+            },
+          }),
+        },
+      },
+    });
+    await expect(provider.generate(facts)).rejects.toMatchObject({
+      kind: 'FAILED_CONFIRMED',
+      publicCode,
+      requestMayHaveStarted: true,
+      providerErrorCode: reason,
+      inputTokens: 11,
+      outputTokens: 22,
+      totalTokens: 33,
+      reasoningTokens: 7,
+    });
+  });
+
+  it('sanitiza usage ausente ou inválido e classifica falha de response', async () => {
+    const provider = new OpenAiCommercialAiCopyProvider({
+      apiKey: 'not-a-real-key',
+      model: 'model',
+      timeoutMs: 1000,
+      maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
+      client: {
+        responses: {
+          create: vi.fn().mockResolvedValue({
+            status: 'failed',
+            error: { code: 'response_failed' },
+            usage: {
+              input_tokens: -1,
+              output_tokens: 1.5,
+              total_tokens: 4,
+              output_tokens_details: { reasoning_tokens: 'hidden' },
+            },
+          }),
+        },
+      },
+    });
+    await expect(provider.generate(facts)).rejects.toMatchObject({
+      kind: 'FAILED_CONFIRMED',
+      publicCode: 'COMMERCIAL_AI_COPY_PROVIDER_FAILED',
+      providerErrorCode: 'response_failed',
+      requestMayHaveStarted: true,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: 4,
+      reasoningTokens: null,
+    });
+  });
+
+  it('marca output inválido recebido como request iniciado', async () => {
+    const provider = new OpenAiCommercialAiCopyProvider({
+      apiKey: 'not-a-real-key',
+      model: 'model',
+      timeoutMs: 1000,
+      maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
+      client: {
+        responses: {
+          create: vi.fn().mockResolvedValue({
+            status: 'completed',
+            output_text: '{partial-output}',
+          }),
+        },
+      },
+    });
+    await expect(provider.generate(facts)).rejects.toMatchObject({
+      publicCode: 'COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID',
+      requestMayHaveStarted: true,
+    });
+  });
+
+  it('mantém NOT_STARTED quando a entrada falha antes da rede', async () => {
+    const create = vi.fn();
+    const provider = new OpenAiCommercialAiCopyProvider({
+      apiKey: 'not-a-real-key',
+      model: 'model',
+      timeoutMs: 1000,
+      maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
+      client: { responses: { create } },
+    });
+    await expect(
+      provider.generate({ ...facts, productName: '' }),
+    ).rejects.toMatchObject({
+      kind: 'NOT_STARTED',
+      publicCode: 'COMMERCIAL_AI_COPY_PROVIDER_NOT_STARTED',
+      requestMayHaveStarted: false,
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('classifica falha de rede depois do início como ambígua', async () => {
@@ -179,6 +306,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       model: 'model',
       timeoutMs: 1000,
       maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
       client: {
         responses: {
           create: vi
@@ -203,6 +331,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       model: 'model',
       timeoutMs: 1000,
       maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
       client: {
         responses: {
           create: vi.fn().mockRejectedValue(new APIUserAbortError()),
@@ -267,12 +396,14 @@ describe('OpenAiCommercialAiCopyProvider', () => {
         model: 'model',
         timeoutMs: 1000,
         maxOutputTokens: 100,
+        reasoningEffort: 'minimal',
         client: { responses: { create: vi.fn().mockRejectedValue(error) } },
       });
       await expect(provider.generate(facts)).rejects.toMatchObject({
         kind: 'FAILED_CONFIRMED',
         publicCode,
         httpStatus: status,
+        requestMayHaveStarted: true,
       });
     },
   );
@@ -288,6 +419,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       model: 'model',
       timeoutMs: 1000,
       maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
       client: { responses: { create: vi.fn().mockRejectedValue(error) } },
     });
     const thrown = await provider.generate(facts).catch((error) => error);
@@ -335,6 +467,7 @@ describe('OpenAiCommercialAiCopyProvider', () => {
       model: 'model',
       timeoutMs: 1000,
       maxOutputTokens: 100,
+      reasoningEffort: 'minimal',
       client: {
         responses: {
           create: vi.fn().mockRejectedValue(new APIConnectionTimeoutError()),

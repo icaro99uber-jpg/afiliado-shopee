@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
+import type { CommercialAiCopyReasoningEffort } from '@shopee-auto-affiliate-ai/config';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 
 import {
@@ -40,6 +41,7 @@ export type CommercialAiCopyConfig = {
   apiKeyConfigured: boolean;
   timeoutMs: number;
   maxOutputTokens: number;
+  reasoningEffort: CommercialAiCopyReasoningEffort;
   maximumCopyLength: number;
 };
 
@@ -143,6 +145,7 @@ export class CommercialPromotionCopyGenerationService {
       validationVersion: COMMERCIAL_AI_COPY_VALIDATION_VERSION,
       timeoutMs: this.options.config.timeoutMs,
       maxOutputTokens: this.options.config.maxOutputTokens,
+      reasoningEffort: this.options.config.reasoningEffort,
       maximumCopyLength: this.options.config.maximumCopyLength,
     };
   }
@@ -444,6 +447,11 @@ export class CommercialPromotionCopyGenerationService {
     failureCode: string,
     requestMayHaveStarted: boolean,
     providerMetadata: CommercialAiCopyProviderErrorMetadata = {},
+    usage?: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+    },
   ) {
     await this.options.repository.markAttemptTerminal({
       inputFingerprint: fingerprint,
@@ -454,6 +462,9 @@ export class CommercialPromotionCopyGenerationService {
       providerErrorCode: providerMetadata.providerErrorCode,
       providerErrorType: providerMetadata.providerErrorType,
       providerErrorParam: providerMetadata.providerErrorParam,
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      totalTokens: usage?.totalTokens ?? null,
       completedAt: this.clock(),
     });
   }
@@ -528,17 +539,13 @@ export class CommercialPromotionCopyGenerationService {
           model: normalizeCommercialAiCopyModel(this.options.config.model),
           publicCode: providerError.publicCode,
           failureKind: providerError.kind,
-          ...(providerError.httpStatus !== undefined && {
-            httpStatus: providerError.httpStatus,
-          }),
+          requestMayHaveStarted: providerError.requestMayHaveStarted,
+          inputTokens: providerError.inputTokens,
+          outputTokens: providerError.outputTokens,
+          totalTokens: providerError.totalTokens,
+          reasoningTokens: providerError.reasoningTokens,
           ...(providerError.providerErrorCode && {
             providerErrorCode: providerError.providerErrorCode,
-          }),
-          ...(providerError.providerErrorType && {
-            providerErrorType: providerError.providerErrorType,
-          }),
-          ...(providerError.providerErrorParam && {
-            providerErrorParam: providerError.providerErrorParam,
           }),
         },
         'Commercial AI copy provider failed',
@@ -547,12 +554,17 @@ export class CommercialPromotionCopyGenerationService {
         fingerprint,
         ambiguous ? 'AMBIGUOUS' : 'FAILED',
         providerError.publicCode,
-        ambiguous,
+        providerError.requestMayHaveStarted,
         {
           httpStatus: providerError.httpStatus,
           providerErrorCode: providerError.providerErrorCode,
           providerErrorType: providerError.providerErrorType,
           providerErrorParam: providerError.providerErrorParam,
+        },
+        {
+          inputTokens: providerError.inputTokens,
+          outputTokens: providerError.outputTokens,
+          totalTokens: providerError.totalTokens,
         },
       );
       throw new AppError(
@@ -570,7 +582,9 @@ export class CommercialPromotionCopyGenerationService {
         fingerprint,
         'FAILED',
         'COMMERCIAL_AI_COPY_OUTPUT_INVALID',
-        false,
+        true,
+        {},
+        providerResult.usage,
       );
       throw new AppError(
         'Output da IA rejeitado',
@@ -597,7 +611,14 @@ export class CommercialPromotionCopyGenerationService {
         error instanceof AppError
           ? error.code
           : 'COMMERCIAL_AI_COPY_OUTPUT_INVALID';
-      await this.terminalFailure(fingerprint, 'FAILED', code, false);
+      await this.terminalFailure(
+        fingerprint,
+        'FAILED',
+        code,
+        true,
+        {},
+        providerResult.usage,
+      );
       throw error instanceof AppError
         ? error
         : new AppError('Copy montada invalida', code);
@@ -652,6 +673,8 @@ export class CommercialPromotionCopyGenerationService {
         'AMBIGUOUS',
         'COMMERCIAL_AI_COPY_PERSISTENCE_AMBIGUOUS',
         true,
+        {},
+        providerResult.usage,
       );
       this.options.logger?.error(
         {

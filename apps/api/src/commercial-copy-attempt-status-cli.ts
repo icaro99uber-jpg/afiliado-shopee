@@ -76,6 +76,9 @@ export type SanitizedCommercialCopyAttemptStatus = {
   providerErrorCode: string | null;
   providerErrorType: string | null;
   providerErrorParam: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
   startedAt: string | null;
   completedAt: string | null;
 };
@@ -103,6 +106,9 @@ const sanitizeAttempt = (
     providerErrorCode: metadata.providerErrorCode ?? null,
     providerErrorType: metadata.providerErrorType ?? null,
     providerErrorParam: metadata.providerErrorParam ?? null,
+    inputTokens: attempt.inputTokens ?? null,
+    outputTokens: attempt.outputTokens ?? null,
+    totalTokens: attempt.totalTokens ?? null,
     startedAt: safeDate(attempt.startedAt),
     completedAt: safeDate(attempt.completedAt),
   };

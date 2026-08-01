@@ -181,6 +181,10 @@ class MemoryCopyRepository implements CommercialPromotionCopyRepository {
     if (this.completionFailure) {
       attempt.status = 'FAILED';
       attempt.failureCode = this.completionFailure;
+      attempt.requestMayHaveStarted = true;
+      attempt.inputTokens = input.usage.inputTokens;
+      attempt.outputTokens = input.usage.outputTokens;
+      attempt.totalTokens = input.usage.totalTokens;
       attempt.completedAt = input.completedAt;
       return { completed: false as const, failureCode: this.completionFailure };
     }
@@ -234,7 +238,12 @@ const validProvider = (): CommercialAiCopyProvider => ({
     },
     provider: 'openai',
     model: 'selected-model',
-    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+    usage: {
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+      reasoningTokens: 4,
+    },
   }),
 });
 
@@ -252,6 +261,7 @@ const service = (
       apiKeyConfigured: true,
       timeoutMs: 30000,
       maxOutputTokens: 300,
+      reasoningEffort: 'minimal',
       maximumCopyLength: 1000,
     },
     clock: () => now,
@@ -269,6 +279,7 @@ describe('CommercialPromotionCopyGenerationService', () => {
         apiKeyConfigured: true,
         timeoutMs: 30_000,
         maxOutputTokens: 300,
+        reasoningEffort: 'minimal',
         maximumCopyLength: 1_000,
       },
     });
@@ -277,6 +288,7 @@ describe('CommercialPromotionCopyGenerationService', () => {
       enabled: true,
       modelConfigured: true,
       apiKeyConfigured: true,
+      reasoningEffort: 'minimal',
     });
   });
 
@@ -383,6 +395,8 @@ describe('CommercialPromotionCopyGenerationService', () => {
             providerErrorType: 'insufficient_quota',
             providerErrorParam: 'model',
           },
+          { inputTokens: 12, outputTokens: 34, totalTokens: 46 },
+          true,
         ),
       ),
     };
@@ -396,6 +410,7 @@ describe('CommercialPromotionCopyGenerationService', () => {
         apiKeyConfigured: true,
         timeoutMs: 30_000,
         maxOutputTokens: 300,
+        reasoningEffort: 'minimal',
         maximumCopyLength: 1_000,
       },
       logger,
@@ -414,10 +429,12 @@ describe('CommercialPromotionCopyGenerationService', () => {
       model: 'selected-model',
       publicCode: 'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED',
       failureKind: 'FAILED_CONFIRMED',
-      httpStatus: 429,
+      requestMayHaveStarted: true,
+      inputTokens: 12,
+      outputTokens: 34,
+      totalTokens: 46,
+      reasoningTokens: null,
       providerErrorCode: 'insufficient_quota',
-      providerErrorType: 'insufficient_quota',
-      providerErrorParam: 'model',
     });
     expect(JSON.stringify(fields)).not.toContain('affiliate');
     expect(JSON.stringify(fields)).not.toContain('inputFingerprint');
@@ -428,6 +445,9 @@ describe('CommercialPromotionCopyGenerationService', () => {
       providerErrorCode: 'insufficient_quota',
       providerErrorType: 'insufficient_quota',
       providerErrorParam: 'model',
+      inputTokens: 12,
+      outputTokens: 34,
+      totalTokens: 46,
     });
   });
 
@@ -485,7 +505,12 @@ describe('CommercialPromotionCopyGenerationService', () => {
         },
         provider: 'openai',
         model: 'selected-model',
-        usage: { inputTokens: null, outputTokens: null, totalTokens: null },
+        usage: {
+          inputTokens: null,
+          outputTokens: null,
+          totalTokens: null,
+          reasoningTokens: null,
+        },
       };
     });
     const copyService = service(repository, provider);
@@ -514,5 +539,11 @@ describe('CommercialPromotionCopyGenerationService', () => {
     ).rejects.toMatchObject({ code: 'COMMERCIAL_AI_COPY_CATALOG_CHANGED' });
     expect(repository.copies.size).toBe(0);
     expect(repository.context?.candidate.status).toBe('QUEUED');
+    expect([...repository.attempts.values()][0]).toMatchObject({
+      requestMayHaveStarted: true,
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+    });
   });
 });
