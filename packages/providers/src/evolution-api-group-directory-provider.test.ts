@@ -36,7 +36,7 @@ const createProvider = (
   });
 
 describe('EvolutionApiGroupDirectoryProvider', () => {
-  it('usa exatamente a rota read-only 2.3.6 sem participantes nem body', async () => {
+  it('usa exatamente a rota read-only 2.3.7 sem participantes nem body', async () => {
     const httpClient = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
         void input;

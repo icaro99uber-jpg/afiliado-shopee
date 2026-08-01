@@ -115,9 +115,9 @@ const mapGroup = (value: unknown): WhatsAppGroupSummary => {
 };
 
 /**
- * Evolution API 2.3.6 read-only contract:
+ * Evolution API 2.3.7 read-only contract:
  * GET /group/fetchAllGroups/:instanceName?getParticipants=false
- * Source: https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/src/api/routes/group.router.ts
+ * Source: https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/src/api/routes/group.router.ts
  */
 export class EvolutionApiGroupDirectoryProvider implements WhatsAppGroupDirectoryProvider {
   private readonly baseUrl: string;

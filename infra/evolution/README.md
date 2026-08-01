@@ -6,7 +6,7 @@ nao envia mensagens automaticamente.
 
 ## Servicos
 
-- `shopee-evolution-api`: API HTTP v2.3.6, publicada somente em
+- `shopee-evolution-api`: API HTTP v2.3.7, publicada somente em
   `http://localhost:8080` por padrao.
 - `shopee-evolution-postgres`: banco persistente exclusivo da Evolution API,
   acessivel apenas pelos containers da rede local.
@@ -19,24 +19,24 @@ compartilhar dados com o compose principal do projeto.
 
 ## Versao e licenca
 
-A imagem fixada e `evoapicloud/evolution-api:v2.3.6`. O namespace e a tag foram
-confirmados na [release oficial 2.3.6](https://github.com/EvolutionAPI/evolution-api/releases/tag/2.3.6),
-no [compose oficial da tag](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/docker-compose.yaml)
+A imagem fixada e `evoapicloud/evolution-api:v2.3.7`. O namespace e a tag foram
+confirmados na [release oficial 2.3.7](https://github.com/EvolutionAPI/evolution-api/releases/tag/2.3.7),
+no [compose oficial da tag](https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/docker-compose.yaml)
 e na [documentacao oficial da troca de namespace](https://github.com/EvolutionAPI/docs-evolution/pull/19/files).
-A 2.3.6 e a ultima release estavel da linha 2.3.x, incorpora a correcao da
+A 2.3.7 e a ultima release estavel da linha 2.3.x, incorpora a correcao da
 migracao Kafka publicada oficialmente na 2.3.5 e nao exige a ativacao remota
 obrigatoria introduzida na 2.4.0. A tentativa inicial com 2.3.4 confirmou a
 falha de migracao corrigida pela release seguinte; nenhum dado de usuario havia
 sido criado e os volumes locais novos foram recriados.
 
-A 2.3.6 declara Apache 2.0 com condicoes adicionais: a marca/copyright do
+A 2.3.7 declara Apache 2.0 com condicoes adicionais: a marca/copyright do
 frontend nao deve ser removida e o uso da Evolution API deve ser informado aos
 administradores e na documentacao/configuracoes do sistema. O uso que descumprir
 essas condicoes pode exigir licenca comercial. Consulte a
-[licenca oficial da tag](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/LICENSE).
+[licenca oficial da tag](https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/LICENSE).
 
 A configuracao usa somente nomes presentes no `.env.example` e no codigo da tag
-oficial 2.3.6. Essa versao autentica pela `AUTHENTICATION_API_KEY` e seleciona o
+oficial 2.3.7. Essa versao autentica pela `AUTHENTICATION_API_KEY` e seleciona o
 banco com `DATABASE_PROVIDER`; `AUTHENTICATION_TYPE` e `DATABASE_ENABLED` nao
 fazem parte desse contrato e foram omitidas intencionalmente.
 
@@ -76,7 +76,7 @@ explicita com volumes; ela nao faz parte dos scripts deste projeto.
 
 ## Validacao segura
 
-Na versão 2.3.6 nao existe uma rota dedicada `/health` ou `/server/ok`. A rota
+Na versão 2.3.7 nao existe uma rota dedicada `/health` ou `/server/ok`. A rota
 publica `/` e o status oficial dessa versao e retorna HTTP 200, mensagem de
 funcionamento, versao e nome do cliente. O healthcheck do container usa essa
 rota.
@@ -92,7 +92,7 @@ devem ser fornecidas somente por ambiente local ignorado:
 corepack pnpm evolution:test-message
 ```
 
-O `sendText` da imagem 2.3.6 usa o corpo plano `{ "number", "text" }`. O
+O `sendText` da imagem 2.3.7 usa o corpo plano `{ "number", "text" }`. O
 provider nao tenta o formato `textMessage` como fallback, pois uma segunda
 requisicao poderia duplicar a entrega. O unico caminho confirmado e
 `corepack pnpm evolution:test-message -- --confirm-one-real-message`; ele exige
@@ -113,7 +113,7 @@ O comando abaixo valida o fluxo real de dispatch em dry-run por padrao:
 corepack pnpm whatsapp:e2e-test
 ```
 
-Ele exige a Evolution local em `http://localhost:8080`, versao 2.3.6 e instancia
+Ele exige a Evolution local em `http://localhost:8080`, versao 2.3.7 e instancia
 `afiliado-shopee-local` em estado `open`, alem do PostgreSQL e Redis do compose
 principal. O `.env` da raiz e carregado sem alterar o arquivo ou substituir
 variaveis de processo. O resumo mascara o unico destino permitido.
@@ -143,10 +143,10 @@ enviar mensagem. Resultado sanitizado: zero mensagens reais.
 
 ## Consulta read-only de grupos
 
-A tag oficial 2.3.6 define a listagem em
-[`group.router.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/src/api/routes/group.router.ts),
+A tag oficial 2.3.7 define a listagem em
+[`group.router.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/src/api/routes/group.router.ts),
 com validacao em
-[`group.schema.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.6/src/validate/group.schema.ts):
+[`group.schema.ts`](https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/src/validate/group.schema.ts):
 
 ```text
 GET /group/fetchAllGroups/:instanceName?getParticipants=false
@@ -162,7 +162,7 @@ edicao, saida ou envio. A rota nao possui guard explicito de conexao, portanto
 qualquer falha por instancia desconectada e tratada como indisponibilidade
 sanitizada, sem resposta bruta.
 
-A validacao local read-only confirmou HTTP 200 na versao 2.3.6, uma contagem de
+A validacao local read-only confirmou HTTP 200 na versao 2.3.7, uma contagem de
 grupo positiva, IDs no formato esperado, `size` numerico e zero campos
 `participants`. Nenhum nome ou identificador foi impresso ou persistido durante
 essa inspecao.

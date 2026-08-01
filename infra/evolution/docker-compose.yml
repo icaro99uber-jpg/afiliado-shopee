@@ -2,7 +2,7 @@ name: shopee-evolution-local
 
 services:
   evolution-api:
-    image: evoapicloud/evolution-api:v2.3.6
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: shopee-evolution-api
     restart: unless-stopped
     env_file:

@@ -64,7 +64,7 @@ export type WhatsAppDispatchE2EPreflight = {
   databaseAvailable: true;
   redisAvailable: true;
   evolutionAvailable: true;
-  evolutionVersion: '2.3.6';
+  evolutionVersion: '2.3.7';
   instanceStatus: 'open';
 };
 
@@ -77,7 +77,7 @@ export type WhatsAppDispatchE2EDryRunOutput = {
   databaseAvailable: true;
   redisAvailable: true;
   evolutionAvailable: true;
-  evolutionVersion: '2.3.6';
+  evolutionVersion: '2.3.7';
   instanceStatus: 'open';
   messageWillBeSent: false;
 };
@@ -271,7 +271,7 @@ export const runWhatsAppDispatchE2EPreflight = async (
       );
     }
     const rootBody = (await rootResponse.json()) as { version?: unknown };
-    if (rootBody.version !== '2.3.6') {
+    if (rootBody.version !== '2.3.7') {
       throw new WhatsAppDispatchE2EError(
         'Versao inesperada da Evolution API',
         'WHATSAPP_E2E_EVOLUTION_VERSION_INVALID',
@@ -313,7 +313,7 @@ export const runWhatsAppDispatchE2EPreflight = async (
       databaseAvailable: true,
       redisAvailable: true,
       evolutionAvailable: true,
-      evolutionVersion: '2.3.6',
+      evolutionVersion: '2.3.7',
       instanceStatus: 'open',
     };
   } finally {

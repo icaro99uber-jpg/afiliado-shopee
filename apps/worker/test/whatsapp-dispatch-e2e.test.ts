@@ -41,7 +41,7 @@ const preflight = vi.fn(async () => ({
   databaseAvailable: true as const,
   redisAvailable: true as const,
   evolutionAvailable: true as const,
-  evolutionVersion: '2.3.6' as const,
+  evolutionVersion: '2.3.7' as const,
   instanceStatus: 'open' as const,
 }));
 

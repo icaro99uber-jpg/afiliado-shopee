@@ -62,7 +62,7 @@ const preflight = (
   databaseAvailable: true,
   redisAvailable: true,
   evolutionAvailable: true,
-  evolutionVersion: '2.3.6',
+  evolutionVersion: '2.3.7',
   instanceStatus: 'open',
   discoveredGroupCount: remoteIds.length,
   storedGroups: groups,

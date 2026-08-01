@@ -73,7 +73,7 @@ export type WhatsAppGroupTestPreflight = {
   databaseAvailable: true;
   redisAvailable: true;
   evolutionAvailable: true;
-  evolutionVersion: '2.3.6';
+  evolutionVersion: '2.3.7';
   instanceStatus: 'open';
   discoveredGroupCount: number;
   storedGroups: WhatsAppGroupRecord[];
@@ -89,7 +89,7 @@ export type WhatsAppGroupTestDryRunOutput = {
   databaseAvailable: true;
   redisAvailable: true;
   evolutionAvailable: true;
-  evolutionVersion: '2.3.6';
+  evolutionVersion: '2.3.7';
   instanceStatus: 'open';
   discoveredGroupCount: number;
   activeAvailableGroupCount: number;
@@ -267,7 +267,7 @@ export const runWhatsAppGroupTestPreflight = async (
       );
     }
     const root = (await rootResponse.json()) as { version?: unknown };
-    if (root.version !== '2.3.6') {
+    if (root.version !== '2.3.7') {
       throw new WhatsAppGroupTestError(
         'Versao inesperada da Evolution API',
         'WHATSAPP_GROUP_TEST_VERSION_INVALID',
@@ -312,7 +312,7 @@ export const runWhatsAppGroupTestPreflight = async (
       databaseAvailable: true,
       redisAvailable: true,
       evolutionAvailable: true,
-      evolutionVersion: '2.3.6',
+      evolutionVersion: '2.3.7',
       instanceStatus: 'open',
       discoveredGroupCount: remoteGroups.length,
       storedGroups,

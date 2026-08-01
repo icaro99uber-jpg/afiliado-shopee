@@ -17,7 +17,7 @@ const packageJson = JSON.parse(readRepositoryFile('package.json')) as {
 
 describe('Evolution local infrastructure', () => {
   it('fixa todas as imagens sem latest', () => {
-    expect(compose).toContain('evoapicloud/evolution-api:v2.3.6');
+    expect(compose).toContain('evoapicloud/evolution-api:v2.3.7');
     expect(compose).toContain('postgres:16.4-alpine3.20');
     expect(compose).toContain('redis:7.2.5-alpine3.20');
     expect(compose).not.toMatch(/image:\s*\S+:latest/);

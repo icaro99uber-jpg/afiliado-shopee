@@ -272,7 +272,7 @@ Proximos passos previstos:
 
 Protecoes Evolution atuais:
 
-- O endpoint `sendText` da Evolution API 2.3.6 local usa somente o payload
+- O endpoint `sendText` da Evolution API 2.3.7 local usa somente o payload
   plano `{ number, text }`; nao ha fallback automatico para `textMessage`, pois
   uma segunda tentativa poderia duplicar uma entrega.
 - Safe mode ativo por padrao, allowlist vazia bloqueando todos os destinos e
@@ -285,7 +285,7 @@ Protecoes Evolution atuais:
   `PROCESSING`. Redelivery e concorrencia nao chamam o provider novamente;
   revisao manual e obrigatoria.
 - Mock sem guard e sem alteracao de comportamento.
-- Esta protecao e o contrato 2.3.6 foram validados com clientes HTTP injetados e
+- Esta protecao e o contrato 2.3.7 foram validados com clientes HTTP injetados e
   mocks; testes automatizados nunca chamam a internet.
 
 Fluxo de teste unico:
@@ -360,7 +360,7 @@ Dependencias:
   `20260724190000_whatsapp_group_directory`.
 - Secao Grupos da pagina WhatsApp do dashboard.
 
-Contrato Evolution 2.3.6:
+Contrato Evolution 2.3.7:
 
 - Somente `GET /group/fetchAllGroups/:instanceName?getParticipants=false`, com
   header `apikey`, timeout e sem body.
@@ -409,13 +409,13 @@ Persistencia:
 Infraestrutura local da Evolution API:
 
 - Compose isolado em `infra/evolution/docker-compose.yml` com Evolution API
-  2.3.6, PostgreSQL 16.4 e Redis 7.2.5 em imagens fixadas.
+  2.3.7, PostgreSQL 16.4 e Redis 7.2.5 em imagens fixadas.
 - Rede e volumes possuem prefixo proprio; PostgreSQL e Redis nao publicam
   portas ao host. Somente a API e exposta em `127.0.0.1:8080` por padrao.
 - `infra/evolution/.env.local` e gerado com segredos aleatorios, carregado
   explicitamente pelo compose e ignorado pelo Git.
 - Healthchecks validam PostgreSQL, Redis e `GET /`, que e o status publico
-  suportado pela Evolution API 2.3.6.
+  suportado pela Evolution API 2.3.7.
 - Telemetria opcional, filas/eventos externos, webhooks, chatbots, S3 e
   persistencia de mensagens, contatos e chats ficam desativadas.
 - Os scripts `evolution:up`, `evolution:down`, `evolution:status`,
@@ -424,7 +424,7 @@ Infraestrutura local da Evolution API:
 - A stack nao cria instancia, nao gera QR Code, nao conecta WhatsApp e nao envia
   mensagens. Criacao e conexao manuais exigem uma task futura e revisao
   controlada separada.
-- A 2.3.6 incorpora a correcao da migracao Kafka publicada na 2.3.5 e nao exige
+- A 2.3.7 incorpora a correcao da migracao Kafka publicada na 2.3.5 e nao exige
   ativacao externa obrigatoria, mas sua Apache 2.0 possui
   condicoes adicionais de marca/copyright e aviso de uso; o descumprimento pode
   exigir licenca comercial.

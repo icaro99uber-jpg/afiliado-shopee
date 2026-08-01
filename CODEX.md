@@ -39,7 +39,7 @@ O estado atual nao executa scraping real nem usa OpenAI real. No modo padrao `mo
   catálogo, importação, cupons e preview sem envio em `apps/api`.
 - Evolution API: provider HTTP v2, `EvolutionSendGuard` e factory segura em
   `packages/providers`, conectados uma unica vez ao bootstrap do worker.
-- Diretorio de grupos: provider read-only 2.3.6 e fingerprints criptograficos
+- Diretorio de grupos: provider read-only 2.3.7 e fingerprints criptograficos
   em `packages/providers`, servico/repositorio/API em `apps/api` e UI na pagina
   WhatsApp do dashboard.
 - Teste Evolution isolado: CLI em
@@ -187,7 +187,7 @@ Fluxo operacional atual:
 
 Seguranca do provider Evolution:
 
-- A Evolution API 2.3.6 local recebe texto com o payload plano
+- A Evolution API 2.3.7 local recebe texto com o payload plano
   `{ "number": "<destination>", "text": "<message>" }`. O provider nao tenta
   automaticamente `textMessage` ou outro formato para evitar duplicidade.
 - `EVOLUTION_SAFE_MODE=true` e o padrao.
@@ -235,7 +235,7 @@ versionado.
 Teste E2E controlado de dispatch:
 
 1. `corepack pnpm whatsapp:e2e-test` carrega o `.env` raiz com precedencia para
-   variaveis de processo, valida Evolution 2.3.6, instancia open, banco e Redis
+   variaveis de processo, valida Evolution 2.3.7, instancia open, banco e Redis
    principais e termina em dry-run sem escrita, job, worker ou envio.
 2. O caminho real aceita somente a flag exata
    `--confirm-one-real-dispatch`, permanece bloqueado em CI e exige provider
@@ -262,7 +262,7 @@ dry-run antes de qualquer escrita. Nenhuma mensagem real foi enviada.
 
 ## Diretorio WhatsApp de grupos
 
-O contrato externo fixado para Evolution API 2.3.6 e somente leitura:
+O contrato externo fixado para Evolution API 2.3.7 e somente leitura:
 `GET /group/fetchAllGroups/:instanceName?getParticipants=false`, header
 `apikey`, sem body. A query obrigatoria impede o retorno de participantes. A
 implementacao oficial monta `id`, `subject`, `size` e outros metadados, mas
@@ -318,7 +318,7 @@ alteracao.
 ## Infraestrutura local da Evolution API
 
 `infra/evolution` contem um compose independente do compose principal. Ele fixa
-`evoapicloud/evolution-api:v2.3.6`, `postgres:16.4-alpine3.20` e
+`evoapicloud/evolution-api:v2.3.7`, `postgres:16.4-alpine3.20` e
 `redis:7.2.5-alpine3.20`, usa uma rede exclusiva, volumes persistentes com
 prefixo proprio e publica somente a API em `127.0.0.1:8080` por padrao.
 PostgreSQL e Redis ficam acessiveis apenas na rede Docker da stack.
@@ -329,7 +329,7 @@ explicitamente ignorado. `evolution:config`, `evolution:pull`, `evolution:up`,
 `evolution:down`, `evolution:status`, `evolution:logs` e `evolution:restart`
 sempre apontam para esse compose e carregam esse arquivo local.
 
-A Evolution API 2.3.6 nao oferece `/health` ou `/server/ok`; sua rota publica
+A Evolution API 2.3.7 nao oferece `/health` ou `/server/ok`; sua rota publica
 `GET /` e o status suportado e retorna HTTP 200, mensagem, versao e clientName.
 O healthcheck da API usa essa rota. A versao foi escolhida por ser a ultima
 release estavel 2.3.x, incorporar a correcao da migracao Kafka da 2.3.5 e nao

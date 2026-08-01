@@ -53,7 +53,7 @@ describe('EvolutionApiWhatsAppProvider', () => {
     });
   });
 
-  it('monta URL, headers e payload do contrato Evolution API v2.3.6', async () => {
+  it('monta URL, headers e payload do contrato Evolution API v2.3.7', async () => {
     const httpClient = vi
       .fn()
       .mockResolvedValue(response({ key: { id: 'message-123' } }));
