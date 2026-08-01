@@ -345,15 +345,75 @@ describe('CommercialPromotionCopyGenerationService', () => {
           ),
         ),
     };
+    const copyService = service(repository, provider);
     await expect(
-      service(repository, provider).generate(
-        'candidate-internal',
-        'GERAR_COPY_COM_IA',
-      ),
+      copyService.generate('candidate-internal', 'GERAR_COPY_COM_IA'),
     ).rejects.toMatchObject({ code: 'COMMERCIAL_AI_COPY_PROVIDER_FAILED' });
+    await expect(
+      copyService.generate('candidate-internal', 'GERAR_COPY_COM_IA'),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_AI_COPY_PREVIOUSLY_FAILED' });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
     expect(repository.context?.candidate.status).toBe('QUEUED');
-    expect([...repository.attempts.values()][0]?.status).toBe('FAILED');
+    expect([...repository.attempts.values()][0]).toMatchObject({
+      status: 'FAILED',
+      failureCode: 'COMMERCIAL_AI_COPY_PROVIDER_FAILED',
+      requestMayHaveStarted: false,
+    });
     expect(repository.copies.size).toBe(0);
+  });
+
+  it('registra somente diagnóstico sanitizado para falha do provider', async () => {
+    const repository = new MemoryCopyRepository();
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const provider: CommercialAiCopyProvider = {
+      generate: vi.fn().mockRejectedValue(
+        new CommercialAiCopyProviderError(
+          'FAILED_CONFIRMED',
+          'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED',
+          {
+            httpStatus: 429,
+            providerErrorCode: 'insufficient_quota',
+            providerErrorType: 'insufficient_quota',
+            providerErrorParam: 'model',
+          },
+        ),
+      ),
+    };
+    const copyService = new CommercialPromotionCopyGenerationService({
+      repository,
+      provider,
+      config: {
+        enabled: true,
+        provider: 'openai',
+        model: 'Selected-Model',
+        apiKeyConfigured: true,
+        timeoutMs: 30_000,
+        maxOutputTokens: 300,
+        maximumCopyLength: 1_000,
+      },
+      logger,
+      clock: () => now,
+    });
+
+    await expect(
+      copyService.generate('candidate-internal', 'GERAR_COPY_COM_IA'),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED' });
+
+    const fields = logger.error.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(fields).toEqual({
+      event: 'commercial-ai-copy.provider-failed',
+      candidateId: 'candidate-internal',
+      provider: 'openai',
+      model: 'selected-model',
+      publicCode: 'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED',
+      failureKind: 'FAILED_CONFIRMED',
+      httpStatus: 429,
+      providerErrorCode: 'insufficient_quota',
+      providerErrorType: 'insufficient_quota',
+      providerErrorParam: 'model',
+    });
+    expect(JSON.stringify(fields)).not.toContain('affiliate');
+    expect(JSON.stringify(fields)).not.toContain('inputFingerprint');
   });
 
   it('marca timeout/rede incerta como AMBIGUOUS e bloqueia repetição', async () => {

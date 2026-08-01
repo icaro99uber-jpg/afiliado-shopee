@@ -3,6 +3,10 @@ export const COMMERCIAL_AI_COPY_PROMPT_VERSION =
 export const COMMERCIAL_AI_COPY_VALIDATION_VERSION =
   'commercial-promotion-copy-validation-v1' as const;
 
+// The official Structured Outputs subset documents `maxItems` for arrays, but
+// does not establish support for `minLength`, `maxLength` or `uniqueItems` on
+// this model family. Keep the request schema and local validator unchanged
+// until model-specific evidence is available (SCHEMA_COMPATIBILITY_UNPROVEN).
 export const COMMERCIAL_AI_COPY_SCHEMA = {
   type: 'object',
   additionalProperties: false,

@@ -40,15 +40,209 @@ export interface CommercialAiCopyProvider {
 export type CommercialAiCopyProviderFailureKind =
   'NOT_STARTED' | 'FAILED_CONFIRMED' | 'AMBIGUOUS';
 
+const PROVIDER_METADATA_VALUE = /^[A-Za-z0-9._-]{1,100}$/u;
+const PROVIDER_METADATA_PARAM = /^[A-Za-z0-9._\-[\]]{1,100}$/u;
+
+const sanitizeProviderMetadataValue = (
+  value: unknown,
+  allowBrackets = false,
+) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 100) {
+    return undefined;
+  }
+  const pattern = allowBrackets
+    ? PROVIDER_METADATA_PARAM
+    : PROVIDER_METADATA_VALUE;
+  return pattern.test(value) ? value : undefined;
+};
+
+const sanitizeHttpStatus = (value: unknown) =>
+  Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599
+    ? Number(value)
+    : undefined;
+
+const PROVIDER_PUBLIC_CODES = new Set([
+  'COMMERCIAL_AI_COPY_PROVIDER_NOT_STARTED',
+  'COMMERCIAL_AI_COPY_PROVIDER_RESULT_AMBIGUOUS',
+  'COMMERCIAL_AI_COPY_PROVIDER_FAILED',
+  'COMMERCIAL_AI_COPY_REQUEST_INVALID',
+  'COMMERCIAL_AI_COPY_AUTHENTICATION_FAILED',
+  'COMMERCIAL_AI_COPY_ACCESS_DENIED',
+  'COMMERCIAL_AI_COPY_MODEL_UNAVAILABLE',
+  'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED',
+  'COMMERCIAL_AI_COPY_RATE_LIMITED',
+  'COMMERCIAL_AI_COPY_PROVIDER_SERVER_ERROR',
+  'COMMERCIAL_AI_COPY_PROVIDER_INCOMPLETE',
+  'COMMERCIAL_AI_COPY_PROVIDER_REFUSED',
+  'COMMERCIAL_AI_COPY_PROVIDER_OUTPUT_INVALID',
+]);
+
+const normalizeCommercialAiCopyProviderPublicCode = (value: string) =>
+  PROVIDER_PUBLIC_CODES.has(value)
+    ? value
+    : 'COMMERCIAL_AI_COPY_PROVIDER_FAILED';
+
+export type CommercialAiCopyProviderErrorMetadata = {
+  httpStatus?: number;
+  providerErrorCode?: string;
+  providerErrorType?: string;
+  providerErrorParam?: string;
+};
+
 export class CommercialAiCopyProviderError extends Error {
+  readonly publicCode: string;
+  readonly httpStatus?: number;
+  readonly providerErrorCode?: string;
+  readonly providerErrorType?: string;
+  readonly providerErrorParam?: string;
+
   constructor(
     readonly kind: CommercialAiCopyProviderFailureKind,
-    readonly publicCode: string,
+    publicCode: string,
+    metadata: CommercialAiCopyProviderErrorMetadata = {},
   ) {
-    super(publicCode);
+    const safePublicCode = normalizeCommercialAiCopyProviderPublicCode(publicCode);
+    super(safePublicCode);
     this.name = 'CommercialAiCopyProviderError';
+    this.publicCode = safePublicCode;
+    this.httpStatus = sanitizeHttpStatus(metadata.httpStatus);
+    this.providerErrorCode = sanitizeProviderMetadataValue(
+      metadata.providerErrorCode,
+    );
+    this.providerErrorType = sanitizeProviderMetadataValue(
+      metadata.providerErrorType,
+    );
+    this.providerErrorParam = sanitizeProviderMetadataValue(
+      metadata.providerErrorParam,
+      true,
+    );
   }
 }
+
+const providerErrorBody = (error: APIError) =>
+  error.error && typeof error.error === 'object'
+    ? (error.error as Record<string, unknown>)
+    : undefined;
+
+const firstSanitizedProviderMetadataValue = (
+  values: unknown[],
+  allowBrackets = false,
+) => {
+  for (const value of values) {
+    const sanitized = sanitizeProviderMetadataValue(value, allowBrackets);
+    if (sanitized) return sanitized;
+  }
+  return undefined;
+};
+
+const providerErrorMetadata = (error: APIError) => {
+  const body = providerErrorBody(error);
+  const httpStatus = sanitizeHttpStatus(error.status);
+  return {
+    httpStatus,
+    providerErrorCode: firstSanitizedProviderMetadataValue([
+      error.code,
+      body?.code,
+    ]),
+    providerErrorType: firstSanitizedProviderMetadataValue([
+      error.type,
+      body?.type,
+    ]),
+    providerErrorParam: firstSanitizedProviderMetadataValue(
+      [error.param, body?.param],
+      true,
+    ),
+  } satisfies CommercialAiCopyProviderErrorMetadata;
+};
+
+const lowerCaseProviderMarker = (value: string | undefined) =>
+  value?.toLocaleLowerCase('en-US');
+
+const isQuotaMarker = (value: string | undefined) => {
+  const marker = lowerCaseProviderMarker(value);
+  return Boolean(
+    marker &&
+      (marker === 'insufficient_quota' ||
+        marker === 'quota_exceeded' ||
+        marker === 'billing_hard_limit_reached' ||
+        marker === 'insufficient_balance' ||
+        marker === 'insufficient_funds' ||
+        marker.includes('quota') ||
+        marker.includes('saldo') ||
+        marker.includes('balance')),
+  );
+};
+
+const isModelMarker = (value: string | undefined) => {
+  const marker = lowerCaseProviderMarker(value);
+  return Boolean(
+    marker &&
+      (marker === 'model_not_found' ||
+        marker === 'model_not_found_error' ||
+        marker === 'model_unavailable'),
+  );
+};
+
+const isModelParam = (value: string | undefined) => {
+  const marker = lowerCaseProviderMarker(value);
+  return Boolean(marker && /^model(?:[._\-[\]]|$)/u.test(marker));
+};
+
+export type CommercialAiCopyProviderErrorClassification = {
+  publicCode: string;
+  metadata: CommercialAiCopyProviderErrorMetadata;
+};
+
+export const classifyOpenAiApiError = (
+  error: APIError,
+): CommercialAiCopyProviderErrorClassification => {
+  const metadata = providerErrorMetadata(error);
+  const markers = [
+    metadata.providerErrorCode,
+    metadata.providerErrorType,
+  ];
+  let publicCode = 'COMMERCIAL_AI_COPY_PROVIDER_FAILED';
+
+  if (metadata.httpStatus === 400) {
+    publicCode = 'COMMERCIAL_AI_COPY_REQUEST_INVALID';
+  } else if (metadata.httpStatus === 401) {
+    publicCode = 'COMMERCIAL_AI_COPY_AUTHENTICATION_FAILED';
+  } else if (metadata.httpStatus === 403) {
+    publicCode = 'COMMERCIAL_AI_COPY_ACCESS_DENIED';
+  } else if (
+    metadata.httpStatus === 404 &&
+    (isModelParam(metadata.providerErrorParam) || markers.some(isModelMarker))
+  ) {
+    publicCode = 'COMMERCIAL_AI_COPY_MODEL_UNAVAILABLE';
+  } else if (metadata.httpStatus === 429) {
+    publicCode = markers.some(isQuotaMarker)
+      ? 'COMMERCIAL_AI_COPY_QUOTA_EXCEEDED'
+      : 'COMMERCIAL_AI_COPY_RATE_LIMITED';
+  } else if (
+    metadata.httpStatus === 500 ||
+    metadata.httpStatus === 502 ||
+    metadata.httpStatus === 503 ||
+    metadata.httpStatus === 504
+  ) {
+    publicCode = 'COMMERCIAL_AI_COPY_PROVIDER_SERVER_ERROR';
+  } else if (
+    markers.some(
+      (marker) => lowerCaseProviderMarker(marker) === 'invalid_request_error',
+    )
+  ) {
+    publicCode = 'COMMERCIAL_AI_COPY_REQUEST_INVALID';
+  }
+
+  return { publicCode, metadata };
+};
+
+export const normalizeCommercialAiCopyModel = (
+  model: string | null | undefined,
+) => {
+  if (typeof model !== 'string') return 'unknown';
+  const normalized = model.normalize('NFKC').trim().toLocaleLowerCase('en-US');
+  return sanitizeProviderMetadataValue(normalized) ?? 'unknown';
+};
 
 type ResponseLike = {
   status?: string;
@@ -163,9 +357,11 @@ export class OpenAiCommercialAiCopyProvider implements CommercialAiCopyProvider 
         );
       }
       if (error instanceof APIError) {
+        const classification = classifyOpenAiApiError(error);
         throw new CommercialAiCopyProviderError(
           'FAILED_CONFIRMED',
-          'COMMERCIAL_AI_COPY_PROVIDER_FAILED',
+          classification.publicCode,
+          classification.metadata,
         );
       }
       throw new CommercialAiCopyProviderError(
