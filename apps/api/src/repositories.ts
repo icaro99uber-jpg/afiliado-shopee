@@ -734,6 +734,10 @@ export type CommercialCopyGenerationAttemptRecord = {
   generatedCopyId: string | null;
   failureCode: string | null;
   requestMayHaveStarted: boolean;
+  providerHttpStatus: number | null;
+  providerErrorCode: string | null;
+  providerErrorType: string | null;
+  providerErrorParam: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
@@ -742,6 +746,26 @@ export type CommercialCopyGenerationAttemptRecord = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type CommercialCopyGenerationAttemptStatusRecord = Pick<
+  CommercialCopyGenerationAttemptRecord,
+  | 'id'
+  | 'candidateId'
+  | 'provider'
+  | 'model'
+  | 'promptVersion'
+  | 'validationVersion'
+  | 'status'
+  | 'failureCode'
+  | 'requestMayHaveStarted'
+  | 'providerHttpStatus'
+  | 'providerErrorCode'
+  | 'providerErrorType'
+  | 'providerErrorParam'
+  | 'startedAt'
+  | 'completedAt'
+  | 'createdAt'
+>;
 
 export type CommercialPromotionCopyContext = {
   candidate: CommercialPromotionCandidateRecord;
@@ -812,6 +836,9 @@ export interface CommercialPromotionCopyRepository {
   findAttemptByInputFingerprint(
     inputFingerprint: string,
   ): Promise<CommercialCopyGenerationAttemptRecord | null>;
+  listAttemptsByCandidateId(
+    candidateId: string,
+  ): Promise<CommercialCopyGenerationAttemptStatusRecord[]>;
   claim(input: CommercialAiCopyClaimInput): Promise<boolean>;
   linkCachedCopy(input: {
     expected: CommercialPromotionCopyContext;
@@ -833,6 +860,10 @@ export interface CommercialPromotionCopyRepository {
     status: 'FAILED' | 'AMBIGUOUS';
     failureCode: string;
     requestMayHaveStarted: boolean;
+    providerHttpStatus?: number | null;
+    providerErrorCode?: string | null;
+    providerErrorType?: string | null;
+    providerErrorParam?: string | null;
     completedAt: Date;
   }): Promise<boolean>;
   findCopyForCandidate(candidateId: string): Promise<{

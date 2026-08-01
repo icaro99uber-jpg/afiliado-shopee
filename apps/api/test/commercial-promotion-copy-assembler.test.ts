@@ -194,4 +194,25 @@ describe('commercialAiCopyInputFingerprint', () => {
     });
     expect(changed).not.toBe(first);
   });
+
+  it('separa fingerprints de validação v1 e v2 sem alterar o histórico', () => {
+    const v1 = commercialAiCopyInputFingerprint({
+      ...input,
+      validationVersion: 'commercial-promotion-copy-validation-v1',
+      promotionSignals: [...input.promotionSignals],
+    });
+    const v2 = commercialAiCopyInputFingerprint({
+      ...input,
+      validationVersion: 'commercial-promotion-copy-validation-v2',
+      promotionSignals: [...input.promotionSignals],
+    });
+    expect(v2).not.toBe(v1);
+    expect(
+      commercialAiCopyInputFingerprint({
+        ...input,
+        validationVersion: 'commercial-promotion-copy-validation-v2',
+        promotionSignals: [...input.promotionSignals],
+      }),
+    ).toBe(v2);
+  });
 });

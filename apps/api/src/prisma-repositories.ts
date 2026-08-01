@@ -30,6 +30,7 @@ import type {
   CommercialPromotionCatalogRepository,
   CommercialPromotionCopyContext,
   CommercialPromotionCopyRepository,
+  CommercialCopyGenerationAttemptStatusRecord,
   CommercialPromotionMaterializationInput,
   CommercialPromotionSnapshotRecord,
   CommercialPipelineRunData,
@@ -1159,6 +1160,10 @@ const mapCommercialAiCopyAttempt = (record: Record<string, unknown>) => ({
   generatedCopyId: (record.generatedCopyId as string | null) ?? null,
   failureCode: (record.failureCode as string | null) ?? null,
   requestMayHaveStarted: Boolean(record.requestMayHaveStarted),
+  providerHttpStatus: (record.providerHttpStatus as number | null) ?? null,
+  providerErrorCode: (record.providerErrorCode as string | null) ?? null,
+  providerErrorType: (record.providerErrorType as string | null) ?? null,
+  providerErrorParam: (record.providerErrorParam as string | null) ?? null,
   inputTokens: (record.inputTokens as number | null) ?? null,
   outputTokens: (record.outputTokens as number | null) ?? null,
   totalTokens: (record.totalTokens as number | null) ?? null,
@@ -1166,6 +1171,27 @@ const mapCommercialAiCopyAttempt = (record: Record<string, unknown>) => ({
   completedAt: (record.completedAt as Date | null) ?? null,
   createdAt: record.createdAt as Date,
   updatedAt: record.updatedAt as Date,
+});
+
+const mapCommercialAiCopyAttemptStatus = (
+  record: Record<string, unknown>,
+): CommercialCopyGenerationAttemptStatusRecord => ({
+  id: String(record.id),
+  candidateId: String(record.candidateId),
+  provider: String(record.provider),
+  model: String(record.model),
+  promptVersion: String(record.promptVersion),
+  validationVersion: String(record.validationVersion),
+  status: record.status as CommercialCopyGenerationAttemptStatusRecord['status'],
+  failureCode: (record.failureCode as string | null) ?? null,
+  requestMayHaveStarted: Boolean(record.requestMayHaveStarted),
+  providerHttpStatus: (record.providerHttpStatus as number | null) ?? null,
+  providerErrorCode: (record.providerErrorCode as string | null) ?? null,
+  providerErrorType: (record.providerErrorType as string | null) ?? null,
+  providerErrorParam: (record.providerErrorParam as string | null) ?? null,
+  startedAt: record.startedAt as Date,
+  completedAt: (record.completedAt as Date | null) ?? null,
+  createdAt: record.createdAt as Date,
 });
 
 const commercialPromotionCopyContextFromRecord = (
@@ -1816,6 +1842,36 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
       : null;
   }
 
+  async listAttemptsByCandidateId(candidateId: string) {
+    const records = await this.prisma.commercialCopyGenerationAttempt.findMany({
+      where: { candidateId },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        candidateId: true,
+        provider: true,
+        model: true,
+        promptVersion: true,
+        validationVersion: true,
+        status: true,
+        failureCode: true,
+        requestMayHaveStarted: true,
+        providerHttpStatus: true,
+        providerErrorCode: true,
+        providerErrorType: true,
+        providerErrorParam: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+      },
+    });
+    return records.map((record) =>
+      mapCommercialAiCopyAttemptStatus(
+        record as unknown as Record<string, unknown>,
+      ),
+    );
+  }
+
   async claim(
     input: Parameters<CommercialPromotionCopyRepository['claim']>[0],
   ) {
@@ -2057,6 +2113,10 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
                 data: {
                   status: 'FAILED',
                   failureCode: terminalFailure,
+                  providerHttpStatus: null,
+                  providerErrorCode: null,
+                  providerErrorType: null,
+                  providerErrorParam: null,
                   completedAt: input.completedAt,
                 },
               });
@@ -2073,6 +2133,10 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
               data: {
                 status: 'FAILED',
                 failureCode: 'COMMERCIAL_AI_COPY_CACHE_INCONSISTENT',
+                providerHttpStatus: null,
+                providerErrorCode: null,
+                providerErrorType: null,
+                providerErrorParam: null,
                 completedAt: input.completedAt,
               },
             });
@@ -2137,6 +2201,10 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
     status: 'FAILED' | 'AMBIGUOUS';
     failureCode: string;
     requestMayHaveStarted: boolean;
+    providerHttpStatus?: number | null;
+    providerErrorCode?: string | null;
+    providerErrorType?: string | null;
+    providerErrorParam?: string | null;
     completedAt: Date;
   }) {
     const result = await this.prisma.commercialCopyGenerationAttempt.updateMany(
@@ -2146,6 +2214,10 @@ export class PrismaCommercialPromotionCopyRepository implements CommercialPromot
           status: input.status,
           failureCode: input.failureCode,
           requestMayHaveStarted: input.requestMayHaveStarted,
+          providerHttpStatus: input.providerHttpStatus ?? null,
+          providerErrorCode: input.providerErrorCode ?? null,
+          providerErrorType: input.providerErrorType ?? null,
+          providerErrorParam: input.providerErrorParam ?? null,
           completedAt: input.completedAt,
         },
       },

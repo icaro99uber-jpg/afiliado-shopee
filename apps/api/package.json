@@ -23,7 +23,8 @@
     "commercial:campaign:mine": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-mining-cli.ts mine",
     "commercial:copy:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts preflight",
     "commercial:copy:preview": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts preview",
-    "commercial:copy:generate": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts generate"
+    "commercial:copy:generate": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-promotion-copy-cli.ts generate",
+    "commercial:copy:attempt:status": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-copy-attempt-status-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

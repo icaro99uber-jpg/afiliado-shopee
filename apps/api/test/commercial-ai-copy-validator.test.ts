@@ -31,8 +31,12 @@ describe('CommercialAiCopyValidator', () => {
   it.each([
     [{ ...valid, extra: true }, 'AI_OUTPUT_EXTRA_PROPERTY'],
     [{ ...valid, headline: '' }, 'AI_HEADLINE_LENGTH'],
+    [{ ...valid, headline: 'x'.repeat(91) }, 'AI_HEADLINE_LENGTH'],
     [{ ...valid, body: '' }, 'AI_BODY_LENGTH'],
+    [{ ...valid, body: 'x'.repeat(261) }, 'AI_BODY_LENGTH'],
     [{ ...valid, cta: '' }, 'AI_CTA_LENGTH'],
+    [{ ...valid, cta: 'x'.repeat(71) }, 'AI_CTA_LENGTH'],
+    [{ ...valid, hashtags: ['#a', '#b', '#c', '#d'] }, 'AI_HASHTAGS_INVALID'],
     [
       { ...valid, body: 'Veja https://example.invalid agora' },
       'AI_URL_OR_CONTACT_FORBIDDEN',
