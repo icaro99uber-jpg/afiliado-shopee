@@ -35,6 +35,11 @@ const positiveIntegerFromEnv = z.preprocess(
   z.number().int().positive(),
 );
 
+const nonNegativeIntegerFromEnv = z.preprocess(
+  (value) => (typeof value === 'string' ? Number(value) : value),
+  z.number().int().nonnegative(),
+);
+
 const timeOfDayFromEnv = z
   .string()
   .trim()
@@ -190,6 +195,19 @@ export const envSchema = z
     SHOPEE_AFFILIATE_API_URL: optionalUrlFromEnv,
     SHOPEE_AFFILIATE_SUB_ID_PREFIX: z.string().trim().default('whatsapp'),
     SHOPEE_AFFILIATE_SYNC_LIMIT: positiveIntegerFromEnv.default(20),
+    SHOPEE_OFFICIAL_CATALOG_SYNC_ENABLED: booleanFromEnv.default(false),
+    SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: positiveIntegerFromEnv
+      .pipe(z.number().min(1).max(50))
+      .default(20),
+    SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: positiveIntegerFromEnv
+      .pipe(z.number().min(1).max(20))
+      .default(3),
+    SHOPEE_OFFICIAL_CATALOG_MAX_PRODUCTS: positiveIntegerFromEnv
+      .pipe(z.number().min(1).max(500))
+      .default(500),
+    SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: nonNegativeIntegerFromEnv
+      .pipe(z.number().min(0).max(60000))
+      .default(1000),
     COMMERCIAL_COPY_MAX_LENGTH: positiveIntegerFromEnv.default(1000),
     COMMERCIAL_AUTOMATION_ENABLED: booleanFromEnv.default(
       COMMERCIAL_AUTOMATION_DEFAULTS.enabled,
@@ -251,6 +269,13 @@ export const envSchema = z
     SCHEDULER_TIMEZONE: z.string().trim().optional(),
   })
   .superRefine((env, context) => {
+    if (env.SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE * env.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES > 500) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SHOPEE_OFFICIAL_CATALOG_MAX_PAGES'],
+        message: 'SHOPEE_OFFICIAL_CATALOG_TOTAL_LIMIT_INVALID',
+      });
+    }
     if (env.COMMERCIAL_AI_COPY_ENABLED) {
       if (!env.OPENAI_API_KEY?.trim()) {
         context.addIssue({
@@ -367,6 +392,18 @@ export const envSchema = z
           });
         }
       }
+    }
+
+    if (
+      env.SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE *
+        env.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES >
+      500
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SHOPEE_OFFICIAL_CATALOG_MAX_PAGES'],
+        message: 'SHOPEE_OFFICIAL_CATALOG_TOTAL_LIMIT_INVALID',
+      });
     }
 
     if (env.WHATSAPP_PROVIDER === 'evolution') {

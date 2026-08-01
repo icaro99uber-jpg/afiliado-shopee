@@ -16,6 +16,8 @@
     "shopee:official:configure": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-configure.ts",
     "shopee:official:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-preflight.ts",
     "shopee:official:sync": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-sync.ts",
+    "shopee:official:catalog:preflight": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-catalog-preflight.ts",
+    "shopee:official:catalog:sync": "tsx --tsconfig ../../tsconfig.runtime.json src/shopee-official-catalog-cli.ts",
     "commercial:dry-run": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-pipeline-cli.ts",
     "commercial:official:diagnose": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-official-diagnosis.ts",
     "commercial:snapshots:backfill": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-offer-snapshot-backfill.ts",
@@ -35,9 +37,11 @@
     "@shopee-auto-affiliate-ai/shared": "workspace:*",
     "decimal.js": "10.6.0",
     "fastify": "^5.0.0",
-    "openai": "^7.3.0"
+    "openai": "^7.3.0",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.20.3",
     "playwright-core": "1.51.1",
     "tsx": "^4.16.0",
     "vitest": "^2.0.0"

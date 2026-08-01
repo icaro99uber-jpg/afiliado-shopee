@@ -409,3 +409,72 @@ describe('envSchema Scheduler', () => {
     expect(config.SCHEDULER_TIMEZONE).toBe('America/Sao_Paulo');
   });
 });
+
+describe('envSchema SHOPEE_OFFICIAL_CATALOG_ limits', () => {
+  it('aplica defaults operacionais de forma segura', () => {
+    const config = envSchema.parse(baseEnv);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_SYNC_ENABLED).toBe(false);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE).toBe(20);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES).toBe(3);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS).toBe(1000);
+  });
+
+  it('aceita configuracoes nos limites', () => {
+    const config = envSchema.parse({
+      ...baseEnv,
+      SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '1',
+      SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '1',
+      SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: '0',
+    });
+    expect(config.SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE).toBe(1);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES).toBe(1);
+    expect(config.SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS).toBe(0);
+
+    const config2 = envSchema.parse({
+      ...baseEnv,
+      SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '50',
+      SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '10',
+      SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: '60000',
+    });
+    expect(config2.SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE).toBe(50);
+    expect(config2.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES).toBe(10);
+    expect(config2.SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS).toBe(60000);
+  });
+
+  it('rejeita zero invalido para page size e max pages', () => {
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '0' })).toThrow();
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '0' })).toThrow();
+  });
+
+  it('rejeita fora do limite maximo individual', () => {
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '51' })).toThrow();
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '21' })).toThrow();
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: '60001' })).toThrow();
+  });
+
+  it('rejeita valor negativo e decimal', () => {
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: '-1' })).toThrow();
+    expect(() => envSchema.parse({ ...baseEnv, SHOPEE_OFFICIAL_CATALOG_MIN_INTERVAL_MS: '1.5' })).toThrow();
+  });
+
+  it('aceita produto total = 500', () => {
+    const config = envSchema.parse({
+      ...baseEnv,
+      SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '50',
+      SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '10',
+    });
+    expect(config.SHOPEE_OFFICIAL_CATALOG_MAX_PAGES).toBe(10);
+  });
+
+  it('rejeita produto total > 500', () => {
+    const result = envSchema.safeParse({
+      ...baseEnv,
+      SHOPEE_OFFICIAL_CATALOG_PAGE_SIZE: '50',
+      SHOPEE_OFFICIAL_CATALOG_MAX_PAGES: '11',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('SHOPEE_OFFICIAL_CATALOG_TOTAL_LIMIT_INVALID');
+    }
+  });
+});

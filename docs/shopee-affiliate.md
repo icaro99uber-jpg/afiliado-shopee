@@ -500,3 +500,17 @@ nenhum deles recebe retry automático para o mesmo input.
 Preflight e preview são read-only. A geração não consulta a Shopee, não altera
 signer, query, matcher ou score, e não cria pipeline run, automation execution,
 dispatch, outbox, job ou mensagem.
+
+
+## Sync Operacional Paginado
+
+O sync histórico e limitado a uma request, ate cinco produtos e tem finalidade diagnostica.
+
+O sync operacional e desabilitado por padrao (`SHOPEE_OFFICIAL_CATALOG_SYNC_ENABLED=false`). A execucao exige o bloqueio de CI, execucao em banco local, preflight dinamico e confirmacao explicita:
+
+```powershell
+corepack pnpm shopee:official:catalog:preflight
+corepack pnpm shopee:official:catalog:sync -- --confirm-local-official-catalog-sync
+```
+
+As configuracoes padrao de paginacao sao 20 itens por pagina e 3 paginas (20 × 3), e overrides na linha de comando nao superam a configuracao ou o maximo agregado configurado. O processamento realiza requests sequenciais com zero retry e e protegido por um lock PostgreSQL de sessao em conexao dedicada. Retornos PARTIAL e FAILED geram codigo de saida diferente de zero (exit code 1).
