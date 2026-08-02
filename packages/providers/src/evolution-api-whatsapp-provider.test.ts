@@ -6,6 +6,7 @@ import {
   type HttpClient,
   type ProviderLogger,
 } from './evolution-api-whatsapp-provider';
+import { EvolutionGroupSendGuard } from './evolution-group-send-guard';
 import { MockWhatsAppProvider } from './index';
 import { createWhatsAppProvider } from './whatsapp-provider-factory';
 
@@ -90,6 +91,158 @@ describe('EvolutionApiWhatsAppProvider', () => {
       text: 'Oferta do dia',
     });
     expect(payload).not.toHaveProperty('textMessage');
+  });
+
+  it.each([undefined, null])(
+    'envia texto quando imageUrl e %s (sendText)',
+    async (imageUrl) => {
+      const httpClient = vi
+        .fn()
+        .mockResolvedValue(response({ key: { id: 'message-123' } }));
+      const provider = createProvider(httpClient);
+
+      await provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta do dia',
+        imageUrl,
+      });
+
+      expect(httpClient).toHaveBeenCalledTimes(1);
+      expect(httpClient).toHaveBeenCalledWith(
+        'http://localhost:8080/message/sendText/affiliate%20bot',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            number: '5511999999999',
+            text: 'Oferta do dia',
+          }),
+        }),
+      );
+    },
+  );
+
+  it('monta URL, headers e payload para envio de imagem HTTPS (sendMedia)', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValue(response({ key: { id: 'message-img-123' } }));
+    const provider = createProvider(httpClient);
+
+    await provider.sendMessage({
+      destination: '5511999999999',
+      message: 'Legenda da oferta',
+      imageUrl: 'https://example.com/image.jpg',
+    });
+
+    expect(httpClient).toHaveBeenCalledTimes(1);
+    expect(httpClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: API_KEY,
+        },
+        body: JSON.stringify({
+          number: '5511999999999',
+          mediatype: 'image',
+          media: 'https://example.com/image.jpg',
+          caption: 'Legenda da oferta',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('aceita URL com protocolo HTTP valido', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValue(response({ key: { id: 'message-img-http' } }));
+    const provider = createProvider(httpClient);
+
+    await provider.sendMessage({
+      destination: '5511999999999',
+      message: 'Legenda HTTP',
+      imageUrl: 'http://example.com/image.jpg',
+    });
+
+    expect(httpClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.objectContaining({
+        body: JSON.stringify({
+          number: '5511999999999',
+          mediatype: 'image',
+          media: 'http://example.com/image.jpg',
+          caption: 'Legenda HTTP',
+        }),
+      }),
+    );
+  });
+
+  it('normaliza URL com protocolo em caixa alta', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValue(response({ key: { id: 'message-img-upper' } }));
+    const provider = createProvider(httpClient);
+
+    await provider.sendMessage({
+      destination: '5511999999999',
+      message: 'Legenda Upper',
+      imageUrl: 'HTTPS://EXAMPLE.COM/IMAGE.JPG',
+    });
+
+    expect(httpClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.objectContaining({
+        body: JSON.stringify({
+          number: '5511999999999',
+          mediatype: 'image',
+          media: 'HTTPS://EXAMPLE.COM/IMAGE.JPG',
+          caption: 'Legenda Upper',
+        }),
+      }),
+    );
+  });
+
+  it.each(['', '   '])('rejeita imageUrl vazia ou com espacos (%j)', async (emptyValue) => {
+    const httpClient = vi.fn();
+    const provider = createProvider(httpClient);
+
+    await expect(
+      provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta',
+        imageUrl: emptyValue,
+      }),
+    ).rejects.toMatchObject({
+      code: 'WHATSAPP_IMAGE_URL_INVALID',
+      deliveryMayHaveStarted: false,
+    });
+
+    expect(httpClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'not-a-url',
+    'ftp://example.com/image.jpg',
+    'javascript:alert(1)',
+    'file:///tmp/image.jpg',
+    'data:image/png;base64,abc',
+  ])('rejeita imagem com URL/esquema invalido (%s) e nao chama httpClient', async (invalidUrl) => {
+    const httpClient = vi.fn();
+    const provider = createProvider(httpClient);
+
+    await expect(
+      provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta',
+        imageUrl: invalidUrl,
+      }),
+    ).rejects.toMatchObject({
+      code: 'WHATSAPP_IMAGE_URL_INVALID',
+      deliveryMayHaveStarted: false,
+    });
+
+    expect(httpClient).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -226,6 +379,183 @@ describe('EvolutionApiWhatsAppProvider', () => {
     await expect(
       provider.sendMessage({ destination: '5511999999999', message: 'Oferta' }),
     ).rejects.toMatchObject({ code: 'EVOLUTION_MESSAGE_ID_MISSING' });
+  });
+
+  it('executa groupSendGuard antes do httpClient para envio de imagem em grupo', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValue(response({ key: { id: 'msg-group-img' } }));
+    const groupSendGuard = new EvolutionGroupSendGuard({
+      enabled: true,
+      safeMode: true,
+      maxMessagesPerRun: 10,
+    });
+    vi.spyOn(groupSendGuard, 'authorizeRequest');
+    const provider = createProvider(httpClient, { groupSendGuard });
+
+    const groupJid = '120363000000000000@g.us';
+    await provider.sendMessage({
+      destination: groupJid,
+      destinationType: 'GROUP',
+      message: 'Legenda grupo',
+      imageUrl: 'https://example.com/group-image.jpg',
+    });
+
+    expect(groupSendGuard.authorizeRequest).toHaveBeenCalledWith(groupJid);
+    expect(httpClient).toHaveBeenCalledTimes(1);
+    expect(httpClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.objectContaining({
+        body: JSON.stringify({
+          number: groupJid,
+          mediatype: 'image',
+          media: 'https://example.com/group-image.jpg',
+          caption: 'Legenda grupo',
+        }),
+      }),
+    );
+  });
+
+  it('impede request HTTP se groupSendGuard bloquear envio de imagem em grupo', async () => {
+    const httpClient = vi.fn();
+    const groupSendGuard = new EvolutionGroupSendGuard({
+      enabled: false,
+      safeMode: true,
+      maxMessagesPerRun: 10,
+    });
+    vi.spyOn(groupSendGuard, 'authorizeRequest');
+    const provider = createProvider(httpClient, { groupSendGuard });
+
+    const groupJid = '120363000000000000@g.us';
+    await expect(
+      provider.sendMessage({
+        destination: groupJid,
+        destinationType: 'GROUP',
+        message: 'Legenda grupo',
+        imageUrl: 'https://example.com/group-image.jpg',
+      }),
+    ).rejects.toMatchObject({
+      code: 'WHATSAPP_GROUP_SEND_DISABLED',
+      deliveryMayHaveStarted: false,
+    });
+
+    expect(groupSendGuard.authorizeRequest).toHaveBeenCalledWith(groupJid);
+    expect(httpClient).not.toHaveBeenCalled();
+  });
+
+  it('mapeia timeout em sendMedia sem realizar retry nem chamar sendText', async () => {
+    const httpClient: HttpClient = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    const spyClient = vi.fn(httpClient);
+    const provider = createProvider(spyClient, { timeoutMs: 5 });
+
+    await expect(
+      provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta com imagem',
+        imageUrl: 'https://example.com/image.jpg',
+      }),
+    ).rejects.toMatchObject({
+      code: 'EVOLUTION_TIMEOUT',
+      deliveryMayHaveStarted: true,
+    });
+
+    expect(spyClient).toHaveBeenCalledTimes(1);
+    expect(spyClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    [400, 'EVOLUTION_BAD_REQUEST'],
+    [401, 'EVOLUTION_UNAUTHORIZED'],
+    [429, 'EVOLUTION_RATE_LIMITED'],
+    [500, 'EVOLUTION_SERVER_ERROR'],
+  ])('mapeia HTTP %i para %s em sendMedia sem fallback para sendText', async (status, code) => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValue(response({ error: 'sendMedia error' }, status));
+    const provider = createProvider(httpClient);
+
+    await expect(
+      provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta com imagem',
+        imageUrl: 'https://example.com/image.jpg',
+      }),
+    ).rejects.toMatchObject({
+      code,
+      deliveryMayHaveStarted: true,
+    });
+
+    expect(httpClient).toHaveBeenCalledTimes(1);
+    expect(httpClient).toHaveBeenCalledWith(
+      'http://localhost:8080/message/sendMedia/affiliate%20bot',
+      expect.anything(),
+    );
+  });
+
+  it('rejeita resposta sem identificador de mensagem em sendMedia', async () => {
+    const httpClient = vi.fn().mockResolvedValue(response({}));
+    const provider = createProvider(httpClient);
+
+    await expect(
+      provider.sendMessage({
+        destination: '5511999999999',
+        message: 'Oferta com imagem',
+        imageUrl: 'https://example.com/image.jpg',
+      }),
+    ).rejects.toMatchObject({
+      code: 'EVOLUTION_MESSAGE_ID_MISSING',
+      deliveryMayHaveStarted: true,
+    });
+
+    expect(httpClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('sanitiza logs de imagem sem expor caption, imageUrl, API key ou destino real', async () => {
+    const logger = createLogger();
+    const groupJid = '120363000000000000@g.us';
+    const imageUrl = 'https://secret.com/sensitive-image.jpg';
+    const caption = 'Super Segredo de Oferta';
+    const groupSendGuard = new EvolutionGroupSendGuard({
+      enabled: true,
+      safeMode: true,
+      maxMessagesPerRun: 10,
+    });
+
+    const provider = createProvider(
+      vi.fn().mockResolvedValue(response({ key: { id: 'msg-img-sent' } })),
+      { logger, groupSendGuard },
+    );
+
+    await provider.sendMessage({
+      destination: groupJid,
+      destinationType: 'GROUP',
+      message: caption,
+      imageUrl,
+    });
+
+    const infoCallsStr = JSON.stringify(vi.mocked(logger.info).mock.calls);
+    expect(infoCallsStr).not.toContain(caption);
+    expect(infoCallsStr).not.toContain(imageUrl);
+    expect(infoCallsStr).not.toContain(API_KEY);
+    expect(infoCallsStr).not.toContain(groupJid);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'evolution.message.sent',
+        instanceName: 'affiliate bot',
+        deliveryMode: 'IMAGE',
+        destinationType: 'GROUP',
+      }),
+      'Evolution API message sent',
+    );
   });
 
   it('nao inclui a API key em erros ou logs', async () => {
