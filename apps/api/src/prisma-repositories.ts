@@ -1775,6 +1775,19 @@ export class PrismaCommercialPromotionRepository
       total,
     };
   }
+
+  async findCandidateForDraft(id: string) {
+    const candidate = await this.prisma.commercialPromotionCandidate.findUnique({
+      where: { id },
+      include: {
+        product: true,
+        generatedCopy: true,
+        snapshot: true,
+      },
+    });
+    if (!candidate) return null;
+    return candidate as unknown as import('./commercial-message-draft-service').CommercialMessageDraftCandidate;
+  }
 }
 
 type CommercialCopyPrismaClient = Pick<

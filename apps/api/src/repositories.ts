@@ -716,6 +716,7 @@ export interface CommercialPromotionCandidateRepository {
     limit: number;
     status?: CommercialPromotionCandidateStatus;
   }): Promise<{ items: CommercialPromotionQueueItem[]; total: number }>;
+  findCandidateForDraft(id: string): Promise<import('./commercial-message-draft-service').CommercialMessageDraftCandidate | null>;
 }
 
 export type CommercialCopyGenerationAttemptStatus =
@@ -1026,7 +1027,7 @@ export type WhatsAppDispatchRecord = WhatsAppDispatchCreateData & {
 export type WhatsAppDispatchDetails = WhatsAppDispatchRecord & {
   generatedCopy: Pick<
     GeneratedCopyRecord,
-    'titulo' | 'mensagem' | 'cta' | 'hashtags'
+    'titulo' | 'mensagem' | 'cta' | 'hashtags' | 'createdFromCandidateId'
   >;
   destination: Pick<
     WhatsAppDestinationRecord,

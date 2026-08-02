@@ -11,11 +11,16 @@ import type {
 } from './repositories';
 import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
 
+import type { CommercialMessageDraftService } from './commercial-message-draft-service';
+import type { CommercialPromotionCandidateRepository } from './repositories';
+
 export type SenderServiceOptions = {
   dispatches: WhatsAppDispatchRepository;
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
   messageBuilder?: (copy: DispatchWithRelations['generatedCopy']) => string;
+  draftService?: CommercialMessageDraftService;
+  candidateRepository?: Pick<CommercialPromotionCandidateRepository, 'findCandidateForDraft'>;
   groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
@@ -29,6 +34,7 @@ type DispatchWithRelations = {
     mensagem: string;
     cta: string;
     hashtags: string;
+    createdFromCandidateId?: string | null;
   };
   destination: {
     destination: string;
@@ -87,9 +93,41 @@ export class SenderService {
       );
     }
 
-    const message = this.options.messageBuilder
-      ? this.options.messageBuilder(dispatch.generatedCopy)
-      : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+    let message: string;
+    let imageUrl: string | undefined;
+    let deliveryMode: 'TEXT' | 'IMAGE' = 'TEXT';
+
+    const candidateId = dispatch.generatedCopy.createdFromCandidateId;
+
+    if (candidateId && this.options.draftService && this.options.candidateRepository) {
+      const candidate = await this.options.candidateRepository.findCandidateForDraft(candidateId);
+      if (candidate) {
+        try {
+          const draft = this.options.draftService.createDraft(candidate);
+          message = draft.caption;
+          if (draft.deliveryMode === 'IMAGE' && draft.imageUrl) {
+            imageUrl = draft.imageUrl;
+            deliveryMode = 'IMAGE';
+          }
+        } catch (error) {
+          this.options.logger.error(
+            { event: 'whatsapp.dispatch.draft_failed', dispatchId, errorType: error instanceof Error ? error.name : 'UnknownError' },
+            'Failed to create commercial draft',
+          );
+          message = this.options.messageBuilder
+            ? this.options.messageBuilder(dispatch.generatedCopy)
+            : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+        }
+      } else {
+        message = this.options.messageBuilder
+          ? this.options.messageBuilder(dispatch.generatedCopy)
+          : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+      }
+    } else {
+      message = this.options.messageBuilder
+        ? this.options.messageBuilder(dispatch.generatedCopy)
+        : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+    }
 
     if (dispatch.destination.type === 'GROUP') {
       if (!this.options.groupSendPolicy) {
@@ -119,6 +157,7 @@ export class SenderService {
       const result = await this.options.provider.sendMessage({
         destination: dispatch.destination.destination,
         message,
+        ...(imageUrl && deliveryMode === 'IMAGE' ? { imageUrl } : {}),
         ...(dispatch.destination.type === 'GROUP'
           ? { destinationType: 'GROUP' as const }
           : {}),

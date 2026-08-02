@@ -37,11 +37,13 @@ const prismaMock = (dispatchData = dispatch) => ({
 const createService = (
   prisma = prismaMock(),
   provider: WhatsAppProvider = new MockWhatsAppProvider(),
+  options?: { draftService?: any; candidateRepository?: any; }
 ) =>
   new SenderService({
     dispatches: new PrismaWhatsAppDispatchRepository(prisma as never),
     provider,
     logger,
+    ...(options || {}),
   });
 
 describe('SenderService', () => {
@@ -225,5 +227,107 @@ describe('SenderService', () => {
     expect(provider.sentMessages).toHaveLength(0);
     expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
     expect(prisma.whatsAppDispatch.update).not.toHaveBeenCalled();
+  });
+
+  describe('Integração com CommercialMessageDraftService', () => {
+    const commercialDispatch = {
+      ...dispatch,
+      generatedCopy: {
+        ...dispatch.generatedCopy,
+        createdFromCandidateId: 'candidate-123',
+      },
+    };
+
+    it('usa draft com imagem se candidato válido e draft image for gerado', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const mockCandidate = { id: 'candidate-123' };
+      const candidateRepository = {
+        findCandidateForDraft: vi.fn(async () => mockCandidate),
+      };
+      const draftService = {
+        createDraft: vi.fn(() => ({
+          caption: 'Draft caption',
+          imageUrl: 'https://shopee.com/image.jpg',
+          deliveryMode: 'IMAGE',
+        })),
+      };
+
+      await createService(prisma, provider, { draftService, candidateRepository }).sendDispatch('dispatch-1');
+
+      expect(candidateRepository.findCandidateForDraft).toHaveBeenCalledWith('candidate-123');
+      expect(draftService.createDraft).toHaveBeenCalledWith(mockCandidate);
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: 'Draft caption',
+        imageUrl: 'https://shopee.com/image.jpg',
+      });
+    });
+
+    it('usa fallback se candidato não for encontrado', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const candidateRepository = {
+        findCandidateForDraft: vi.fn(async () => null),
+      };
+      const draftService = {
+        createDraft: vi.fn(),
+      };
+
+      await createService(prisma, provider, { draftService, candidateRepository }).sendDispatch('dispatch-1');
+
+      expect(candidateRepository.findCandidateForDraft).toHaveBeenCalledWith('candidate-123');
+      expect(draftService.createDraft).not.toHaveBeenCalled();
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: expect.stringContaining('Título'),
+      });
+      expect(provider.sentMessages[0]).not.toHaveProperty('imageUrl');
+    });
+
+    it('usa fallback e loga erro se draftService lançar exceção', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const mockCandidate = { id: 'candidate-123' };
+      const candidateRepository = {
+        findCandidateForDraft: vi.fn(async () => mockCandidate),
+      };
+      const draftService = {
+        createDraft: vi.fn(() => {
+          throw new Error('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+        }),
+      };
+
+      await createService(prisma, provider, { draftService, candidateRepository }).sendDispatch('dispatch-1');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'whatsapp.dispatch.draft_failed' }),
+        'Failed to create commercial draft'
+      );
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: expect.stringContaining('Título'),
+      });
+    });
+
+    it('não usa imageUrl se draft disser deliveryMode=TEXT', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const mockCandidate = { id: 'candidate-123' };
+      const candidateRepository = {
+        findCandidateForDraft: vi.fn(async () => mockCandidate),
+      };
+      const draftService = {
+        createDraft: vi.fn(() => ({
+          caption: 'Draft caption text',
+          imageUrl: 'https://shopee.com/image.jpg', // ignorado porque modo é TEXT
+          deliveryMode: 'TEXT',
+        })),
+      };
+
+      await createService(prisma, provider, { draftService, candidateRepository }).sendDispatch('dispatch-1');
+
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: 'Draft caption text',
+      });
+      expect(provider.sentMessages[0]).not.toHaveProperty('imageUrl');
+    });
   });
 });
