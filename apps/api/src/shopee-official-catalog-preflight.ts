@@ -24,7 +24,7 @@ export const executeShopeeOfficialCatalogPreflight = async (deps?: {
     throw new AppError('Execucao bloqueada em ambiente CI', 'SHOPEE_OFFICIAL_CATALOG_CI_BLOCKED');
   }
 
-  const dbUrl = deps?.environment?.databaseUrl ?? process.env.DATABASE_URL;
+  const dbUrl = deps?.environment?.databaseUrl ?? config.DATABASE_URL;
   if (!dbUrl) {
     throw new AppError('Banco de dados nao configurado', 'SHOPEE_OFFICIAL_CATALOG_LOCAL_DATABASE_REQUIRED');
   }
