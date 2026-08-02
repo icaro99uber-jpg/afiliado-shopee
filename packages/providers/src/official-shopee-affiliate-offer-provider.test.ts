@@ -508,4 +508,63 @@ describe('OfficialShopeeAffiliateOfferProvider', () => {
       'scrollId: $scrollId',
     );
   });
+  it('aplica limit=10 com maximumOffersPerPage=20', async () => {
+    const { transport } = createProvider(
+      Array.from({ length: 30 }, (_, index) =>
+        officialNode({ itemId: String(1234567890123 + index) }),
+      ),
+      { hasNextPage: false, scrollId: '', limit: 5 }
+    );
+    const providerWith20 = new OfficialShopeeAffiliateOfferProvider({
+      apiEnabled: true,
+      apiUrl: SHOPEE_AFFILIATE_OFFICIAL_API_URL,
+      appId: 'test-app-id',
+      secret: 'test-secret',
+      maximumOffersPerPage: 20,
+      transport,
+    });
+    const page = await providerWith20.listProductOffers({ limit: 10, page: 1 });
+    expect(page.items).toHaveLength(10);
+    expect(page.limit).toBeLessThanOrEqual(10);
+    expect(page.fetchedCount).toBe(10);
+    expect(transport.execute).toHaveBeenCalledOnce();
+    expect(transport.execute.mock.calls[0][0].variables.limit).toBe(10);
+  });
+
+  it('rejeita limit acima de 50', async () => {
+    const providerWith51 = new OfficialShopeeAffiliateOfferProvider({
+      apiEnabled: true,
+      apiUrl: SHOPEE_AFFILIATE_OFFICIAL_API_URL,
+      appId: 'test-app-id',
+      secret: 'test-secret',
+      maximumOffersPerPage: 51,
+      transport: { execute: vi.fn() },
+    });
+    await expect(providerWith51.listProductOffers()).rejects.toMatchObject({
+      code: 'SHOPEE_API_INVALID_LIMIT',
+    });
+  });
+
+  it('rejeita limite decimal invalido', async () => {
+    const providerDecimal = new OfficialShopeeAffiliateOfferProvider({
+      apiEnabled: true,
+      apiUrl: SHOPEE_AFFILIATE_OFFICIAL_API_URL,
+      appId: 'test-app-id',
+      secret: 'test-secret',
+      maximumOffersPerPage: 20.5,
+      transport: { execute: vi.fn() },
+    });
+    await expect(providerDecimal.listProductOffers()).rejects.toMatchObject({
+      code: 'SHOPEE_API_INVALID_LIMIT',
+    });
+  });
+
+  it('inclui productCatId e rejeita filtros nao suportados', async () => {
+    const { provider, transport } = createProvider([officialNode()]);
+    await provider.listProductOffers({ categoryId: '100' });
+    expect(transport.execute.mock.calls[0][0].variables.productCatId).toBe(100);
+    expect(transport.execute.mock.calls[0][0].query).not.toContain('listType');
+    expect(transport.execute.mock.calls[0][0].query).not.toContain('minPrice');
+    expect(transport.execute.mock.calls[0][0].query).not.toContain('minRating');
+  });
 });

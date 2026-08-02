@@ -299,6 +299,7 @@ export class ShopeeAffiliateGraphqlTransport implements OfficialShopeeAffiliateT
 }
 
 export type OfficialShopeeAffiliateOfferProviderOptions = {
+  maximumOffersPerPage?: number;
   apiEnabled?: boolean;
   apiUrl?: string;
   appId?: string;
@@ -701,26 +702,49 @@ export class OfficialShopeeAffiliateOfferProvider implements ShopeeAffiliateOffe
         'SHOPEE_API_NOT_CONFIGURED',
       );
     }
+
+    const maximumOffersPerPage =
+      this.options.maximumOffersPerPage ?? SHOPEE_AFFILIATE_REAL_READ_LIMIT;
+
+    if (
+      !Number.isSafeInteger(maximumOffersPerPage) ||
+      maximumOffersPerPage < 1 ||
+      maximumOffersPerPage > 50
+    ) {
+      throw new AppError(
+        'Limite de ofertas invalido',
+        'SHOPEE_API_INVALID_LIMIT',
+      );
+    }
+    const requestedLimit = input.limit ?? maximumOffersPerPage;
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      throw new AppError(
+        'Limite solicitado invalido',
+        'SHOPEE_API_INVALID_LIMIT',
+      );
+    }
+
+    const limit = Math.min(requestedLimit, maximumOffersPerPage);
+
     validateUnsupportedFilters(input);
-    const limit = Math.min(
-      Math.max(input.limit ?? SHOPEE_AFFILIATE_REAL_READ_LIMIT, 1),
-      SHOPEE_AFFILIATE_REAL_READ_LIMIT,
-    );
-    const categoryId =
+
+    const sortType = input.sort ? SORT_TYPES[input.sort] : undefined;
+    const productCatId =
       input.categoryId === undefined
         ? undefined
         : safeInteger(input.categoryId, 'CATEGORY_ID');
+
     const response = asResponseRecord(
       await this.transport().execute({
         operationName: 'ProductOfferV2',
         query: productOfferV2Query(Boolean(input.cursor)),
         variables: {
-          page: input.page ?? 1,
           limit,
+          page: input.page ?? 1,
           ...(input.cursor ? { scrollId: input.cursor } : {}),
-          ...(input.keyword ? { keyword: input.keyword } : {}),
-          ...(input.sort ? { sortType: SORT_TYPES[input.sort] } : {}),
-          ...(categoryId !== undefined ? { productCatId: categoryId } : {}),
+          keyword: input.keyword ?? undefined,
+          productCatId,
+          sortType,
         },
       }),
     );
@@ -797,7 +821,7 @@ export class OfficialShopeeAffiliateOfferProvider implements ShopeeAffiliateOffe
     return {
       items,
       page,
-      limit: Math.min(pageLimit, SHOPEE_AFFILIATE_REAL_READ_LIMIT),
+      limit: Math.min(pageLimit, limit),
       hasNextPage: pageInfo.hasNextPage,
       nextCursor,
       fetchedCount: Math.min(rawNodes.length, limit),
