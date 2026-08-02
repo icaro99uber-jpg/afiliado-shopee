@@ -51,4 +51,55 @@ describe('MockWhatsAppProvider', () => {
       provider.sendMessage({ destination: 'mock-group-01', message: 'Oferta' }),
     ).rejects.toThrow('falha simulada');
   });
+
+  it('registra envio de imagem com URL http ou https e preserva em sentMessages', async () => {
+    const provider = new MockWhatsAppProvider();
+    await provider.sendMessage({
+      destination: 'mock-group-01',
+      message: 'Oferta com imagem',
+      imageUrl: 'https://example.com/item.jpg',
+    });
+
+    expect(provider.sentMessages).toEqual([
+      {
+        destination: 'mock-group-01',
+        message: 'Oferta com imagem',
+        imageUrl: 'https://example.com/item.jpg',
+      },
+    ]);
+  });
+
+  it.each(['', '   ', 'not-a-url', 'ftp://example.com/img.jpg', 'javascript:alert(1)'])(
+    'rejeita imagem invalida (%s) sem registrar em sentMessages',
+    async (invalidUrl) => {
+      const provider = new MockWhatsAppProvider();
+
+      await expect(
+        provider.sendMessage({
+          destination: 'mock-group-01',
+          message: 'Oferta',
+          imageUrl: invalidUrl,
+        }),
+      ).rejects.toMatchObject({
+        code: 'WHATSAPP_IMAGE_URL_INVALID',
+      });
+
+      expect(provider.sentMessages).toHaveLength(0);
+    },
+  );
+
+  it('permite falha simulada tambem para envio de imagem', async () => {
+    const provider = new MockWhatsAppProvider();
+    provider.simulateFailure('falha imagem');
+
+    await expect(
+      provider.sendMessage({
+        destination: 'mock-group-01',
+        message: 'Oferta',
+        imageUrl: 'https://example.com/img.jpg',
+      }),
+    ).rejects.toThrow('falha imagem');
+
+    expect(provider.sentMessages).toHaveLength(0);
+  });
 });

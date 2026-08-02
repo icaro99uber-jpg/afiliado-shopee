@@ -61,6 +61,7 @@ export type WhatsAppSendInput = {
   destination: string;
   message: string;
   destinationType?: 'INDIVIDUAL' | 'GROUP';
+  imageUrl?: string | null;
 };
 
 export type WhatsAppSendResult = {
@@ -113,6 +114,39 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
         { deliveryMayHaveStarted: false },
       );
     }
+    const rawImageUrl = input.imageUrl;
+    const imageRequested = rawImageUrl !== undefined && rawImageUrl !== null;
+    let imageUrl: string | undefined;
+
+    if (imageRequested) {
+      const trimmed = typeof rawImageUrl === 'string' ? rawImageUrl.trim() : '';
+      if (trimmed.length === 0) {
+        throw new WhatsAppSendError(
+          'URL de imagem invalida',
+          'WHATSAPP_IMAGE_URL_INVALID',
+          { deliveryMayHaveStarted: false },
+        );
+      }
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(trimmed);
+      } catch {
+        throw new WhatsAppSendError(
+          'URL de imagem invalida',
+          'WHATSAPP_IMAGE_URL_INVALID',
+          { deliveryMayHaveStarted: false },
+        );
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw new WhatsAppSendError(
+          'URL de imagem invalida',
+          'WHATSAPP_IMAGE_URL_INVALID',
+          { deliveryMayHaveStarted: false },
+        );
+      }
+      imageUrl = trimmed;
+    }
+
     if (this.shouldFail) {
       throw new WhatsAppSendError(
         this.failureMessage,
@@ -121,7 +155,11 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
       );
     }
 
-    this.calls.push({ ...input });
+    const recordedInput: WhatsAppSendInput = {
+      ...input,
+      ...(imageRequested ? { imageUrl } : {}),
+    };
+    this.calls.push(recordedInput);
     return {
       externalMessageId: `mock-whatsapp-${this.sequence++}`,
       status: 'sent',

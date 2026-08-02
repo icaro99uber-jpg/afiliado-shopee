@@ -12,6 +12,7 @@ import {
 import type { EvolutionGroupSendGuard } from './evolution-group-send-guard';
 import { fingerprintWhatsAppGroupId } from './whatsapp-group-directory';
 import { WhatsAppSendError } from './whatsapp-send-error';
+import { buildEvolutionMessagePayload } from './evolution-payload-builder';
 
 export type HttpClient = (
   input: string | URL | Request,
@@ -160,6 +161,10 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
     let message: string;
     let isGroup: boolean;
     let destinationPublic: string;
+    let imageRequested: boolean;
+    let imageUrl: string | undefined;
+    let payload: { url: string; method: string; body: string };
+
     try {
       destination = requireValue(
         input.destination,
@@ -171,29 +176,31 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
         'Mensagem WhatsApp e obrigatoria',
         'WHATSAPP_MESSAGE_REQUIRED',
       );
+
+      const rawImageUrl = input.imageUrl;
+      imageRequested = rawImageUrl !== undefined && rawImageUrl !== null;
+      if (imageRequested) {
+        const trimmed = typeof rawImageUrl === 'string' ? rawImageUrl.trim() : '';
+        if (trimmed.length === 0) {
+          throw new AppError('URL de imagem invalida', 'WHATSAPP_IMAGE_URL_INVALID');
+        }
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(trimmed);
+        } catch {
+          throw new AppError('URL de imagem invalida', 'WHATSAPP_IMAGE_URL_INVALID');
+        }
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          throw new AppError('URL de imagem invalida', 'WHATSAPP_IMAGE_URL_INVALID');
+        }
+        imageUrl = trimmed;
+      }
+
       isGroup = input.destinationType === 'GROUP';
       destinationPublic = isGroup
         ? fingerprintWhatsAppGroupId(destination)
         : maskEvolutionDestination(destination);
-    } catch (error) {
-      const preflightError =
-        error instanceof AppError
-          ? error
-          : new AppError(
-              'Falha ao validar envio WhatsApp',
-              'WHATSAPP_SEND_PREFLIGHT_FAILED',
-            );
-      throw new WhatsAppSendError(preflightError.message, preflightError.code, {
-        deliveryMayHaveStarted: false,
-      });
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-    const url = `${this.baseUrl}/message/sendText/${encodeURIComponent(this.instanceName)}`;
-    let responseStatus: number | undefined;
-    let deliveryMayHaveStarted = false;
 
-    try {
       if (isGroup) {
         if (!this.groupSendGuard) {
           throw new AppError(
@@ -205,19 +212,60 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
       } else {
         this.sendGuard?.authorizeRequest(destination);
       }
+
+      try {
+        payload = buildEvolutionMessagePayload({
+          baseUrl: this.baseUrl,
+          instanceName: this.instanceName,
+          destination,
+          deliveryMode: imageRequested ? 'IMAGE' : 'TEXT',
+          text: message,
+          imageUrl,
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === 'COMMERCIAL_EVOLUTION_INVALID_IMAGE_URL'
+        ) {
+          throw new AppError('URL de imagem invalida', 'WHATSAPP_IMAGE_URL_INVALID');
+        }
+        throw new AppError(
+          'Falha ao validar envio WhatsApp',
+          'WHATSAPP_SEND_PREFLIGHT_FAILED',
+        );
+      }
+    } catch (error) {
+      const preflightError =
+        error instanceof AppError
+          ? error
+          : new AppError(
+              'Falha ao validar envio WhatsApp',
+              'WHATSAPP_SEND_PREFLIGHT_FAILED',
+            );
+
+      throw new WhatsAppSendError(
+        preflightError.message,
+        preflightError.code,
+        {
+          deliveryMayHaveStarted: false,
+        },
+      );
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let responseStatus: number | undefined;
+    let deliveryMayHaveStarted = false;
+
+    try {
       deliveryMayHaveStarted = true;
-      const response = await this.httpClient(url, {
-        method: 'POST',
+      const response = await this.httpClient(payload.url, {
+        method: payload.method,
         headers: {
           'Content-Type': 'application/json',
           apikey: this.apiKey,
         },
-        // Contrato plano da Evolution API 2.3.7 fixada na infraestrutura local.
-        // Nao tente formatos alternativos: um fallback pode duplicar o envio.
-        body: JSON.stringify({
-          number: destination,
-          text: message,
-        }),
+        body: payload.body,
         signal: controller.signal,
       });
       responseStatus = response.status;
@@ -248,6 +296,8 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
           event: 'evolution.message.sent',
           instanceName: this.instanceName,
           destination: destinationPublic,
+          destinationType: input.destinationType ?? 'INDIVIDUAL',
+          deliveryMode: imageRequested ? 'IMAGE' : 'TEXT',
         },
         'Evolution API message sent',
       );
@@ -269,6 +319,8 @@ export class EvolutionApiWhatsAppProvider implements WhatsAppProvider {
           event: 'evolution.message.failed',
           instanceName: this.instanceName,
           destination: destinationPublic,
+          destinationType: input.destinationType ?? 'INDIVIDUAL',
+          deliveryMode: imageRequested ? 'IMAGE' : 'TEXT',
           code: mappedError.code,
           ...(responseStatus === undefined ? {} : { status: responseStatus }),
         },
