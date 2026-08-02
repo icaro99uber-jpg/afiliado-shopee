@@ -163,14 +163,7 @@ export class ShopeeOfficialCatalogSyncService {
             );
           }
 
-          if (providerPage.hasNextPage) {
-            if (!providerPage.nextCursor) {
-              report.failureCode = 'SHOPEE_OFFICIAL_CATALOG_CURSOR_REQUIRED';
-              throw new AppError(
-                'Cursor e obrigatorio para paginacao',
-                'SHOPEE_OFFICIAL_CATALOG_CURSOR_REQUIRED',
-              );
-            }
+          if (providerPage.hasNextPage && providerPage.nextCursor !== undefined) {
             if (
               previousCursors.has(providerPage.nextCursor) ||
               providerPage.nextCursor === currentCursor
