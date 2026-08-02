@@ -141,4 +141,51 @@ describe('executeShopeeOfficialCatalogPreflight', () => {
     const result = await runWithEnv({}, undefined, dbUrl);
     expect(result.approved).toBe(true);
   });
+  it('USA DATABASE_URL DO CONFIG SEM ENVIRONMENT', async () => {
+    const config = envSchema.parse({ ...baseEnv, DATABASE_URL: 'postgresql://localhost:5432/app' });
+    const result = await executeShopeeOfficialCatalogPreflight({
+      config,
+      runtime: mockRuntime,
+    });
+    expect(result.approved).toBe(true);
+    expect(mockRuntime.close).not.toHaveBeenCalled();
+  });
+
+  it('SOBRESCRITA EXPLÍCITA CONTINUA FUNCIONANDO', async () => {
+    const config = envSchema.parse({ ...baseEnv, DATABASE_URL: 'postgresql://localhost:5432/app' });
+    await expect(
+      executeShopeeOfficialCatalogPreflight({
+        config,
+        runtime: mockRuntime,
+        environment: { databaseUrl: 'postgresql://remote.host:5432/app' },
+      })
+    ).rejects.toThrowError(
+      new AppError('Banco remoto nao permitido', 'SHOPEE_OFFICIAL_CATALOG_LOCAL_DATABASE_REQUIRED')
+    );
+  });
+
+  it('CONFIG COM BANCO REMOTO CONTINUA BLOQUEADA', async () => {
+    const config = envSchema.parse({ ...baseEnv, DATABASE_URL: 'postgresql://remote.host:5432/app' });
+    await expect(
+      executeShopeeOfficialCatalogPreflight({
+        config,
+        runtime: mockRuntime,
+      })
+    ).rejects.toThrowError(
+      new AppError('Banco remoto nao permitido', 'SHOPEE_OFFICIAL_CATALOG_LOCAL_DATABASE_REQUIRED')
+    );
+  });
+
+  it.each([
+    'postgresql://localhost/db',
+    'postgres://127.0.0.1/db',
+    'postgresql://[::1]/db',
+  ])('CONFIG COM LOOPBACKS %s', async (dbUrl) => {
+    const config = envSchema.parse({ ...baseEnv, DATABASE_URL: dbUrl });
+    const result = await executeShopeeOfficialCatalogPreflight({
+      config,
+      runtime: mockRuntime,
+    });
+    expect(result.approved).toBe(true);
+  });
 });
