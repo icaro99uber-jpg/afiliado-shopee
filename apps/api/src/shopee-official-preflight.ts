@@ -97,8 +97,9 @@ export const assertShopeeOfficialStaticPreflight = (
 
 export const createShopeeOfficialPreflightRuntime = (
   config: AppEnv,
+  prismaFactory = createPrismaClient,
 ): ShopeeOfficialPreflightRuntime => {
-  const prisma = createPrismaClient();
+  const prisma = prismaFactory(config.DATABASE_URL);
   const settings = new PrismaCommercialAutomationSettingsRepository(prisma);
   const redis = createRedisConnection(config.REDIS_URL);
   const queue = createWhatsAppDispatchQueue(redis);
@@ -201,7 +202,6 @@ export const runShopeeOfficialPreflight = async ({
   runtimeFactory?: (config: AppEnv) => ShopeeOfficialPreflightRuntime;
 } = {}) => {
   const config = loadShopeeOfficialConfig(env, envPath);
-  process.env.DATABASE_URL ??= config.DATABASE_URL;
   const runtime = runtimeFactory(config);
   try {
     return await executeShopeeOfficialPreflight({ config, runtime });
