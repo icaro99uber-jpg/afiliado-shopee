@@ -191,20 +191,70 @@ describe('ShopeeOfficialCatalogSyncService', () => {
     expect(report.valid).toBe(1);
     expect(mockOffers.upsertOfficialOfferWithSnapshot).toHaveBeenCalledTimes(1);
   });
-  it('falha se a API nao retornar o cursor esperado (ausente)', async () => {
-    mockProvider.listProductOffers.mockResolvedValueOnce({
-      items: [],
-      page: 1,
-      limit: 20,
-      hasNextPage: true,
-      nextCursor: undefined,
-      fetchedCount: 0,
-      rejected: [],
-    });
+  it('PAGINAÇÃO SOMENTE POR PAGE', async () => {
+    mockProvider.listProductOffers
+      .mockResolvedValueOnce({
+        items: [{
+          source: 'OFFICIAL', providerProductId: 'prod1', productName: 'Produto 1',
+          shopName: 'Loja 1', price: '10.00', priceMin: '10.00', priceMax: '10.00', discountRate: 0, rating: 5, sales: 10,
+          commissionRate: 10, imageUrl: 'http://img.com', productLink: 'http://prod.com', fetchedAt: new Date(),
+        }],
+        page: 1, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 1, rejected: []
+      })
+      .mockResolvedValueOnce({
+        items: [], page: 2, limit: 20, hasNextPage: false, nextCursor: undefined, fetchedCount: 0, rejected: []
+      });
+
+    mockOffers.upsertOfficialOfferWithSnapshot.mockResolvedValue({ productAction: 'created', snapshotCreated: true });
 
     const report = await service.sync({ pageSize: 20, maxPages: 3, minimumIntervalMs: 0 });
-    expect(report.status).toBe('FAILED');
-    expect(report.failureCode).toBe('SHOPEE_OFFICIAL_CATALOG_CURSOR_REQUIRED');
+    expect(report.status).toBe('SUCCEEDED');
+    expect(report.pagesRequested).toBe(2);
+    expect(report.pagesCompleted).toBe(2);
+    expect(mockProvider.listProductOffers.mock.calls[1][0].page).toBe(2);
+    expect(mockProvider.listProductOffers.mock.calls[1][0].cursor).toBeUndefined();
+    expect(report.fetched).toBe(1);
+    expect(report.valid).toBe(1);
+    expect(report.created).toBe(1);
+  });
+
+  it('TRÊS PÁGINAS SEM CURSOR', async () => {
+    mockProvider.listProductOffers
+      .mockResolvedValueOnce({ items: [], page: 1, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 0, rejected: [] })
+      .mockResolvedValueOnce({ items: [], page: 2, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 0, rejected: [] })
+      .mockResolvedValueOnce({ items: [], page: 3, limit: 20, hasNextPage: false, nextCursor: undefined, fetchedCount: 0, rejected: [] });
+
+    const report = await service.sync({ pageSize: 20, maxPages: 3, minimumIntervalMs: 0 });
+    expect(report.status).toBe('SUCCEEDED');
+    expect(report.pagesRequested).toBe(3);
+    expect(mockProvider.listProductOffers.mock.calls[0][0].cursor).toBeUndefined();
+    expect(mockProvider.listProductOffers.mock.calls[1][0].cursor).toBeUndefined();
+    expect(mockProvider.listProductOffers.mock.calls[2][0].cursor).toBeUndefined();
+  });
+
+  it('TRUNCAMENTO SEM CURSOR', async () => {
+    mockProvider.listProductOffers
+      .mockResolvedValueOnce({ items: [], page: 1, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 0, rejected: [] })
+      .mockResolvedValueOnce({ items: [], page: 2, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 0, rejected: [] });
+
+    const report = await service.sync({ pageSize: 20, maxPages: 2, minimumIntervalMs: 0 });
+    expect(report.status).toBe('SUCCEEDED');
+    expect(report.completed).toBe(true);
+    expect(report.truncated).toBe(true);
+    expect(report.pagesRequested).toBe(2);
+  });
+
+  it('MODO MISTO', async () => {
+    mockProvider.listProductOffers
+      .mockResolvedValueOnce({ items: [], page: 1, limit: 20, hasNextPage: true, nextCursor: undefined, fetchedCount: 0, rejected: [] })
+      .mockResolvedValueOnce({ items: [], page: 2, limit: 20, hasNextPage: true, nextCursor: 'cursorA', fetchedCount: 0, rejected: [] })
+      .mockResolvedValueOnce({ items: [], page: 3, limit: 20, hasNextPage: false, nextCursor: undefined, fetchedCount: 0, rejected: [] });
+
+    const report = await service.sync({ pageSize: 20, maxPages: 3, minimumIntervalMs: 0 });
+    expect(report.status).toBe('SUCCEEDED');
+    expect(mockProvider.listProductOffers.mock.calls[0][0].cursor).toBeUndefined();
+    expect(mockProvider.listProductOffers.mock.calls[1][0].cursor).toBeUndefined();
+    expect(mockProvider.listProductOffers.mock.calls[2][0].cursor).toBe('cursorA');
   });
 
   it('falha se cursor for repetido numa pagina intermediaria', async () => {
