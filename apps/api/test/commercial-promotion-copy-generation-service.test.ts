@@ -382,6 +382,57 @@ describe('CommercialPromotionCopyGenerationService', () => {
     expect(repository.copies.size).toBe(0);
   });
 
+  it('não permite que um attempt FAILED v1 bloqueie a geração v2, gerando um fingerprint diferente e não o apagando', async () => {
+    const repository = new MemoryCopyRepository();
+    // Simulate a failed attempt from v1
+    const v1Fingerprint = 'v1-fingerprint-mock-hash';
+    repository.attempts.set(v1Fingerprint, {
+      id: 'attempt-v1-failed',
+      candidateId: 'candidate-internal',
+      snapshotId: 'snapshot-internal',
+      inputFingerprint: v1Fingerprint,
+      provider: 'openai',
+      model: 'selected-model',
+      promptVersion: 'commercial-promotion-copy-v1', // Historical v1
+      validationVersion: 'commercial-promotion-copy-validation-v2',
+      startedAt: now,
+      status: 'FAILED',
+      generatedCopyId: null,
+      failureCode: 'COMMERCIAL_AI_COPY_OUTPUT_INVALID',
+      requestMayHaveStarted: true,
+      providerHttpStatus: null,
+      providerErrorCode: null,
+      providerErrorType: null,
+      providerErrorParam: null,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      validationFailureCodes: [],
+      completedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const provider = validProvider();
+    const copyService = service(repository, provider);
+
+    const report = await copyService.preview('candidate-internal');
+    expect(report.cacheAvailable).toBe(false); // v2 preview não encontra cache de v1
+
+    const result = await copyService.generate('candidate-internal', 'GERAR_COPY_COM_IA');
+    expect(result.status).toBe('COPY_READY');
+    expect(provider.generate).toHaveBeenCalledTimes(1); // provider called for v2
+
+    const attempts = [...repository.attempts.values()];
+    expect(attempts.length).toBe(2); // v1 and v2 attempts
+    expect(attempts.find(a => a.id === 'attempt-v1-failed')).toBeDefined(); // V1 attempt is preserved
+
+    const newAttempt = attempts.find(a => a.id !== 'attempt-v1-failed')!;
+    expect(newAttempt.promptVersion).toBe('commercial-promotion-copy-v2');
+    expect(newAttempt.status).toBe('SUCCEEDED');
+    expect(newAttempt.inputFingerprint).not.toBe(v1Fingerprint);
+  });
+
   it('registra somente diagnóstico sanitizado para falha do provider', async () => {
     const repository = new MemoryCopyRepository();
     const logger = { info: vi.fn(), error: vi.fn() };
