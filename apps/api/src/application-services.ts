@@ -18,6 +18,7 @@ import { CouponService } from './coupon-service';
 import { CopyPreviewService } from './copy-preview-service';
 import { CommercialCopyService } from './commercial-copy-service';
 import { CommercialPipelineService } from './commercial-pipeline-service';
+import { CommercialMessageDraftService } from './commercial-message-draft-service';
 import { createCommercialPromotionMiningDomainService } from './commercial-promotion-mining-service';
 import {
   CommercialPipelineConfirmationService,
@@ -269,6 +270,7 @@ export const createSenderService = ({
   whatsAppProvider,
   logger,
   messageBuilder,
+  draftService,
   groupSendPolicy,
 }: {
   repositories: Pick<ApplicationRepositories, 'whatsappDispatches'>;
@@ -277,6 +279,7 @@ export const createSenderService = ({
   messageBuilder?: ConstructorParameters<
     typeof SenderService
   >[0]['messageBuilder'];
+  draftService?: CommercialMessageDraftService;
   groupSendPolicy?: WhatsAppGroupSendPolicy;
 }) =>
   new SenderService({
@@ -284,6 +287,7 @@ export const createSenderService = ({
     provider: whatsAppProvider,
     logger,
     messageBuilder,
+    draftService,
     groupSendPolicy,
   });
 
@@ -354,7 +358,12 @@ export const createApplicationServices = ({
     logger,
   });
   const sender = whatsAppProvider
-    ? createSenderService({ repositories, whatsAppProvider, logger })
+    ? createSenderService({
+        repositories,
+        whatsAppProvider,
+        logger,
+        draftService: new CommercialMessageDraftService(),
+      })
     : undefined;
   const shopeeOfferSync = new ShopeeOfferSyncService({
     provider: shopeeOfferProvider,

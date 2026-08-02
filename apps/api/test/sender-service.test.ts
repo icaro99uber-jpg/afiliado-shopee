@@ -34,14 +34,18 @@ const prismaMock = (dispatchData = dispatch) => ({
   },
 });
 
+import type { CommercialMessageDraftService } from '../src/commercial-message-draft-service';
+
 const createService = (
   prisma = prismaMock(),
   provider: WhatsAppProvider = new MockWhatsAppProvider(),
+  options?: { draftService?: CommercialMessageDraftService; }
 ) =>
   new SenderService({
     dispatches: new PrismaWhatsAppDispatchRepository(prisma as never),
     provider,
     logger,
+    ...(options || {}),
   });
 
 describe('SenderService', () => {
@@ -225,5 +229,126 @@ describe('SenderService', () => {
     expect(provider.sentMessages).toHaveLength(0);
     expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
     expect(prisma.whatsAppDispatch.update).not.toHaveBeenCalled();
+  });
+
+  describe('Integração com CommercialMessageDraftService', () => {
+    const mockCandidate = { id: 'candidate-123', productId: 'product-1', snapshotId: 'snap-1' };
+    const commercialDispatch = {
+      ...dispatch,
+      generatedCopy: {
+        ...dispatch.generatedCopy,
+        createdFromCandidateId: 'candidate-123',
+        promotionCandidates: [mockCandidate],
+      },
+    };
+
+    it('usa draft com imagem se candidato válido e draft image for gerado', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(() => ({
+          caption: 'Draft caption',
+          imageUrl: 'https://shopee.com/image.jpg',
+          deliveryMode: 'IMAGE',
+        })),
+      } as unknown as CommercialMessageDraftService;
+
+      await createService(prisma, provider, { draftService }).sendDispatch('dispatch-1');
+
+      expect(draftService.createDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'candidate-123' })
+      );
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: 'Draft caption',
+        imageUrl: 'https://shopee.com/image.jpg',
+      });
+      expect(prisma.whatsAppDispatch.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('lança erro se zero candidato correspondente e interrompe fluxo', async () => {
+      const dispatchSemCandidato = {
+        ...commercialDispatch,
+        generatedCopy: {
+          ...commercialDispatch.generatedCopy,
+          promotionCandidates: [],
+        },
+      };
+      const prisma = prismaMock(dispatchSemCandidato);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(),
+      };
+
+      await expect(
+        createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+      ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_RELATION_MISMATCH' });
+
+      expect(draftService.createDraft).not.toHaveBeenCalled();
+      expect(provider.sentMessages).toHaveLength(0);
+      expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('lança erro se múltiplos candidatos correspondentes e interrompe fluxo', async () => {
+      const dispatchComMultiplos = {
+        ...commercialDispatch,
+        generatedCopy: {
+          ...commercialDispatch.generatedCopy,
+          promotionCandidates: [mockCandidate, mockCandidate],
+        },
+      };
+      const prisma = prismaMock(dispatchComMultiplos);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(),
+      };
+
+      await expect(
+        createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+      ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_RELATION_MISMATCH' });
+
+      expect(draftService.createDraft).not.toHaveBeenCalled();
+      expect(provider.sentMessages).toHaveLength(0);
+      expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('lança erro de draftService e interrompe fluxo (candidato inválido ou vencido)', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(() => {
+          throw new Error('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+        }),
+      } as unknown as CommercialMessageDraftService;
+
+      await expect(
+        createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+      ).rejects.toThrow('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'whatsapp.dispatch.draft_failed' }),
+        'Failed to create commercial draft'
+      );
+      expect(provider.sentMessages).toHaveLength(0);
+      expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('não usa imageUrl se draft disser deliveryMode=TEXT', async () => {
+      const prisma = prismaMock(commercialDispatch);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(() => ({
+          caption: 'Draft caption text',
+          imageUrl: 'https://shopee.com/image.jpg',
+          deliveryMode: 'TEXT',
+        })),
+      } as unknown as CommercialMessageDraftService;
+
+      await createService(prisma, provider, { draftService }).sendDispatch('dispatch-1');
+
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: 'Draft caption text',
+      });
+      expect(provider.sentMessages[0]).not.toHaveProperty('imageUrl');
+    });
   });
 });

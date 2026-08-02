@@ -1775,6 +1775,19 @@ export class PrismaCommercialPromotionRepository
       total,
     };
   }
+
+  async findCandidateForDraft(id: string) {
+    const candidate = await this.prisma.commercialPromotionCandidate.findUnique({
+      where: { id },
+      include: {
+        product: true,
+        generatedCopy: true,
+        snapshot: true,
+      },
+    });
+    if (!candidate) return null;
+    return candidate as unknown as import('./commercial-message-draft-service').CommercialMessageDraftCandidate;
+  }
 }
 
 type CommercialCopyPrismaClient = Pick<
@@ -3300,10 +3313,81 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
   async findByIdForSending(
     id: string,
   ): Promise<WhatsAppDispatchDetails | null> {
-    return (await this.prisma.whatsAppDispatch.findUnique({
+    const record = await this.prisma.whatsAppDispatch.findUnique({
       where: { id },
-      include: { generatedCopy: true, destination: true, product: true },
-    })) as WhatsAppDispatchDetails | null;
+      select: {
+        id: true,
+        productId: true,
+        generatedCopyId: true,
+        destinationId: true,
+        externalMessageId: true,
+        status: true,
+        attemptCount: true,
+        errorMessage: true,
+        sentAt: true,
+        createdAt: true,
+        updatedAt: true,
+        destination: {
+          select: {
+            destination: true,
+            type: true,
+            active: true,
+            available: true,
+            fingerprint: true,
+            sourceInstanceName: true,
+          },
+        },
+        product: {
+          select: {
+            comissao: true,
+          },
+        },
+        generatedCopy: {
+          select: {
+            id: true,
+            titulo: true,
+            mensagem: true,
+            cta: true,
+            hashtags: true,
+            createdFromCandidateId: true,
+            promotionCandidates: {
+              select: {
+                id: true,
+                productId: true,
+                snapshotId: true,
+                generatedCopyId: true,
+                status: true,
+                expiresAt: true,
+                product: {
+                  select: {
+                    id: true,
+                    unavailableAt: true,
+                    affiliateLink: true,
+                    urlImagem: true,
+                    commercialSnapshotRevision: true,
+                  },
+                },
+                snapshot: {
+                  select: {
+                    id: true,
+                    productId: true,
+                    revision: true,
+                    unavailableAt: true,
+                    offerEndsAt: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return record as WhatsAppDispatchDetails;
   }
 
   async findByIdWithDetails(

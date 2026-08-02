@@ -7,41 +7,22 @@ import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type {
   WhatsAppDispatchRepository,
   WhatsAppDispatchRecord,
-  WhatsAppDispatchStatus,
+  WhatsAppDispatchDetails,
 } from './repositories';
 import type { WhatsAppGroupSendPolicy } from './whatsapp-group-send-policy';
+
+import type { CommercialMessageDraftService } from './commercial-message-draft-service';
 
 export type SenderServiceOptions = {
   dispatches: WhatsAppDispatchRepository;
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
-  messageBuilder?: (copy: DispatchWithRelations['generatedCopy']) => string;
+  messageBuilder?: (copy: WhatsAppDispatchDetails['generatedCopy']) => string;
+  draftService?: CommercialMessageDraftService;
   groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 
-type DispatchWithRelations = {
-  id: string;
-  productId: string;
-  generatedCopyId: string;
-  destinationId: string;
-  generatedCopy: {
-    titulo: string;
-    mensagem: string;
-    cta: string;
-    hashtags: string;
-  };
-  destination: {
-    destination: string;
-    type?: 'INDIVIDUAL' | 'GROUP';
-    active?: boolean;
-    available?: boolean;
-    fingerprint?: string | null;
-    sourceInstanceName?: string | null;
-  };
-  product?: { comissao?: number | null } | null;
-  status: WhatsAppDispatchStatus;
-  attemptCount: number;
-};
+
 
 const providerErrorCode = (error: unknown) =>
   error instanceof AppError ? error.code : undefined;
@@ -65,9 +46,9 @@ export class SenderService {
       'WhatsApp dispatch started',
     );
 
-    const dispatch = (await this.options.dispatches.findByIdForSending(
+    const dispatch = await this.options.dispatches.findByIdForSending(
       dispatchId,
-    )) as DispatchWithRelations | null;
+    );
 
     if (!dispatch) {
       throw new AppError(
@@ -87,9 +68,64 @@ export class SenderService {
       );
     }
 
-    const message = this.options.messageBuilder
-      ? this.options.messageBuilder(dispatch.generatedCopy)
-      : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+    let message: string;
+    let imageUrl: string | undefined;
+    let deliveryMode: 'TEXT' | 'IMAGE' = 'TEXT';
+
+    const candidateId = dispatch.generatedCopy.createdFromCandidateId;
+
+    if (candidateId !== null && candidateId !== undefined) {
+      if (!this.options.draftService) {
+        throw new AppError(
+          'Servico de rascunho comercial indisponivel',
+          'COMMERCIAL_MESSAGE_DRAFT_SERVICE_UNAVAILABLE',
+        );
+      }
+
+      const matches = dispatch.generatedCopy.promotionCandidates?.filter(
+        (candidate) => candidate.id === candidateId,
+      ) ?? [];
+
+      if (matches.length !== 1) {
+        throw new AppError(
+          'Inconsistencia na relacao do candidato de promocao comercial',
+          'COMMERCIAL_MESSAGE_RELATION_MISMATCH',
+        );
+      }
+
+      const candidate = {
+        ...matches[0],
+        generatedCopy: {
+          id: dispatch.generatedCopy.id,
+          productId: matches[0].productId,
+          snapshotId: matches[0].snapshotId,
+          createdFromCandidateId: dispatch.generatedCopy.createdFromCandidateId ?? null,
+          titulo: dispatch.generatedCopy.titulo,
+          mensagem: dispatch.generatedCopy.mensagem,
+          cta: dispatch.generatedCopy.cta,
+          hashtags: dispatch.generatedCopy.hashtags,
+        },
+      };
+
+      try {
+        const draft = this.options.draftService.createDraft(candidate);
+        message = draft.caption;
+        if (draft.deliveryMode === 'IMAGE' && draft.imageUrl) {
+          imageUrl = draft.imageUrl;
+          deliveryMode = 'IMAGE';
+        }
+      } catch (error) {
+        this.options.logger.error(
+          { event: 'whatsapp.dispatch.draft_failed', dispatchId, errorType: error instanceof Error ? error.name : 'UnknownError' },
+          'Failed to create commercial draft',
+        );
+        throw error;
+      }
+    } else {
+      message = this.options.messageBuilder
+        ? this.options.messageBuilder(dispatch.generatedCopy)
+        : buildWhatsAppPublicMessage(dispatch.generatedCopy);
+    }
 
     if (dispatch.destination.type === 'GROUP') {
       if (!this.options.groupSendPolicy) {
@@ -106,7 +142,7 @@ export class SenderService {
     }
 
     const claimed = await this.options.dispatches.markAttemptPending(
-      dispatch.id,
+      dispatchId,
     );
     if (!claimed) {
       throw new AppError(
@@ -119,6 +155,7 @@ export class SenderService {
       const result = await this.options.provider.sendMessage({
         destination: dispatch.destination.destination,
         message,
+        ...(imageUrl && deliveryMode === 'IMAGE' ? { imageUrl } : {}),
         ...(dispatch.destination.type === 'GROUP'
           ? { destinationType: 'GROUP' as const }
           : {}),
