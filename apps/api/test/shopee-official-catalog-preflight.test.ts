@@ -4,6 +4,7 @@ import { envSchema } from '@shopee-auto-affiliate-ai/config';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
 import type { ShopeeOfficialPreflightRuntime } from '../src/shopee-official-preflight';
 import * as shopeeOfficialPreflightModule from '../src/shopee-official-preflight';
+import * as queueModule from '@shopee-auto-affiliate-ai/queue';
 
 const baseEnv = {
   DATABASE_URL: 'postgresql://localhost:5432/app',
@@ -187,5 +188,32 @@ describe('executeShopeeOfficialCatalogPreflight', () => {
       runtime: mockRuntime,
     });
     expect(result.approved).toBe(true);
+  });
+
+  it('createShopeeOfficialPreflightRuntime passa config.DATABASE_URL para factory', async () => {
+    const config = envSchema.parse({ ...baseEnv, DATABASE_URL: 'postgresql://fake-db:5432/app' });
+    const mockPrismaFactory = vi.fn().mockReturnValue({});
+
+    vi.spyOn(queueModule, 'createRedisConnection').mockReturnValue({
+      quit: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof queueModule.createRedisConnection>);
+
+    vi.spyOn(queueModule, 'createWhatsAppDispatchQueue').mockReturnValue({
+      getWorkers: vi.fn().mockResolvedValue([]),
+      getActiveCount: vi.fn().mockResolvedValue(0),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof queueModule.createWhatsAppDispatchQueue>);
+
+    const { createShopeeOfficialPreflightRuntime } = await import('../src/shopee-official-preflight');
+
+    const runtime = createShopeeOfficialPreflightRuntime(config, mockPrismaFactory as unknown as typeof import('@shopee-auto-affiliate-ai/database').createPrismaClient);
+
+    expect(mockPrismaFactory).toHaveBeenCalledTimes(1);
+    expect(mockPrismaFactory).toHaveBeenCalledWith('postgresql://fake-db:5432/app');
+
+    // Test the lifecycle
+    vi.spyOn(runtime, 'close').mockImplementation(async () => {});
+    await runtime.close();
+    expect(runtime.close).toHaveBeenCalled();
   });
 });

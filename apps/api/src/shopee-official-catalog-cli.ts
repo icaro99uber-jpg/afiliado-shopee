@@ -26,6 +26,7 @@ export const executeShopeeOfficialCatalogSyncCli = async (deps?: {
   lock?: any;
   service?: any;
   prisma?: any;
+  prismaFactory?: typeof createPrismaClient;
   logger?: any;
 }) => {
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -76,7 +77,7 @@ export const executeShopeeOfficialCatalogSyncCli = async (deps?: {
     return;
   }
 
-  const prisma = deps?.prisma ?? createPrismaClient();
+  const prisma = deps?.prisma ?? (deps?.prismaFactory ?? createPrismaClient)(config.DATABASE_URL);
   const provider = deps?.provider ?? new OfficialShopeeAffiliateOfferProvider({
     apiEnabled: config.SHOPEE_AFFILIATE_API_ENABLED,
     apiUrl: config.SHOPEE_AFFILIATE_API_URL,

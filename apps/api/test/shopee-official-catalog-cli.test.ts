@@ -20,7 +20,7 @@ describe('executeShopeeOfficialCatalogSyncCli', () => {
   const mockServiceSync = vi.fn();
   const mockPrismaDisconnect = vi.fn();
 
-  const mockDeps = () => ({
+  const mockDeps = (): NonNullable<Parameters<typeof executeShopeeOfficialCatalogSyncCli>[0]> => ({
     rawArgs: ['--confirm-local-official-catalog-sync', '--keyword=test'],
     config,
     preflight: Promise.resolve(preflightApproved),
@@ -98,5 +98,31 @@ describe('executeShopeeOfficialCatalogSyncCli', () => {
       expect.objectContaining({ code: 'SYNC_ERROR' }),
       'Erro fatal na sincronizacao do catalogo'
     );
+  });
+
+  it('SEM PRISMA INJETADO: chama prismaFactory com config.DATABASE_URL', async () => {
+    const deps = mockDeps();
+    deps.prisma = undefined; // Force no injected prisma
+    deps.config.DATABASE_URL = 'postgresql://fake-local-db:5432/app';
+    const mockPrismaFactory = vi.fn().mockReturnValue({ $disconnect: vi.fn() });
+    deps.prismaFactory = mockPrismaFactory as unknown as typeof import('@shopee-auto-affiliate-ai/database').createPrismaClient;
+
+    mockServiceSync.mockResolvedValueOnce({ status: 'SUCCEEDED', completed: true });
+    await executeShopeeOfficialCatalogSyncCli(deps);
+
+    expect(mockPrismaFactory).toHaveBeenCalledTimes(1);
+    expect(mockPrismaFactory).toHaveBeenCalledWith('postgresql://fake-local-db:5432/app');
+  });
+
+  it('COM PRISMA INJETADO: não chama prismaFactory e não desconecta prisma externo', async () => {
+    const deps = mockDeps();
+    const mockPrismaFactory = vi.fn();
+    deps.prismaFactory = mockPrismaFactory as unknown as typeof import('@shopee-auto-affiliate-ai/database').createPrismaClient;
+
+    mockServiceSync.mockResolvedValueOnce({ status: 'SUCCEEDED', completed: true });
+    await executeShopeeOfficialCatalogSyncCli(deps);
+
+    expect(mockPrismaFactory).not.toHaveBeenCalled();
+    expect(deps.prisma.$disconnect).not.toHaveBeenCalled(); // Existent logic preserves external disconnect
   });
 });
