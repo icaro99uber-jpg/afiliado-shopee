@@ -58,7 +58,8 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,css}\""
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,css}\"",
+    "commercial:message:preview": "corepack pnpm --filter @shopee-auto-affiliate-ai/api commercial:message:preview"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

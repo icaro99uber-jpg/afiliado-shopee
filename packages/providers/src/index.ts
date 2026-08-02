@@ -204,3 +204,4 @@ export class MockEvolutionProvider implements EvolutionProvider {
     return { id: 'mock-message' };
   }
 }
+export * from './evolution-payload-builder';

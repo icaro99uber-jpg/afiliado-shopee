@@ -1,0 +1,171 @@
+import { describe, it, expect } from 'vitest';
+import {
+  CommercialMessageDraftService,
+  CommercialMessageDraftCandidate,
+} from '../src/commercial-message-draft-service';
+
+describe('CommercialMessageDraftService', () => {
+  const service = new CommercialMessageDraftService();
+  const fixedNow = new Date('2026-08-01T10:00:00.000Z');
+
+  const createValidCandidate = (): CommercialMessageDraftCandidate => ({
+    id: 'candidate-1',
+    productId: 'prod-1',
+    snapshotId: 'snap-1',
+    generatedCopyId: 'copy-1',
+    status: 'COPY_READY',
+    expiresAt: null,
+    product: {
+      id: 'prod-1',
+      unavailableAt: null,
+      affiliateLink: 'https://shope.ee/link',
+      urlImagem: 'https://shopee.com/image.jpg',
+      commercialSnapshotRevision: 1,
+    },
+    snapshot: {
+      id: 'snap-1',
+      productId: 'prod-1',
+      revision: 1,
+      unavailableAt: null,
+      offerEndsAt: null,
+    },
+    generatedCopy: {
+      id: 'copy-1',
+      productId: 'prod-1',
+      snapshotId: 'snap-1',
+      createdFromCandidateId: 'candidate-1',
+      titulo: 'Oferta incrivel!',
+      mensagem: 'Compre agora mesmo.',
+      cta: 'Buy now\nhttps://shope.ee/link',
+      hashtags: '#teste #shopee',
+    },
+  });
+
+  it('should generate an IMAGE draft for valid copy and image', () => {
+    const candidate = createValidCandidate();
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+
+    expect(draft.candidateId).toBe('candidate-1');
+    expect(draft.generatedCopyId).toBe('copy-1');
+    expect(draft.imageUrl).toBe('https://shopee.com/image.jpg');
+    expect(draft.deliveryMode).toBe('IMAGE');
+    expect(draft.warnings).toEqual([]);
+    
+    const expectedCaption = 'Oferta incrivel!\n\nCompre agora mesmo.\n\nBuy now\nhttps://shope.ee/link\n\n#teste #shopee';
+    expect(draft.caption).toBe(expectedCaption);
+  });
+
+  it('should fallback to TEXT when imageUrl is missing', () => {
+    const candidate = createValidCandidate();
+    candidate.product.urlImagem = '';
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+    
+    expect(draft.imageUrl).toBeNull();
+    expect(draft.deliveryMode).toBe('TEXT');
+    expect(draft.warnings).toContain('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+  });
+
+  it('should fallback to TEXT when imageUrl is invalid', () => {
+    const candidate = createValidCandidate();
+    candidate.product.urlImagem = 'not-a-url';
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+    
+    expect(draft.imageUrl).toBeNull();
+    expect(draft.deliveryMode).toBe('TEXT');
+    expect(draft.warnings).toContain('COMMERCIAL_MESSAGE_IMAGE_URL_INVALID');
+  });
+
+  it('should fallback to TEXT when imageUrl equals affiliateLink', () => {
+    const candidate = createValidCandidate();
+    candidate.product.urlImagem = 'https://shope.ee/link';
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+    
+    expect(draft.imageUrl).toBeNull();
+    expect(draft.deliveryMode).toBe('TEXT');
+    expect(draft.warnings).toContain('COMMERCIAL_MESSAGE_IMAGE_EQUALS_AFFILIATE_LINK');
+  });
+
+  it('should block if relation mismatch (product id)', () => {
+    const candidate = createValidCandidate();
+    candidate.product.id = 'another';
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_RELATION_MISMATCH');
+  });
+
+  it('should block if relation mismatch (generatedCopy productId)', () => {
+    const candidate = createValidCandidate();
+    candidate.generatedCopy!.productId = 'another';
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_RELATION_MISMATCH');
+  });
+
+  it('should block if generated copy is missing', () => {
+    const candidate = createValidCandidate();
+    candidate.generatedCopyId = null;
+    candidate.generatedCopy = null;
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_COPY_MISSING');
+  });
+
+  it('should block if status is not COPY_READY', () => {
+    const candidate = createValidCandidate();
+    candidate.status = 'QUEUED';
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_CANDIDATE_NOT_READY');
+  });
+
+  it('should block if affiliate link is missing', () => {
+    const candidate = createValidCandidate();
+    candidate.product.affiliateLink = null;
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_AFFILIATE_LINK_MISSING');
+  });
+
+  it('should block if affiliate link does not appear exactly once in caption', () => {
+    const candidate = createValidCandidate();
+    // Two occurrences
+    candidate.generatedCopy!.cta = 'Buy now\nhttps://shope.ee/link\nAnother link: https://shope.ee/link';
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_INVALID_LINK_OCCURRENCES');
+  });
+
+  it('should block if snapshot revision is outdated', () => {
+    const candidate = createValidCandidate();
+    candidate.snapshot.revision = 2; // Product says 1
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_SNAPSHOT_OUTDATED');
+  });
+
+  it('should block if snapshot shows product unavailable', () => {
+    const candidate = createValidCandidate();
+    candidate.snapshot.unavailableAt = new Date('2026-07-01T00:00:00Z');
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_SNAPSHOT_UNAVAILABLE');
+  });
+
+  it('should block if product is unavailable', () => {
+    const candidate = createValidCandidate();
+    candidate.product.unavailableAt = new Date('2026-07-01T00:00:00Z');
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_PRODUCT_UNAVAILABLE');
+  });
+
+  it('should block if offer expired', () => {
+    const candidate = createValidCandidate();
+    candidate.snapshot.offerEndsAt = new Date('2026-07-01T00:00:00Z');
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_SNAPSHOT_EXPIRED');
+  });
+
+  it('should block if candidate expired', () => {
+    const candidate = createValidCandidate();
+    candidate.expiresAt = new Date('2026-07-01T00:00:00Z');
+    expect(() => service.createDraft(candidate, { now: () => fixedNow })).toThrowError('COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED');
+  });
+
+  it('should clean up CRLF and spaces in the caption', () => {
+    const candidate = createValidCandidate();
+    candidate.generatedCopy!.mensagem = 'Uma mensagem \r\n com espaços extras \n e quebras';
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+    expect(draft.caption).toContain('Uma mensagem\n com espaços extras\n e quebras');
+  });
+
+  it('should omit empty blocks from caption without leaving empty lines', () => {
+    const candidate = createValidCandidate();
+    candidate.generatedCopy!.hashtags = '   \n  \r\n '; // only spaces and newlines
+    const draft = service.createDraft(candidate, { now: () => fixedNow });
+    // hashtags should be completely omitted from the caption
+    const expectedCaption = 'Oferta incrivel!\n\nCompre agora mesmo.\n\nBuy now\nhttps://shope.ee/link';
+    expect(draft.caption).toBe(expectedCaption);
+  });
+});
