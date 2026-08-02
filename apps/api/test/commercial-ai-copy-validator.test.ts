@@ -100,6 +100,33 @@ describe('CommercialAiCopyValidator', () => {
     expect(result.valid).toBe(false);
     expect(result.publicFailureCodes).toContain('AI_CATALOG_FACT_REPEATED');
   });
+
+  it('aceita output válido V2 estrito (sem hashtags e tamanhos controlados)', () => {
+    const validV2 = {
+      headline: 'Oferta incrível e confiável para você', // 37 chars (between 10 and 60)
+      body: 'Uma escolha maravilhosa e segura para o seu dia a dia e rotina.', // 63 chars (between 40 and 180)
+      cta: 'Confira os detalhes', // 19 chars (between 5 and 40)
+      hashtags: [],
+    };
+    const result = validator.validate(validV2);
+    expect(result.valid).toBe(true);
+    expect(result.publicFailureCodes).toEqual([]);
+    expect(result.sanitizedOutput).toEqual(validV2);
+  });
+
+  it('comprova regressão da falha real simultânea', () => {
+    const regression = {
+      headline: 'Oferta confiável',
+      body: 'Uma escolha prática para sua rotina 2. ' + 'x'.repeat(250), // Acima de 260, com algarismo
+      cta: 'Confira os detalhes hoje',
+      hashtags: ['#Invalido123'], // Hashtag com algarismo e formato invalido
+    };
+    const result = validator.validate(regression);
+    expect(result.valid).toBe(false);
+    expect(result.publicFailureCodes).toContain('AI_BODY_LENGTH');
+    expect(result.publicFailureCodes).toContain('AI_DIGIT_FORBIDDEN');
+    expect(result.publicFailureCodes).toContain('AI_HASHTAGS_INVALID');
+  });
 });
 
 describe('sanitizeCommercialAiCopyValidationFailureCodes', () => {

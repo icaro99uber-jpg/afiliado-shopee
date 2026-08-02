@@ -935,8 +935,8 @@ Comportamento operacional:
 - `CommercialPromotionCopyGenerationService` depende apenas de interfaces. O
   provider OpenAI usa Responses API com Structured Output estrito,
   `store=false`, sem streaming, background, tools ou retry automático.
-- O prompt `commercial-promotion-copy-v1` e a validação
-  `commercial-promotion-copy-validation-v1` recebem somente nome do produto,
+- O prompt `commercial-promotion-copy-v2` e a validação
+  `commercial-promotion-copy-validation-v2` recebem somente nome do produto,
   loja, nicho, sinais, score, desconto, avaliação, vendas, queda opcional e
   limites. Nunca recebem links, IDs externos, fingerprints, JID, credenciais ou
   payload externo.

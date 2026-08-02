@@ -836,8 +836,8 @@ revalidação serializável → `GeneratedCopy AI`, attempt `SUCCEEDED` e candid
 `COPY_READY` atômicos.
 
 O provider usa Structured Output estrito, prompt
-`commercial-promotion-copy-v1`, validação
-`commercial-promotion-copy-validation-v1`, `store=false`, zero retry e nenhuma
+`commercial-promotion-copy-v2`, validação
+`commercial-promotion-copy-validation-v2`, `store=false`, zero retry e nenhuma
 tool. Produto, loja e nicho são normalizados e delimitados como dados não
 confiáveis. A IA nunca recebe link, ID externo, fingerprint ou credencial e só
 gera `headline`, `body`, `cta` e hashtags sem números ou fatos comerciais. O

@@ -215,4 +215,28 @@ describe('commercialAiCopyInputFingerprint', () => {
       }),
     ).toBe(v2);
   });
+
+  it('separa fingerprints de prompt v1 e v2 mantendo a mesma validationVersion', () => {
+    const promptV1 = commercialAiCopyInputFingerprint({
+      ...input,
+      promptVersion: 'commercial-promotion-copy-v1',
+      validationVersion: 'commercial-promotion-copy-validation-v2',
+      promotionSignals: [...input.promotionSignals],
+    });
+    const promptV2 = commercialAiCopyInputFingerprint({
+      ...input,
+      promptVersion: 'commercial-promotion-copy-v2',
+      validationVersion: 'commercial-promotion-copy-validation-v2',
+      promotionSignals: [...input.promotionSignals],
+    });
+    expect(promptV2).not.toBe(promptV1);
+    expect(
+      commercialAiCopyInputFingerprint({
+        ...input,
+        promptVersion: 'commercial-promotion-copy-v2',
+        validationVersion: 'commercial-promotion-copy-validation-v2',
+        promotionSignals: [...input.promotionSignals],
+      }),
+    ).toBe(promptV2);
+  });
 });

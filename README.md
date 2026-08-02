@@ -1214,7 +1214,7 @@ Rotas disponíveis:
   `{ "confirm": "GERAR_COPY_COM_IA" }`;
 - `GET /commercial/promotion-candidates/:id/copy`.
 
-O prompt `commercial-promotion-copy-v1` trata catálogo como dado não confiável.
+O prompt `commercial-promotion-copy-v2` trata catálogo como dado não confiável.
 O schema remoto Structured Outputs é a versão v2 conservadora: objeto estrito
 com propriedades obrigatórias, `additionalProperties: false`, strings, array
 de strings e `maxItems`; limites de comprimento e unicidade permanecem somente
