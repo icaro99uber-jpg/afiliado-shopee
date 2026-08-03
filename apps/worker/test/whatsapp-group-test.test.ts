@@ -200,6 +200,10 @@ const successfulDispatch = (): WhatsAppDispatchDetails => ({
   sentAt: new Date('2026-07-24T12:01:00.000Z'),
   errorMessage: null,
   generatedCopy: {
+    id: 'copy-1',
+    productId: 'product-1',
+    snapshotId: null,
+    createdFromCandidateId: null,
     titulo: 'Teste controlado de grupo',
     mensagem: WHATSAPP_GROUP_TEST_MESSAGE,
     cta: '',
