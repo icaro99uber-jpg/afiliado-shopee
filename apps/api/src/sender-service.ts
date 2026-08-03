@@ -97,8 +97,8 @@ export class SenderService {
         ...matches[0],
         generatedCopy: {
           id: dispatch.generatedCopy.id,
-          productId: matches[0].productId,
-          snapshotId: matches[0].snapshotId,
+          productId: dispatch.generatedCopy.productId,
+          snapshotId: dispatch.generatedCopy.snapshotId,
           createdFromCandidateId: dispatch.generatedCopy.createdFromCandidateId ?? null,
           titulo: dispatch.generatedCopy.titulo,
           mensagem: dispatch.generatedCopy.mensagem,
@@ -114,12 +114,25 @@ export class SenderService {
           imageUrl = draft.imageUrl;
           deliveryMode = 'IMAGE';
         }
+        if (draft.warnings && draft.warnings.length > 0) {
+          this.options.logger.info(
+            { event: 'whatsapp.dispatch.draft_warning', dispatchId, warningCodes: draft.warnings },
+            'Commercial message draft generated with warnings'
+          );
+        }
       } catch (error) {
+        let errorCode = 'COMMERCIAL_MESSAGE_DRAFT_FAILED';
+        if (error instanceof AppError) {
+          errorCode = error.code;
+        } else if (error instanceof Error && /^COMMERCIAL_MESSAGE_[A-Z0-9_]+$/.test(error.message)) {
+          errorCode = error.message;
+        }
+
         this.options.logger.error(
-          { event: 'whatsapp.dispatch.draft_failed', dispatchId, errorType: error instanceof Error ? error.name : 'UnknownError' },
+          { event: 'whatsapp.dispatch.draft_failed', dispatchId, errorCode },
           'Failed to create commercial draft',
         );
-        throw error;
+        throw new AppError('Falha ao montar mensagem comercial', errorCode);
       }
     } else {
       message = this.options.messageBuilder

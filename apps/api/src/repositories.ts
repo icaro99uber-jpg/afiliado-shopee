@@ -1026,7 +1026,14 @@ export type WhatsAppDispatchRecord = WhatsAppDispatchCreateData & {
 export type WhatsAppDispatchDetails = WhatsAppDispatchRecord & {
   generatedCopy: Pick<
     GeneratedCopyRecord,
-    'id' | 'titulo' | 'mensagem' | 'cta' | 'hashtags' | 'createdFromCandidateId'
+    | 'id'
+    | 'productId'
+    | 'snapshotId'
+    | 'titulo'
+    | 'mensagem'
+    | 'cta'
+    | 'hashtags'
+    | 'createdFromCandidateId'
   > & {
     promotionCandidates?: Omit<import('./commercial-message-draft-service').CommercialMessageDraftCandidate, 'generatedCopy'>[];
   };

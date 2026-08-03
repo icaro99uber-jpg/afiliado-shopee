@@ -34,7 +34,7 @@ const prismaMock = (dispatchData = dispatch) => ({
   },
 });
 
-import type { CommercialMessageDraftService } from '../src/commercial-message-draft-service';
+import { CommercialMessageDraftService } from '../src/commercial-message-draft-service';
 
 const createService = (
   prisma = prismaMock(),
@@ -318,15 +318,13 @@ describe('SenderService', () => {
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(() => {
-          const error = new Error('Candidate expired');
-          error.name = 'COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED';
-          throw error;
+          throw new Error('COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED');
         }),
       } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await expect(
         createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
-      ).rejects.toThrow('Candidate expired');
+      ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED' });
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.objectContaining({ event: 'whatsapp.dispatch.draft_failed' }),
@@ -381,6 +379,100 @@ describe('SenderService', () => {
         message: 'Draft caption text',
       });
       expect(provider.sentMessages[0]).not.toHaveProperty('imageUrl');
+    });
+
+    describe('Testes com CommercialMessageDraftService real', () => {
+      const buildRealDispatch = () => {
+        const now = new Date();
+        return {
+          id: 'dispatch-1',
+          destinationId: 'dest-1',
+          productId: 'product-1',
+          generatedCopyId: 'copy-1',
+          status: 'PENDING',
+          destination: { type: 'INDIVIDUAL', destination: '11999999999' },
+          product: { id: 'product-1', comissao: 0.2 },
+          generatedCopy: {
+            id: 'copy-1',
+            productId: 'product-1',
+            snapshotId: 'snap-1',
+            createdFromCandidateId: 'candidate-1',
+            titulo: 'Title',
+            mensagem: 'Message',
+            cta: 'CTA https://shope.ee/link',
+            hashtags: '#hash',
+            promotionCandidates: [
+              {
+                id: 'candidate-1',
+                productId: 'product-1',
+                snapshotId: 'snap-1',
+                generatedCopyId: 'copy-1',
+                status: 'COPY_READY',
+                expiresAt: new Date(now.getTime() + 100000),
+                product: {
+                  id: 'product-1',
+                  unavailableAt: null,
+                  affiliateLink: 'https://shope.ee/link',
+                  urlImagem: 'https://shopee.com/image.jpg',
+                  commercialSnapshotRevision: 1,
+                },
+                snapshot: {
+                  id: 'snap-1',
+                  productId: 'product-1',
+                  revision: 1,
+                  unavailableAt: null,
+                  offerEndsAt: null,
+                },
+              },
+            ],
+          },
+        };
+      };
+
+      it('generatedCopy.productId diferente do produto gera erro de integridade de relação', async () => {
+        const dispatchObj = buildRealDispatch();
+        dispatchObj.generatedCopy.productId = 'other-product';
+        const prisma = prismaMock(dispatchObj);
+        const provider = new MockWhatsAppProvider();
+        const draftService = new CommercialMessageDraftService();
+
+        await expect(
+          createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+        ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_RELATION_MISMATCH' });
+
+        expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+        expect(provider.sentMessages).toHaveLength(0);
+      });
+
+      it('generatedCopy.snapshotId diferente do snapshot gera erro de integridade de relação', async () => {
+        const dispatchObj = buildRealDispatch();
+        dispatchObj.generatedCopy.snapshotId = 'other-snap';
+        const prisma = prismaMock(dispatchObj);
+        const provider = new MockWhatsAppProvider();
+        const draftService = new CommercialMessageDraftService();
+
+        await expect(
+          createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+        ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_RELATION_MISMATCH' });
+
+        expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+        expect(provider.sentMessages).toHaveLength(0);
+      });
+
+      it('candidato com expiresAt no passado gera AppError com código COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED', async () => {
+        const dispatchObj = buildRealDispatch();
+        dispatchObj.generatedCopy.promotionCandidates[0].expiresAt = new Date(Date.now() - 10000);
+        const prisma = prismaMock(dispatchObj);
+        const provider = new MockWhatsAppProvider();
+        const draftService = new CommercialMessageDraftService();
+
+        await expect(
+          createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
+        ).rejects.toMatchObject({ code: 'COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED' });
+
+        expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
+        expect(provider.sentMessages).toHaveLength(0);
+      });
     });
   });
 });

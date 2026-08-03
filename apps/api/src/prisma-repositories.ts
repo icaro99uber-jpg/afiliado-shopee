@@ -3333,6 +3333,8 @@ export class PrismaWhatsAppDispatchRepository implements WhatsAppDispatchReposit
         generatedCopy: {
           select: {
             id: true,
+            productId: true,
+            snapshotId: true,
             titulo: true,
             mensagem: true,
             cta: true,
