@@ -98,7 +98,7 @@ export class SenderService {
         generatedCopy: {
           id: dispatch.generatedCopy.id,
           productId: dispatch.generatedCopy.productId,
-          snapshotId: dispatch.generatedCopy.snapshotId,
+          snapshotId: dispatch.generatedCopy.snapshotId ?? null,
           createdFromCandidateId: dispatch.generatedCopy.createdFromCandidateId ?? null,
           titulo: dispatch.generatedCopy.titulo,
           mensagem: dispatch.generatedCopy.mensagem,
