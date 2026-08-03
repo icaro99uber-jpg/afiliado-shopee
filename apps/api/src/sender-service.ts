@@ -18,7 +18,7 @@ export type SenderServiceOptions = {
   provider: WhatsAppProvider;
   logger: Pick<FastifyBaseLogger, 'info' | 'error'>;
   messageBuilder?: (copy: WhatsAppDispatchDetails['generatedCopy']) => string;
-  draftService?: CommercialMessageDraftService;
+  draftService?: Pick<CommercialMessageDraftService, 'createDraft'>;
   groupSendPolicy?: WhatsAppGroupSendPolicy;
 };
 

@@ -247,11 +247,14 @@ describe('SenderService', () => {
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(() => ({
+          candidateId: 'candidate-123',
+          generatedCopyId: 'copy-123',
+          warnings: [],
           caption: 'Draft caption',
           imageUrl: 'https://shopee.com/image.jpg',
-          deliveryMode: 'IMAGE',
+          deliveryMode: 'IMAGE' as const,
         })),
-      } as unknown as CommercialMessageDraftService;
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await createService(prisma, provider, { draftService }).sendDispatch('dispatch-1');
 
@@ -277,7 +280,7 @@ describe('SenderService', () => {
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(),
-      };
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await expect(
         createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
@@ -300,7 +303,7 @@ describe('SenderService', () => {
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(),
-      };
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await expect(
         createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
@@ -310,19 +313,20 @@ describe('SenderService', () => {
       expect(provider.sentMessages).toHaveLength(0);
       expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
     });
-
     it('lança erro de draftService e interrompe fluxo (candidato inválido ou vencido)', async () => {
       const prisma = prismaMock(commercialDispatch);
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(() => {
-          throw new Error('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+          const error = new Error('Candidate expired');
+          error.name = 'COMMERCIAL_MESSAGE_CANDIDATE_EXPIRED';
+          throw error;
         }),
-      } as unknown as CommercialMessageDraftService;
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await expect(
         createService(prisma, provider, { draftService }).sendDispatch('dispatch-1')
-      ).rejects.toThrow('COMMERCIAL_MESSAGE_IMAGE_MISSING');
+      ).rejects.toThrow('Candidate expired');
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.objectContaining({ event: 'whatsapp.dispatch.draft_failed' }),
@@ -332,16 +336,44 @@ describe('SenderService', () => {
       expect(prisma.whatsAppDispatch.updateMany).not.toHaveBeenCalled();
     });
 
+    it('fluxo legado: envia apenas texto e não chama draftService se createdFromCandidateId for nulo', async () => {
+      const dispatchLegado = {
+        ...commercialDispatch,
+        generatedCopy: {
+          ...commercialDispatch.generatedCopy,
+          createdFromCandidateId: null,
+          promotionCandidates: [],
+        },
+      };
+      const prisma = prismaMock(dispatchLegado);
+      const provider = new MockWhatsAppProvider();
+      const draftService = {
+        createDraft: vi.fn(),
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
+
+      await createService(prisma, provider, { draftService }).sendDispatch('dispatch-1');
+
+      expect(draftService.createDraft).not.toHaveBeenCalled();
+      expect(provider.sentMessages[0]).toMatchObject({
+        message: expect.stringContaining(dispatchLegado.generatedCopy.titulo),
+      });
+      expect(provider.sentMessages[0]).not.toHaveProperty('imageUrl');
+      expect(prisma.whatsAppDispatch.updateMany).toHaveBeenCalledTimes(1);
+    });
+
     it('não usa imageUrl se draft disser deliveryMode=TEXT', async () => {
       const prisma = prismaMock(commercialDispatch);
       const provider = new MockWhatsAppProvider();
       const draftService = {
         createDraft: vi.fn(() => ({
+          candidateId: 'candidate-123',
+          generatedCopyId: 'copy-123',
+          warnings: [],
           caption: 'Draft caption text',
           imageUrl: 'https://shopee.com/image.jpg',
-          deliveryMode: 'TEXT',
+          deliveryMode: 'TEXT' as const,
         })),
-      } as unknown as CommercialMessageDraftService;
+      } satisfies Pick<CommercialMessageDraftService, 'createDraft'>;
 
       await createService(prisma, provider, { draftService }).sendDispatch('dispatch-1');
 
