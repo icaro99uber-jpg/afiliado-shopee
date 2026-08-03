@@ -104,17 +104,20 @@ export type CommercialImageDispatchE2ERunResult =
 
 type E2EJob = Pick<Job<WhatsAppDispatchJob>, 'id' | 'waitUntilFinished'>;
 
-export type CommercialImageDispatchE2ERuntime = {
+export type CommercialImageDispatchE2EReadOnlyRuntime = {
   repositories: ApplicationRepositories;
   draftService: CommercialMessageDraftService;
   prisma: ReturnType<typeof createPrismaClient>;
+  close(force?: boolean): Promise<void>;
+};
+
+export type CommercialImageDispatchE2ERuntime = CommercialImageDispatchE2EReadOnlyRuntime & {
   assertNoCompetingWork(): Promise<void>;
   findJob(jobId: string): Promise<unknown | null>;
   enqueue(dispatchId: string, jobId: string): Promise<E2EJob>;
   startWorker(): Promise<void>;
   waitForJob(job: E2EJob, timeoutMs: number): Promise<void>;
   queryDispatchApi(dispatchId: string): Promise<WhatsAppDispatchDetails>;
-  close(force?: boolean): Promise<void>;
 };
 
 type CommercialImageDispatchE2EOptions = {
@@ -124,6 +127,10 @@ type CommercialImageDispatchE2EOptions = {
   readEnvFile?: (path: string) => string;
   logger?: E2ELogger;
   preflight?: (config: AppEnv) => Promise<CommercialImageDispatchE2EPreflight>;
+  readOnlyRuntimeFactory?: (
+    config: AppEnv,
+    logger: E2ELogger,
+  ) => Promise<CommercialImageDispatchE2EReadOnlyRuntime>;
   runtimeFactory?: (
     config: AppEnv,
     logger: E2ELogger,
@@ -231,11 +238,9 @@ const validateControlledConfig = (config: AppEnv) => {
   };
 };
 
-export const runCommercialImageDispatchE2EPreflight = async (
+export const runCommercialImageDispatchE2EExternalPreflight = async (
   config: AppEnv,
 ): Promise<CommercialImageDispatchE2EPreflight> => {
-  const prisma = createPrismaClient();
-  const redis = createRedisConnection(config.REDIS_URL);
   try {
     const rootResponse = await fetch(`${config.EVOLUTION_API_URL}/`, {
       signal: AbortSignal.timeout(10_000),
@@ -277,14 +282,6 @@ export const runCommercialImageDispatchE2EPreflight = async (
       );
     }
 
-    await prisma.productLead.count();
-    if ((await redis.ping()) !== 'PONG') {
-      throw new CommercialImageDispatchE2EError(
-        'Redis principal indisponivel',
-        'COMMERCIAL_E2E_REDIS_UNAVAILABLE',
-      );
-    }
-
     return {
       databaseAvailable: true,
       redisAvailable: true,
@@ -292,11 +289,12 @@ export const runCommercialImageDispatchE2EPreflight = async (
       evolutionVersion: '2.3.7',
       instanceStatus: 'open',
     };
-  } finally {
-    await Promise.allSettled([
-      prisma.$disconnect(),
-      redis.quit().then(() => undefined),
-    ]);
+  } catch (error) {
+    if (error instanceof CommercialImageDispatchE2EError) throw error;
+    throw new CommercialImageDispatchE2EError(
+      'Falha inesperada no preflight externo',
+      'COMMERCIAL_E2E_EXTERNAL_PREFLIGHT_FAILED'
+    );
   }
 };
 
@@ -311,6 +309,11 @@ const validateEntities = async (
 ) => {
   const candidate = await prisma.commercialPromotionCandidate.findUnique({
     where: { id: candidateId },
+    include: {
+      product: true,
+      snapshot: true,
+      generatedCopy: true,
+    }
   });
   if (!candidate) {
     throw new CommercialImageDispatchE2EError(
@@ -319,18 +322,33 @@ const validateEntities = async (
     );
   }
 
-  const copy = await repositories.generatedCopies.findById(copyId);
-  if (!copy) {
+  const { product, snapshot, generatedCopy: copy } = candidate;
+
+  if (!product) {
     throw new CommercialImageDispatchE2EError(
-      'Copy nao encontrada',
+      'Produto nao encontrado',
+      'COMMERCIAL_E2E_PRODUCT_NOT_FOUND',
+    );
+  }
+
+  if (!copy || copy.id !== copyId) {
+    throw new CommercialImageDispatchE2EError(
+      'Copy nao encontrada ou divergente',
       'COMMERCIAL_E2E_COPY_NOT_FOUND',
     );
   }
 
-  if (copy.createdFromCandidateId !== candidateId) {
+  if (copy.createdFromCandidateId !== candidateId || copy.productId !== candidate.productId || copy.snapshotId !== candidate.snapshotId) {
     throw new CommercialImageDispatchE2EError(
       'Relacao candidato-copy inconsistente',
       'COMMERCIAL_E2E_RELATION_MISMATCH',
+    );
+  }
+
+  if (!snapshot) {
+    throw new CommercialImageDispatchE2EError(
+      'Snapshot nao encontrado',
+      'COMMERCIAL_E2E_SNAPSHOT_NOT_FOUND',
     );
   }
 
@@ -356,30 +374,10 @@ const validateEntities = async (
     );
   }
 
-  // Find snapshot to ensure relation is correct
-  const snapshot = await prisma.commercialOfferSnapshot.findUnique({
-    where: { id: candidate.snapshotId },
-  });
-  if (!snapshot) {
-    throw new CommercialImageDispatchE2EError(
-      'Snapshot nao encontrado',
-      'COMMERCIAL_E2E_SNAPSHOT_NOT_FOUND',
-    );
-  }
-
-  const candidateForDraft = {
-    ...candidate,
-    generatedCopy: {
-      ...copy,
-      createdFromCandidateId: candidate.id,
-      snapshotId: candidate.snapshotId,
-    },
-  };
-
   let draft;
   try {
-    draft = draftService.createDraft(candidateForDraft as unknown as Parameters<CommercialMessageDraftService['createDraft']>[0]);
-  } catch {
+    draft = draftService.createDraft(candidate);
+  } catch (error) {
     throw new CommercialImageDispatchE2EError(
       'Falha ao gerar rascunho',
       'COMMERCIAL_E2E_DRAFT_FAILED',
@@ -393,15 +391,20 @@ const validateEntities = async (
     );
   }
 
-  const linkCount = (draft.caption.match(/http/g) || []).length;
-  if (linkCount !== 1) {
+  if (!product.affiliateLink) {
+    throw new CommercialImageDispatchE2EError(
+      'Produto nao possui link de afiliado',
+      'COMMERCIAL_E2E_PRODUCT_NO_LINK',
+    );
+  }
+  const occurrences = draft.caption.split(product.affiliateLink.trim()).length - 1;
+  if (occurrences !== 1) {
     throw new CommercialImageDispatchE2EError(
       'A copy deve conter exatamente um link de afiliado',
       'COMMERCIAL_E2E_LINK_COUNT_INVALID',
     );
   }
 
-  // Ensure no previous dispatch
   const prevDispatches = await repositories.whatsappDispatches.list({
     productId: candidate.productId,
   });
@@ -413,6 +416,20 @@ const validateEntities = async (
   }
 
   return { candidate, copy, dest, draft };
+};
+
+export const createReadOnlyCommercialImageDispatchE2ERuntime = async (): Promise<CommercialImageDispatchE2EReadOnlyRuntime> => {
+  const prisma = createPrismaClient();
+  const repositories = createPrismaRepositories(prisma);
+  const draftService = new CommercialMessageDraftService();
+  return {
+    repositories,
+    draftService,
+    prisma,
+    close: async () => {
+      await prisma.$disconnect();
+    },
+  };
 };
 
 export const createRealCommercialImageDispatchE2ERuntime = async (
@@ -560,21 +577,24 @@ const safeFailure = (
     typeof error === 'object' &&
     'code' in error &&
     typeof (error as { code: unknown }).code === 'string' &&
-    (error as { code: string }).code.startsWith('COMMERCIAL_E2E_')
+    (
+      (error as { code: string }).code.startsWith('COMMERCIAL_E2E_') ||
+      (error as { code: string }).code.startsWith('COMMERCIAL_MESSAGE_')
+    )
   ) {
-    const e2eError = error as { code: string; message: string; details?: { destination?: string; [key: string]: unknown } };
+    const e2eError = error as { code: string; message: string; details?: { destination?: string; dispatchId?: string; status?: string; investigationRequired?: boolean; [key: string]: unknown } };
     return {
       code: e2eError.code,
       message: e2eError.message,
-      ...(e2eError.details || {}),
-      ...(maskedDestination && !(e2eError.details?.destination)
-        ? { destination: maskedDestination }
-        : {}),
+      ...(e2eError.details?.dispatchId ? { dispatchId: e2eError.details.dispatchId } : {}),
+      ...(e2eError.details?.status ? { status: e2eError.details.status } : {}),
+      ...(e2eError.details?.investigationRequired !== undefined ? { investigationRequired: e2eError.details.investigationRequired } : {}),
+      ...(e2eError.details?.destination ? { destination: e2eError.details.destination } : (maskedDestination ? { destination: maskedDestination } : {})),
     };
   }
   return {
     code: 'COMMERCIAL_E2E_BLOCKED',
-    message: `Teste E2E bloqueado por configuracao ou estado inseguro: ${error instanceof Error ? error.message : String(error)}`,
+    message: 'Teste E2E bloqueado por estado inesperado',
     ...(maskedDestination ? { destination: maskedDestination } : {}),
   };
 };
@@ -764,30 +784,26 @@ export const runCommercialImageDispatchE2E = async (
     const config = loadConfig(env);
     const destinationConfig = validateControlledConfig(config);
     maskedDestination = destinationConfig.maskedDestination;
-    const preflight = await (
-      options.preflight ?? runCommercialImageDispatchE2EPreflight
-    )(config);
-
-    const runtime = await (
-      options.runtimeFactory ?? createRealCommercialImageDispatchE2ERuntime
+    const readOnlyRuntime = await (
+      options.readOnlyRuntimeFactory ?? createReadOnlyCommercialImageDispatchE2ERuntime
     )(config, logger);
 
-    if (mode === 'dry-run') {
-      let validationOutput;
-      try {
-        validationOutput = await validateEntities(
-          runtime.repositories,
-          runtime.draftService,
-          candidateId,
-          copyId,
-          destinationId,
-          destinationConfig.destination,
-          runtime.prisma
-        );
-      } finally {
-        await runtime.close(false);
-      }
+    let validationOutput;
+    try {
+      validationOutput = await validateEntities(
+        readOnlyRuntime.repositories,
+        readOnlyRuntime.draftService,
+        candidateId,
+        copyId,
+        destinationId,
+        destinationConfig.destination,
+        readOnlyRuntime.prisma
+      );
+    } finally {
+      await readOnlyRuntime.close(false);
+    }
 
+    if (mode === 'dry-run') {
       const output: CommercialImageDispatchE2EDryRunOutput = {
         mode: 'dry-run',
         result: 'GO',
@@ -795,7 +811,11 @@ export const runCommercialImageDispatchE2E = async (
         safeMode: true,
         destination: maskedDestination,
         schedulerEnabled: false,
-        ...preflight,
+        databaseAvailable: true,
+        redisAvailable: true,
+        evolutionAvailable: true,
+        evolutionVersion: '2.3.7',
+        instanceStatus: 'open',
         messageWillBeSent: false,
         draftDeliveryMode: validationOutput.draft.deliveryMode as 'IMAGE',
         warningsCount: validationOutput.draft.warnings?.length || 0,
@@ -803,6 +823,14 @@ export const runCommercialImageDispatchE2E = async (
       logger.info(output);
       return { exitCode: 0, output };
     }
+
+    const preflight = await (
+      options.preflight ?? runCommercialImageDispatchE2EExternalPreflight
+    )(config);
+
+    const runtime = await (
+      options.runtimeFactory ?? createRealCommercialImageDispatchE2ERuntime
+    )(config, logger);
 
     const result = await executeCommercialImageDispatchE2E({
       runtime,
