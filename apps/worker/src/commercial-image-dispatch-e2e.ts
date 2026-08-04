@@ -459,8 +459,10 @@ const validateEntities = async (
   return { candidate, copy, dest, draft };
 };
 
-export const createReadOnlyCommercialImageDispatchE2ERuntime = async (): Promise<CommercialImageDispatchE2EReadOnlyRuntime> => {
-  const prisma = createPrismaClient();
+export const createReadOnlyCommercialImageDispatchE2ERuntime = async (
+  config: AppEnv,
+): Promise<CommercialImageDispatchE2EReadOnlyRuntime> => {
+  const prisma = createPrismaClient(config.DATABASE_URL);
   const repositories = createPrismaRepositories(prisma);
   const draftService = new CommercialMessageDraftService();
   return {
@@ -477,7 +479,7 @@ export const createRealCommercialImageDispatchE2ERuntime = async (
   config: AppEnv,
   logger: E2ELogger,
 ): Promise<CommercialImageDispatchE2ERuntime> => {
-  const prisma = createPrismaClient();
+  const prisma = createPrismaClient(config.DATABASE_URL);
   const redis = createRedisConnection(config.REDIS_URL);
   const queueEventsRedis = createRedisConnection(config.REDIS_URL);
   const whatsappQueue = createWhatsAppDispatchQueue(redis);
