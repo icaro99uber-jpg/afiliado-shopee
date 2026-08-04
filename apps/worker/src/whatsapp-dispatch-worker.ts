@@ -17,6 +17,7 @@ import {
 } from '../../api/src/application-services';
 import type { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 import { finalizeCommercialPipelineRun } from '../../api/src/commercial-pipeline-run-finalizer';
+import { CommercialMessageDraftService } from '../../api/src/commercial-message-draft-service';
 
 export type WhatsAppDispatchWorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
@@ -37,6 +38,7 @@ export type WhatsAppDispatchProcessorOptions = {
   // isolado nao instancia nem usa Hunter, Score, Copy ou Pipeline.
   hunterProvider?: HunterProvider;
   groupSendPolicy?: WhatsAppGroupSendPolicy;
+  draftService?: Pick<CommercialMessageDraftService, 'createDraft'>;
 };
 
 type CreateWhatsAppDispatchWorkerOptions = {
@@ -46,6 +48,7 @@ type CreateWhatsAppDispatchWorkerOptions = {
   whatsAppProvider: WhatsAppProvider;
   messageBuilder?: WhatsAppDispatchProcessorOptions['messageBuilder'];
   groupSendPolicy?: WhatsAppGroupSendPolicy;
+  draftService?: Pick<CommercialMessageDraftService, 'createDraft'>;
 };
 
 const consoleLogger: WhatsAppDispatchWorkerLogger = {
@@ -66,6 +69,7 @@ export const processWhatsAppDispatchJob = async (
     logger: options.logger,
     messageBuilder: options.messageBuilder,
     groupSendPolicy: options.groupSendPolicy,
+    draftService: options.draftService ?? new CommercialMessageDraftService(),
   });
   try {
     const dispatch = await sender.sendDispatch(job.data.dispatchId);
@@ -118,6 +122,7 @@ export const createWhatsAppDispatchWorker = (
     whatsAppProvider: options.whatsAppProvider,
     messageBuilder: options.messageBuilder,
     groupSendPolicy: options.groupSendPolicy,
+    draftService: options.draftService,
   };
   const worker = new Worker<WhatsAppDispatchJob>(
     QUEUE_NAMES.whatsappDispatch,
