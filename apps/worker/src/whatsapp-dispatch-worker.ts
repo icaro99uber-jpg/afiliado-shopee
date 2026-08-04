@@ -18,14 +18,19 @@ import {
 import type { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 import { finalizeCommercialPipelineRun } from '../../api/src/commercial-pipeline-run-finalizer';
 import { CommercialMessageDraftService } from '../../api/src/commercial-message-draft-service';
+import type { ApplicationRepositories } from '../../api/src/application-services';
 
 export type WhatsAppDispatchWorkerLogger = {
   info: (obj: unknown, msg?: string) => void;
   error: (obj: unknown, msg?: string) => void;
 };
 
-export type WhatsAppDispatchProcessorOptions = {
-  prisma: ReturnType<typeof createPrismaClient>;
+export type WhatsAppDispatchProcessorRepositories = Pick<
+  ApplicationRepositories,
+  'whatsappDispatches' | 'commercialRuns'
+>;
+
+type WhatsAppDispatchProcessorBaseOptions = {
   logger: WhatsAppDispatchWorkerLogger;
   whatsAppProvider: WhatsAppProvider;
   messageBuilder?: (copy: {
@@ -40,6 +45,16 @@ export type WhatsAppDispatchProcessorOptions = {
   groupSendPolicy?: WhatsAppGroupSendPolicy;
   draftService?: Pick<CommercialMessageDraftService, 'createDraft'>;
 };
+
+export type WhatsAppDispatchProcessorOptions =
+  | (WhatsAppDispatchProcessorBaseOptions & {
+      prisma: ReturnType<typeof createPrismaClient>;
+      repositories?: never;
+    })
+  | (WhatsAppDispatchProcessorBaseOptions & {
+      prisma?: never;
+      repositories: WhatsAppDispatchProcessorRepositories;
+    });
 
 type CreateWhatsAppDispatchWorkerOptions = {
   connection?: ReturnType<typeof createRedisConnection>;
@@ -62,7 +77,8 @@ export const processWhatsAppDispatchJob = async (
 ) => {
   if (job.name !== JOB_NAMES.whatsappDispatch) return { skipped: true };
 
-  const repositories = createPrismaRepositories(options.prisma);
+  const repositories =
+    options.repositories ?? createPrismaRepositories(options.prisma);
   const sender = createSenderService({
     repositories,
     whatsAppProvider: options.whatsAppProvider,

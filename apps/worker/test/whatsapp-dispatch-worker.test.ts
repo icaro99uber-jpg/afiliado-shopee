@@ -1,71 +1,131 @@
 import { describe, expect, it, vi } from 'vitest';
-import { processWhatsAppDispatchJob, type WhatsAppDispatchProcessorOptions } from '../src/whatsapp-dispatch-worker';
+import { processWhatsAppDispatchJob, type WhatsAppDispatchProcessorRepositories } from '../src/whatsapp-dispatch-worker';
 import { JOB_NAMES, type WhatsAppDispatchJob } from '@shopee-auto-affiliate-ai/queue';
-import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import type { WhatsAppProvider } from '@shopee-auto-affiliate-ai/providers';
 import type { CommercialMessageDraftService } from '../../api/src/commercial-message-draft-service';
 import { AppError } from '@shopee-auto-affiliate-ai/shared';
+import type { Job } from 'bullmq';
+import type { WhatsAppDispatchDetails } from '../../api/src/repositories';
 
-vi.mock('@shopee-auto-affiliate-ai/database', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@shopee-auto-affiliate-ai/database')>();
-  return {
-    ...actual,
-    createPrismaClient: vi.fn(),
-  };
-});
+const fakeDestination = {
+  id: 'dest-123',
+  destination: '5511999999999',
+  type: 'INDIVIDUAL' as const,
+  name: 'Test',
+  active: true,
+  available: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  fingerprint: 'hash',
+  sourceInstanceName: 'instance',
+};
+
+const fakeProduct = {
+  id: 'prod-123',
+  providerProductId: 'prod-id-1',
+  origin: 'OFFICIAL' as const,
+  nome: 'Test',
+  preco: 10,
+  urlImagem: 'http://img',
+  affiliateLink: 'http://link',
+  desconto: 0,
+  nota: 5,
+  vendidos: 100,
+  comissao: 1,
+  loja: 'Shopee',
+  categoria: 'cat',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  score: 100,
+  scoreUpdatedAt: new Date(),
+  lastSeenAt: new Date(),
+  unavailableAt: null,
+  commercialSnapshotRevision: 1,
+  commercialSnapshotFingerprint: 'hash',
+};
+
+const fakeCopy = {
+  id: 'copy-123',
+  productId: 'prod-123',
+  snapshotId: 'snap-123',
+  titulo: 'Title',
+  mensagem: 'Message',
+  cta: 'Buy now',
+  hashtags: '#sale',
+  createdAt: new Date(),
+  createdFromCandidateId: 'candidate-123',
+  promotionCandidates: [
+    {
+      id: 'candidate-123',
+      status: 'COPY_READY' as const,
+      productId: 'prod-123',
+      snapshotId: 'snap-123',
+      generatedCopyId: 'copy-123',
+      createdAt: new Date(),
+      expiresAt: null,
+      snapshot: {
+        id: 'snap-123',
+        productId: 'prod-123',
+        revision: 1,
+        fingerprint: 'hash',
+        preco: 10,
+        comissao: 1,
+        desconto: 0,
+        nota: 5,
+        vendidos: 100,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        unavailableAt: null,
+        offerEndsAt: null,
+      },
+      product: fakeProduct,
+    },
+  ],
+};
+
+const fakeDispatch: WhatsAppDispatchDetails = {
+  id: 'dispatch-123',
+  destinationId: 'dest-123',
+  generatedCopyId: 'copy-123',
+  productId: 'prod-123',
+  status: 'PENDING',
+  attemptCount: 0,
+  errorMessage: null,
+  sentAt: null,
+  externalMessageId: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  destination: fakeDestination,
+  product: fakeProduct,
+  generatedCopy: fakeCopy,
+};
 
 describe('processWhatsAppDispatchJob', () => {
   it('dispatch comercial recebe draftService sem COMMERCIAL_MESSAGE_DRAFT_SERVICE_UNAVAILABLE e chama provider uma vez para draft IMAGE', async () => {
-    const fakeCopy = {
-      id: 'copy-123',
-      createdFromCandidateId: 'candidate-123',
-      titulo: 'Title',
-      mensagem: 'Message',
-      cta: 'Buy now',
-      hashtags: '#sale',
-      createdAt: new Date(),
-      productId: 'prod-123',
-      snapshotId: 'snap-123',
-      promotionCandidates: [{ id: 'candidate-123', status: 'COPY_READY' }],
-    };
-    
-    const fakeDestination = {
-      id: 'dest-123',
-      destination: '5511999999999',
-      available: true,
-      active: true,
-    };
-    
-    const fakeDispatch = {
-      id: 'dispatch-123',
-      generatedCopyId: 'copy-123',
-      destinationId: 'dest-123',
-      status: 'PENDING',
-      attempts: 0,
-      generatedCopy: fakeCopy,
-      destination: fakeDestination,
+    const markAttemptPending = vi.fn().mockResolvedValue(true);
+    const markSent = vi.fn().mockResolvedValue(fakeDispatch);
+    const findByIdWithDetails = vi.fn().mockResolvedValue(fakeDispatch);
+
+    const repositories: WhatsAppDispatchProcessorRepositories = {
+      whatsappDispatches: {
+        findByIdWithDetails,
+        markAttemptPending,
+        markSent,
+        createPending: vi.fn(),
+        findByIdForSending: vi.fn().mockResolvedValue(fakeDispatch),
+        list: vi.fn(),
+        markFailed: vi.fn(),
+      },
+      commercialRuns: {
+        create: vi.fn(),
+        update: vi.fn(),
+        list: vi.fn(),
+        findById: vi.fn(),
+        findByDispatchId: vi.fn().mockResolvedValue(null),
+      },
     };
 
-    const prismaMock = {
-      whatsAppDispatch: {
-        findUnique: vi.fn().mockResolvedValue(fakeDispatch),
-        update: vi.fn().mockResolvedValue(fakeDispatch),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findByIdWithDetails: vi.fn().mockResolvedValue(fakeDispatch),
-      },
-      generatedCopy: {
-        findUnique: vi.fn().mockResolvedValue(fakeCopy),
-      },
-      commercialPromotionCandidate: {
-        findUnique: vi.fn().mockResolvedValue({ status: 'COPY_READY' }),
-      },
-      whatsAppDestination: {
-        findUnique: vi.fn().mockResolvedValue(fakeDestination),
-      },
-      $transaction: vi.fn((cb) => cb(prismaMock)),
-    } as unknown as ReturnType<typeof createPrismaClient>;
-
-    const fakeJob = {
+    const fakeJob: Pick<Job<WhatsAppDispatchJob>, 'id' | 'name' | 'data'> = {
       id: 'job-123',
       name: JOB_NAMES.whatsappDispatch,
       data: { dispatchId: 'dispatch-123' },
@@ -92,8 +152,8 @@ describe('processWhatsAppDispatchJob', () => {
 
     const logger = { info: vi.fn(), error: vi.fn() };
 
-    await processWhatsAppDispatchJob(fakeJob as any, {
-      prisma: prismaMock,
+    await processWhatsAppDispatchJob(fakeJob, {
+      repositories,
       whatsAppProvider,
       logger,
       draftService,
@@ -106,58 +166,34 @@ describe('processWhatsAppDispatchJob', () => {
       message: 'draft text',
       imageUrl: 'http://image',
     });
+    expect(markAttemptPending).toHaveBeenCalledOnce();
   });
 
   it('falha na criacao do draft nao chama o provider e falha sem tentativas adicionais', async () => {
-    const fakeCopy = {
-      id: 'copy-123',
-      createdFromCandidateId: 'candidate-123',
-      titulo: 'Title',
-      mensagem: 'Message',
-      cta: 'Buy now',
-      hashtags: '#sale',
-      createdAt: new Date(),
-      productId: 'prod-123',
-      snapshotId: 'snap-123',
-      promotionCandidates: [{ id: 'candidate-123', status: 'COPY_READY' }],
-    };
-    
-    const fakeDestination = {
-      id: 'dest-123',
-      available: true,
-      active: true,
-    };
-    
-    const fakeDispatch = {
-      id: 'dispatch-123',
-      generatedCopyId: 'copy-123',
-      destinationId: 'dest-123',
-      status: 'PENDING',
-      attempts: 0,
-      generatedCopy: fakeCopy,
-      destination: fakeDestination,
+    const markAttemptPending = vi.fn().mockResolvedValue(true);
+    const markFailed = vi.fn().mockResolvedValue(fakeDispatch);
+    const findByIdWithDetails = vi.fn().mockResolvedValue(fakeDispatch);
+
+    const repositories: WhatsAppDispatchProcessorRepositories = {
+      whatsappDispatches: {
+        findByIdWithDetails,
+        markAttemptPending,
+        markFailed,
+        markSent: vi.fn(),
+        createPending: vi.fn(),
+        findByIdForSending: vi.fn().mockResolvedValue(fakeDispatch),
+        list: vi.fn(),
+      },
+      commercialRuns: {
+        create: vi.fn(),
+        update: vi.fn(),
+        list: vi.fn(),
+        findById: vi.fn(),
+        findByDispatchId: vi.fn().mockResolvedValue(null),
+      },
     };
 
-    const prismaMock = {
-      whatsAppDispatch: {
-        findUnique: vi.fn().mockResolvedValue(fakeDispatch),
-        update: vi.fn().mockResolvedValue(fakeDispatch),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findByIdWithDetails: vi.fn().mockResolvedValue(fakeDispatch),
-      },
-      generatedCopy: {
-        findUnique: vi.fn().mockResolvedValue(fakeCopy),
-      },
-      commercialPromotionCandidate: {
-        findUnique: vi.fn().mockResolvedValue({ status: 'COPY_READY' }),
-      },
-      whatsAppDestination: {
-        findUnique: vi.fn().mockResolvedValue(fakeDestination),
-      },
-      $transaction: vi.fn((cb) => cb(prismaMock)),
-    } as unknown as ReturnType<typeof createPrismaClient>;
-
-    const fakeJob = {
+    const fakeJob: Pick<Job<WhatsAppDispatchJob>, 'id' | 'name' | 'data'> = {
       id: 'job-123',
       name: JOB_NAMES.whatsappDispatch,
       data: { dispatchId: 'dispatch-123' },
@@ -168,14 +204,16 @@ describe('processWhatsAppDispatchJob', () => {
     };
 
     const draftService: Pick<CommercialMessageDraftService, 'createDraft'> = {
-      createDraft: vi.fn().mockImplementation(() => { throw new AppError('Draft failure', 'DRAFT_ERROR') }),
+      createDraft: vi.fn().mockImplementation(() => {
+        throw new AppError('Draft failure', 'DRAFT_ERROR');
+      }),
     };
 
     const logger = { info: vi.fn(), error: vi.fn() };
 
     await expect(
-      processWhatsAppDispatchJob(fakeJob as any, {
-        prisma: prismaMock,
+      processWhatsAppDispatchJob(fakeJob, {
+        repositories,
         whatsAppProvider,
         logger,
         draftService,
@@ -184,5 +222,6 @@ describe('processWhatsAppDispatchJob', () => {
 
     expect(draftService.createDraft).toHaveBeenCalledOnce();
     expect(whatsAppProvider.sendMessage).not.toHaveBeenCalled();
+    expect(markAttemptPending).not.toHaveBeenCalled();
   });
 });
