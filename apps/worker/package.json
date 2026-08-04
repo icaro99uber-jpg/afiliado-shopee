@@ -20,7 +20,8 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "commercial:image:e2e": "tsx --tsconfig ../../tsconfig.runtime.json src/commercial-image-dispatch-e2e.ts"
   },
   "dependencies": {
     "@shopee-auto-affiliate-ai/config": "workspace:*",
