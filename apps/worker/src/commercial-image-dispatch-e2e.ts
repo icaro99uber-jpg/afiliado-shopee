@@ -27,13 +27,10 @@ import { buildApp } from '../../api/src/app';
 import {
   createPrismaRepositories,
 } from '../../api/src/application-services';
-import type { 
-  WhatsAppDispatchDetails, 
-  WhatsAppDestinationRecord, 
+import type {
+  WhatsAppDispatchDetails,
+  WhatsAppDestinationRecord,
   WhatsAppDispatchRecord,
-  CommercialPromotionCandidateRecord,
-  CommercialPromotionSnapshotRecord,
-  GeneratedCopyRecord
 } from '../../api/src/repositories';
 import { createWhatsAppDispatchWorker } from './whatsapp-dispatch-worker';
 import { CommercialMessageDraftService, type CommercialMessageDraftCandidate } from '../../api/src/commercial-message-draft-service';
@@ -52,11 +49,10 @@ type E2ELogger = {
 };
 
 export type CommercialImageDispatchE2EPreflight = {
-  databaseAvailable: true;
-  redisAvailable: true;
-  evolutionAvailable: true;
-  evolutionVersion: '2.3.7';
-  instanceStatus: 'open';
+  externalPreflightExecuted: boolean;
+  evolutionAvailable?: true;
+  evolutionVersion?: '2.3.7';
+  instanceStatus?: 'open';
 };
 
 export type CommercialImageDispatchE2EDryRunOutput = {
@@ -66,14 +62,10 @@ export type CommercialImageDispatchE2EDryRunOutput = {
   safeMode: true;
   destination: string;
   schedulerEnabled: false;
-  databaseAvailable: true;
-  redisAvailable: true;
-  evolutionAvailable: true;
-  evolutionVersion: '2.3.7';
-  instanceStatus: 'open';
   messageWillBeSent: false;
   draftDeliveryMode: 'IMAGE';
   warningsCount: number;
+  externalPreflightExecuted: boolean;
 };
 
 export type CommercialImageDispatchE2EConfirmedOutput = {
@@ -333,8 +325,7 @@ export const runCommercialImageDispatchE2EExternalPreflight = async (
     }
 
     return {
-      databaseAvailable: true,
-      redisAvailable: true,
+      externalPreflightExecuted: true,
       evolutionAvailable: true,
       evolutionVersion: '2.3.7',
       instanceStatus: 'open',
@@ -427,14 +418,14 @@ const validateEntities = async (
   let draft;
   try {
     draft = draftService.createDraft(candidate);
-  } catch (error) {
+  } catch {
     throw new CommercialImageDispatchE2EError(
       'Falha ao gerar rascunho',
       'COMMERCIAL_E2E_DRAFT_FAILED',
     );
   }
 
-  if (draft.deliveryMode !== 'IMAGE' || !draft.imageUrl) {
+  if (draft.deliveryMode !== 'IMAGE' || !draft.imageUrl || !draft.imageUrl.startsWith('http')) {
     throw new CommercialImageDispatchE2EError(
       'Rascunho nao e de imagem ou URL invalida',
       'COMMERCIAL_E2E_NOT_IMAGE_DRAFT',
@@ -622,8 +613,11 @@ const safeFailure = (
   error: unknown,
   maskedDestination?: string,
 ): CommercialImageDispatchE2EFailureOutput => {
-  if (error instanceof CommercialImageDispatchE2EError) {
-    const e2eError = error;
+  if (
+    error instanceof CommercialImageDispatchE2EError ||
+    (error instanceof Error && error.name === 'CommercialImageDispatchE2EError')
+  ) {
+    const e2eError = error as CommercialImageDispatchE2EError;
     return {
       code: e2eError.code,
       message: e2eError.message,
@@ -852,11 +846,7 @@ export const runCommercialImageDispatchE2E = async (
         safeMode: true,
         destination: maskedDestination,
         schedulerEnabled: false,
-        databaseAvailable: true,
-        redisAvailable: true,
-        evolutionAvailable: true,
-        evolutionVersion: '2.3.7',
-        instanceStatus: 'open',
+        externalPreflightExecuted: false,
         messageWillBeSent: false,
         draftDeliveryMode: validationOutput.draft.deliveryMode as 'IMAGE',
         warningsCount: validationOutput.draft.warnings?.length || 0,
@@ -865,7 +855,7 @@ export const runCommercialImageDispatchE2E = async (
       return { exitCode: 0, output };
     }
 
-    const preflight = await (
+    await (
       options.preflight ?? runCommercialImageDispatchE2EExternalPreflight
     )(config);
 

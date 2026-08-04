@@ -11,16 +11,16 @@ import {
   type CommercialImageDispatchDispatchWriter,
   type CommercialImageDispatchE2EPreflight,
 } from '../src/commercial-image-dispatch-e2e';
-import type { 
-  WhatsAppDestinationRecord, 
-  GeneratedCopyRecord, 
-  WhatsAppDispatchDetails, 
-  WhatsAppDispatchRecord 
+import type {
+  WhatsAppDestinationRecord,
+  GeneratedCopyRecord,
+  WhatsAppDispatchDetails,
+  WhatsAppDispatchRecord
 } from '../../api/src/repositories';
-import type { 
-  CommercialMessageDraftService, 
+import type {
+  CommercialMessageDraftService,
   CommercialMessageDraft,
-  CommercialMessageDraftCandidate 
+  CommercialMessageDraftCandidate
 } from '../../api/src/commercial-message-draft-service';
 
 const DESTINATION = '0000000000000';
@@ -41,8 +41,7 @@ const baseEnv: NodeJS.ProcessEnv = {
 };
 
 const preflightOutput: CommercialImageDispatchE2EPreflight = {
-  databaseAvailable: true,
-  redisAvailable: true,
+  externalPreflightExecuted: true,
   evolutionAvailable: true,
   evolutionVersion: '2.3.7',
   instanceStatus: 'open',
@@ -110,7 +109,7 @@ const createMockReadOnlyRuntimeFactory = (state: RuntimeState) => {
 const createMockRuntimeFactory = (state: RuntimeState) => {
   return async (): Promise<CommercialImageDispatchE2ERuntime> => {
     const ro = await createMockReadOnlyRuntimeFactory(state)();
-    
+
     const repositories: CommercialImageDispatchWriteRepositories = {
       ...ro.repositories,
       whatsappDispatches: {
@@ -176,16 +175,16 @@ const createMockRuntimeFactory = (state: RuntimeState) => {
 describe('Commercial Image Dispatch E2E CLI', () => {
   let logger: ReturnType<typeof createLogger>;
   let state: RuntimeState;
-  
+
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createLogger();
-    
+
     const copy: GeneratedCopyRecord = {
       id: 'copy-1', productId: 'product-1', createdFromCandidateId: 'candidate-1', snapshotId: 'snap-1',
       titulo: 'T', mensagem: 'M', cta: 'C', hashtags: 'H', createdAt: new Date(), model: null, source: 'AI'
     };
-    
+
     const candidate: CommercialMessageDraftCandidate = {
       id: 'candidate-1',
       productId: 'product-1',
@@ -193,7 +192,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       generatedCopyId: 'copy-1',
       status: 'COPY_READY',
       expiresAt: new Date(),
-      product: { 
+      product: {
         id: 'product-1',
         unavailableAt: null,
         affiliateLink: 'https://shope.ee/test',
@@ -208,25 +207,25 @@ describe('Commercial Image Dispatch E2E CLI', () => {
         offerEndsAt: null
       },
       generatedCopy: {
-        id: 'copy-1', 
-        productId: 'product-1', 
+        id: 'copy-1',
+        productId: 'product-1',
         snapshotId: 'snap-1',
         createdFromCandidateId: 'candidate-1',
-        titulo: 'T', 
-        mensagem: 'M', 
-        cta: 'C', 
+        titulo: 'T',
+        mensagem: 'M',
+        cta: 'C',
         hashtags: 'H'
       }
     };
 
-    const dest: WhatsAppDestinationRecord = { 
-      id: 'dest-1', 
-      type: 'INDIVIDUAL', 
-      destination: DESTINATION, 
-      active: true, 
+    const dest: WhatsAppDestinationRecord = {
+      id: 'dest-1',
+      type: 'INDIVIDUAL',
+      destination: DESTINATION,
+      active: true,
       available: true,
       sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE,
-      createdAt: new Date(), 
+      createdAt: new Date(),
       updatedAt: new Date(),
       name: 'Test Name'
     };
@@ -246,7 +245,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       destination: { type: 'INDIVIDUAL', destination: maskEvolutionDestination(DESTINATION), active: true, available: true, sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE },
       generatedCopy: copy
     };
-    
+
     state = {
       activeCount: 0,
       workerCount: 0,
@@ -442,5 +441,97 @@ describe('Commercial Image Dispatch E2E CLI', () => {
         externalMessageIdPresent: true,
       })
     );
+  });
+
+  it('blocks if job anterior exists', async () => {
+    state.job = { id: 'job-x', waitUntilFinished: vi.fn() };
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1', '--confirm-one-real-commercial-image-dispatch']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_PREVIOUS_JOB_BLOCKED' }));
+  });
+
+  it('blocks if candidate.generatedCopyId divergent', async () => {
+    if (state.candidates['candidate-1'].generatedCopy) {
+      state.candidates['candidate-1'].generatedCopy.id = 'other-copy';
+    }
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_COPY_NOT_FOUND' }));
+  });
+
+  it('blocks if generatedCopy.productId divergent', async () => {
+    if (state.candidates['candidate-1'].generatedCopy) {
+      state.candidates['candidate-1'].generatedCopy.productId = 'other-product';
+    }
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_RELATION_MISMATCH' }));
+  });
+
+  it('blocks if generatedCopy.snapshotId divergent', async () => {
+    if (state.candidates['candidate-1'].generatedCopy) {
+      state.candidates['candidate-1'].generatedCopy.snapshotId = 'other-snap';
+    }
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_RELATION_MISMATCH' }));
+  });
+
+  it('blocks if draft is TEXT', async () => {
+    const runtime = await createMockReadOnlyRuntimeFactory(state)();
+
+    const draftMock: CommercialMessageDraft = {
+      candidateId: 'candidate-1',
+      generatedCopyId: 'copy-1',
+      deliveryMode: 'TEXT',
+      imageUrl: '',
+      caption: 'Promo test https://shope.ee/test',
+      warnings: []
+    };
+
+    runtime.draftService.createDraft = vi.fn(() => draftMock);
+
+    const result = await runCommercialImageDispatchE2E({
+      args: ['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1'],
+      env: baseEnv,
+      readEnvFile: () => '',
+      logger,
+      preflight,
+      readOnlyRuntimeFactory: async () => runtime,
+      runtimeFactory: async () => { throw new Error('should not be called'); },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_NOT_IMAGE_DRAFT' }));
+  });
+
+  it('blocks if image url is invalid (not empty)', async () => {
+    state.candidates['candidate-1'].product = { ...state.candidates['candidate-1'].product, urlImagem: 'not-an-url' };
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_NOT_IMAGE_DRAFT' }));
+  });
+
+  it('blocks if destination available is false', async () => {
+    state.destinations['dest-1'].available = false;
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_DESTINATION_UNAVAILABLE' }));
+  });
+
+  it('dry-run ensures runtimeFactory and external preflight are not called', async () => {
+    const runtimeFactory = vi.fn();
+    const result = await runCommercialImageDispatchE2E({
+      args: ['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1'],
+      env: baseEnv,
+      readEnvFile: () => '',
+      logger,
+      preflight,
+      readOnlyRuntimeFactory: createMockReadOnlyRuntimeFactory(state),
+      runtimeFactory,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(preflight).not.toHaveBeenCalled();
+    expect(runtimeFactory).not.toHaveBeenCalled();
   });
 });
