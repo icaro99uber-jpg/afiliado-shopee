@@ -5,14 +5,27 @@ import {
   COMMERCIAL_IMAGE_DISPATCH_E2E_REAL_FLAG,
   type CommercialImageDispatchE2ERuntime,
   type CommercialImageDispatchE2EReadOnlyRuntime,
+  type CommercialImageDispatchReadRepositories,
+  type CommercialImageDispatchWriteRepositories,
+  type CommercialImageDispatchCandidateReader,
+  type CommercialImageDispatchDispatchWriter,
+  type CommercialImageDispatchE2EPreflight,
 } from '../src/commercial-image-dispatch-e2e';
-import type { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
-import type { WhatsAppDestinationRecord, GeneratedCopyRecord, WhatsAppDispatchDetails, CommercialPromotionCandidateRecord, CommercialPromotionSnapshotRecord, WhatsAppDispatchRecord } from '../../api/src/repositories';
-import type { ApplicationRepositories } from '../../api/src/application-services';
-import type { CommercialMessageDraftService } from '../../api/src/commercial-message-draft-service';
+import type { 
+  WhatsAppDestinationRecord, 
+  GeneratedCopyRecord, 
+  WhatsAppDispatchDetails, 
+  WhatsAppDispatchRecord 
+} from '../../api/src/repositories';
+import type { 
+  CommercialMessageDraftService, 
+  CommercialMessageDraft,
+  CommercialMessageDraftCandidate 
+} from '../../api/src/commercial-message-draft-service';
 
 const DESTINATION = '0000000000000';
 const API_KEY = 'unit-test-api-key-never-real';
+const EXPECTED_EVOLUTION_INSTANCE = 'afiliado-shopee-local';
 const baseEnv: NodeJS.ProcessEnv = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://localhost:5432/test',
@@ -20,28 +33,24 @@ const baseEnv: NodeJS.ProcessEnv = {
   WHATSAPP_PROVIDER: 'evolution',
   EVOLUTION_API_URL: 'http://localhost:8080',
   EVOLUTION_API_KEY: API_KEY,
-  EVOLUTION_INSTANCE_NAME: 'afiliado-shopee-local',
+  EVOLUTION_INSTANCE_NAME: EXPECTED_EVOLUTION_INSTANCE,
   EVOLUTION_SAFE_MODE: 'true',
   EVOLUTION_ALLOWED_DESTINATIONS: DESTINATION,
   EVOLUTION_MAX_MESSAGES_PER_BOOT: '1',
   SCHEDULER_ENABLED: 'false',
 };
 
-const preflight = vi.fn(async () => ({
-  databaseAvailable: true as const,
-  redisAvailable: true as const,
-  evolutionAvailable: true as const,
-  evolutionVersion: '2.3.7' as const,
-  instanceStatus: 'open' as const,
-}));
+const preflightOutput: CommercialImageDispatchE2EPreflight = {
+  databaseAvailable: true,
+  redisAvailable: true,
+  evolutionAvailable: true,
+  evolutionVersion: '2.3.7',
+  instanceStatus: 'open',
+};
+
+const preflight = vi.fn(async () => preflightOutput);
 
 const createLogger = () => ({ info: vi.fn(), error: vi.fn() });
-
-type TestCandidate = CommercialPromotionCandidateRecord & { 
-  product: { affiliateLink: string }, 
-  snapshot: CommercialPromotionSnapshotRecord, 
-  generatedCopy: GeneratedCopyRecord 
-};
 
 type RuntimeState = {
   activeCount: number;
@@ -49,48 +58,50 @@ type RuntimeState = {
   dispatch: WhatsAppDispatchRecord | null;
   apiDispatch: WhatsAppDispatchDetails | null;
   job: { id: string; waitUntilFinished: () => Promise<void> } | null;
-  candidates: Record<string, TestCandidate>;
+  candidates: Record<string, CommercialMessageDraftCandidate>;
   copies: Record<string, GeneratedCopyRecord>;
   destinations: Record<string, WhatsAppDestinationRecord>;
-  snapshots: Record<string, CommercialPromotionSnapshotRecord>;
   dispatches: WhatsAppDispatchRecord[];
 };
 
-type PrismaClientType = ReturnType<typeof createPrismaClient>;
-
 const createMockReadOnlyRuntimeFactory = (state: RuntimeState) => {
   return async (): Promise<CommercialImageDispatchE2EReadOnlyRuntime> => {
+    const repositories: CommercialImageDispatchReadRepositories = {
+      whatsappDestinations: {
+        findById: vi.fn(async (id: string) => state.destinations[id] || null),
+      },
+      whatsappDispatches: {
+        list: vi.fn(async () => state.dispatches),
+      },
+    };
+
+    const prisma: CommercialImageDispatchCandidateReader = {
+      commercialPromotionCandidate: {
+        findUnique: vi.fn(async (args: { where: { id: string } }) => state.candidates[args.where.id] || null)
+      },
+    };
+
+    const mockDraft: CommercialMessageDraft = {
+      candidateId: 'candidate-1',
+      generatedCopyId: 'copy-1',
+      deliveryMode: 'IMAGE',
+      imageUrl: 'https://example.invalid/image.jpg',
+      caption: 'Promo test https://shope.ee/test',
+      warnings: []
+    };
+
+    const draftService: Pick<CommercialMessageDraftService, 'createDraft'> = {
+      createDraft: vi.fn((candidate) => ({
+        ...mockDraft,
+        imageUrl: candidate.product?.urlImagem || '',
+        caption: candidate.product?.affiliateLink === 'double' ? 'double double' : `Promo test ${candidate.product?.affiliateLink || ''}`
+      }))
+    };
+
     return {
-      repositories: {
-        commercialPromotionCandidates: {
-          findById: vi.fn(async (id: string) => state.candidates[id] as never),
-        },
-        commercialOfferSnapshots: {
-          findById: vi.fn(async (id: string) => state.snapshots[id] as never),
-        },
-        whatsappDestinations: {
-          findById: vi.fn(async (id: string) => state.destinations[id] || null),
-        },
-        whatsappDispatches: {
-          list: vi.fn(async () => state.dispatches as never),
-        },
-        generatedCopies: {
-          findById: vi.fn(async (id: string) => state.copies[id] || null),
-        },
-      } as never as ApplicationRepositories,
-      prisma: {
-        commercialPromotionCandidate: {
-          findUnique: vi.fn(async (args: { where: { id: string } }) => state.candidates[args.where.id] || null)
-        },
-      } as never as PrismaClientType,
-      draftService: {
-        createDraft: vi.fn(() => ({
-          deliveryMode: 'IMAGE',
-          imageUrl: 'https://example.invalid/image.jpg',
-          caption: 'Promo test https://shope.ee/test',
-          warnings: []
-        }))
-      } as never as CommercialMessageDraftService,
+      repositories,
+      prisma,
+      draftService,
       close: vi.fn(),
     };
   };
@@ -99,44 +110,50 @@ const createMockReadOnlyRuntimeFactory = (state: RuntimeState) => {
 const createMockRuntimeFactory = (state: RuntimeState) => {
   return async (): Promise<CommercialImageDispatchE2ERuntime> => {
     const ro = await createMockReadOnlyRuntimeFactory(state)();
+    
+    const repositories: CommercialImageDispatchWriteRepositories = {
+      ...ro.repositories,
+      whatsappDispatches: {
+        ...ro.repositories.whatsappDispatches,
+        findByIdWithDetails: vi.fn(async (): Promise<WhatsAppDispatchDetails | null> => state.apiDispatch),
+        createPending: vi.fn(async (data: { id: string; productId: string; generatedCopyId: string; destinationId: string }) => {
+          const newDispatch: WhatsAppDispatchRecord = {
+            ...data,
+            status: 'PENDING',
+            attemptCount: 0,
+            externalMessageId: null,
+            sentAt: null,
+            errorMessage: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          state.dispatch = newDispatch;
+          state.dispatches.push(newDispatch);
+          return newDispatch;
+        }),
+      },
+    };
+
+    const prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDispatchWriter = {
+      ...ro.prisma,
+      whatsAppDispatch: {
+        findUnique: vi.fn(async (args: { where: { id: string } }) => state.dispatches.find(d => d.id === args.where.id) || null)
+      }
+    };
+
     return {
-      repositories: {
-        ...ro.repositories,
-        whatsappDispatches: {
-          ...ro.repositories.whatsappDispatches,
-          findByIdWithDetails: vi.fn(async () => state.dispatch as never),
-          createPending: vi.fn(async (data: { id: string; productId: string; generatedCopyId: string; destinationId: string }) => {
-            const newDispatch: WhatsAppDispatchRecord = {
-              ...data,
-              status: 'PENDING',
-              attemptCount: 0,
-              externalMessageId: null,
-              sentAt: null,
-              errorMessage: null,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            };
-            state.dispatch = newDispatch;
-            state.dispatches.push(newDispatch);
-            return state.dispatch as never;
-          }),
-        },
-      } as never as ApplicationRepositories,
-      prisma: {
-        ...ro.prisma,
-        whatsAppDispatch: {
-          findUnique: vi.fn(async (args: { where: { id: string } }) => state.dispatches.find(d => d.id === args.where.id) || null)
-        }
-      } as never as PrismaClientType,
+      repositories,
+      prisma,
       draftService: ro.draftService,
       assertNoCompetingWork: vi.fn(async () => {
         if (state.activeCount > 0 || state.workerCount > 0)
           throw new Error('Ha worker ou pipeline ativo; execucao E2E bloqueada');
       }),
-      findJob: vi.fn(async () => state.job as never),
+      findJob: vi.fn(async () => state.job),
       enqueue: vi.fn(async (dispatchId: string, jobId: string) => {
-        state.job = { id: jobId, waitUntilFinished: vi.fn() };
-        return state.job as never;
+        const job = { id: jobId, waitUntilFinished: vi.fn() };
+        state.job = job;
+        return job;
       }),
       startWorker: vi.fn(),
       waitForJob: vi.fn(async () => {
@@ -147,7 +164,10 @@ const createMockRuntimeFactory = (state: RuntimeState) => {
           state.dispatch.sentAt = new Date();
         }
       }),
-      queryDispatchApi: vi.fn(async () => state.apiDispatch as never),
+      queryDispatchApi: vi.fn(async (): Promise<WhatsAppDispatchDetails> => {
+        if (!state.apiDispatch) throw new Error('No apiDispatch');
+        return state.apiDispatch;
+      }),
       close: vi.fn(),
     };
   };
@@ -161,50 +181,57 @@ describe('Commercial Image Dispatch E2E CLI', () => {
     vi.clearAllMocks();
     logger = createLogger();
     
-    const snap = {
-      id: 'snap-1', productId: 'product-1', revision: 1, unavailableAt: null, offerEndsAt: null,
-      discountRate: null, commissionRate: null, currentPrice: null, snapshotAt: new Date(),
-      ratingCount: null, ratingStar: null, historicalSold: null
-    } as never as CommercialPromotionSnapshotRecord;
-    
     const copy: GeneratedCopyRecord = {
       id: 'copy-1', productId: 'product-1', createdFromCandidateId: 'candidate-1', snapshotId: 'snap-1',
-      titulo: 'T', mensagem: 'M', cta: 'C', hashtags: 'H', createdAt: new Date()
+      titulo: 'T', mensagem: 'M', cta: 'C', hashtags: 'H', createdAt: new Date(), model: null, source: 'AI'
     };
     
-    state = {
-      activeCount: 0,
-      workerCount: 0,
-      dispatch: null,
-      apiDispatch: null,
-      job: null,
-      candidates: {
-        'candidate-1': {
-          id: 'candidate-1',
-          productId: 'product-1',
-          snapshotId: 'snap-1',
-          generatedCopyId: 'copy-1',
-          status: 'COPY_READY',
-          expiresAt: new Date(),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          product: { affiliateLink: 'https://shope.ee/test' },
-          snapshot: snap,
-          generatedCopy: copy
-        } as never as TestCandidate
+    const candidate: CommercialMessageDraftCandidate = {
+      id: 'candidate-1',
+      productId: 'product-1',
+      snapshotId: 'snap-1',
+      generatedCopyId: 'copy-1',
+      status: 'COPY_READY',
+      expiresAt: new Date(),
+      product: { 
+        id: 'product-1',
+        unavailableAt: null,
+        affiliateLink: 'https://shope.ee/test',
+        urlImagem: 'https://example.invalid/image.jpg',
+        commercialSnapshotRevision: 1
       },
-      copies: {
-        'copy-1': copy
+      snapshot: {
+        id: 'snap-1',
+        productId: 'product-1',
+        revision: 1,
+        unavailableAt: null,
+        offerEndsAt: null
       },
-      destinations: {
-        'dest-1': { id: 'dest-1', name: 'L', type: 'INDIVIDUAL', destination: DESTINATION, active: true, available: true, createdAt: new Date(), updatedAt: new Date() } as never as WhatsAppDestinationRecord
-      },
-      snapshots: {
-        'snap-1': snap
-      },
-      dispatches: []
+      generatedCopy: {
+        id: 'copy-1', 
+        productId: 'product-1', 
+        snapshotId: 'snap-1',
+        createdFromCandidateId: 'candidate-1',
+        titulo: 'T', 
+        mensagem: 'M', 
+        cta: 'C', 
+        hashtags: 'H'
+      }
     };
-    state.apiDispatch = {
+
+    const dest: WhatsAppDestinationRecord = { 
+      id: 'dest-1', 
+      type: 'INDIVIDUAL', 
+      destination: DESTINATION, 
+      active: true, 
+      available: true,
+      sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE,
+      createdAt: new Date(), 
+      updatedAt: new Date(),
+      name: 'Test Name'
+    };
+
+    const apiDispatch: WhatsAppDispatchDetails = {
       id: 'dispatch-e2e-candidate-1-copy-1',
       productId: 'product-1',
       generatedCopyId: 'copy-1',
@@ -216,9 +243,27 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       errorMessage: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-      destination: { type: 'INDIVIDUAL', destination: maskEvolutionDestination(DESTINATION), active: true, available: true } as never,
+      destination: { type: 'INDIVIDUAL', destination: maskEvolutionDestination(DESTINATION), active: true, available: true, sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE },
       generatedCopy: copy
-    } as never as WhatsAppDispatchDetails;
+    };
+    
+    state = {
+      activeCount: 0,
+      workerCount: 0,
+      dispatch: null,
+      apiDispatch,
+      job: null,
+      candidates: {
+        'candidate-1': candidate
+      },
+      copies: {
+        'copy-1': copy
+      },
+      destinations: {
+        'dest-1': dest
+      },
+      dispatches: []
+    };
   });
 
   const runWithEnv = (args: string[], envOverrides = {}) =>
@@ -267,7 +312,18 @@ describe('Commercial Image Dispatch E2E CLI', () => {
 
   it('candidate or copy mismatch blocks execution', async () => {
     state.copies['copy-1'] = { ...state.copies['copy-1'], createdFromCandidateId: 'other-candidate' };
-    state.candidates['candidate-1'].generatedCopy = { ...state.candidates['candidate-1'].generatedCopy, createdFromCandidateId: 'other-candidate' };
+    if (state.candidates['candidate-1'].generatedCopy) {
+      state.candidates['candidate-1'].generatedCopy = {
+        id: 'copy-1',
+        productId: 'product-1',
+        snapshotId: 'snap-1',
+        titulo: 'T',
+        mensagem: 'M',
+        cta: 'C',
+        hashtags: 'H',
+        createdFromCandidateId: 'other-candidate'
+      };
+    }
     const result = await runWithEnv([
       '--candidate-id', 'candidate-1',
       '--copy-id', 'copy-1',
@@ -293,7 +349,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
   });
 
   it('destination not in allowlist blocks execution', async () => {
-    state.destinations['dest-1'] = { ...state.destinations['dest-1'], destination: '5511999999999' } as never as WhatsAppDestinationRecord;
+    state.destinations['dest-1'] = { ...state.destinations['dest-1'], destination: '5511999999999' };
     const result = await runWithEnv([
       '--candidate-id', 'candidate-1',
       '--copy-id', 'copy-1',
@@ -318,7 +374,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       errorMessage: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as never as WhatsAppDispatchRecord);
+    });
     const result = await runWithEnv([
       '--candidate-id', 'candidate-1',
       '--copy-id', 'copy-1',
@@ -328,6 +384,33 @@ describe('Commercial Image Dispatch E2E CLI', () => {
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'COMMERCIAL_E2E_PREVIOUS_DISPATCH_BLOCKED' })
     );
+  });
+
+  it('blocks if image url is missing or invalid', async () => {
+    state.candidates['candidate-1'].product = { ...state.candidates['candidate-1'].product, urlImagem: '' };
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_NOT_IMAGE_DRAFT' }));
+  });
+
+  it('blocks if affiliate link is missing', async () => {
+    state.candidates['candidate-1'].product = { ...state.candidates['candidate-1'].product, affiliateLink: '' };
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_PRODUCT_NO_LINK' }));
+  });
+
+  it('blocks if affiliate link occurs more than once or zero times', async () => {
+    state.candidates['candidate-1'].product.affiliateLink = 'double';
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_LINK_COUNT_INVALID' }));
+  });
+
+  it('dry-run explicit guarantees: no preflight, no fetch, no queue, no worker', async () => {
+    const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1']);
+    expect(result.exitCode).toBe(0);
+    expect(preflight).not.toHaveBeenCalled();
   });
 
   it('real mode success path', async () => {
@@ -343,7 +426,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       errorMessage: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as never as WhatsAppDispatchRecord;
+    };
     const result = await runWithEnv([
       '--candidate-id', 'candidate-1',
       '--copy-id', 'copy-1',

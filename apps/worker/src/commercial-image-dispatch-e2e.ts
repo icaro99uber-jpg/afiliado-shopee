@@ -26,11 +26,17 @@ import {
 import { buildApp } from '../../api/src/app';
 import {
   createPrismaRepositories,
-  type ApplicationRepositories,
 } from '../../api/src/application-services';
-import type { WhatsAppDispatchDetails } from '../../api/src/repositories';
+import type { 
+  WhatsAppDispatchDetails, 
+  WhatsAppDestinationRecord, 
+  WhatsAppDispatchRecord,
+  CommercialPromotionCandidateRecord,
+  CommercialPromotionSnapshotRecord,
+  GeneratedCopyRecord
+} from '../../api/src/repositories';
 import { createWhatsAppDispatchWorker } from './whatsapp-dispatch-worker';
-import { CommercialMessageDraftService } from '../../api/src/commercial-message-draft-service';
+import { CommercialMessageDraftService, type CommercialMessageDraftCandidate } from '../../api/src/commercial-message-draft-service';
 
 export const COMMERCIAL_IMAGE_DISPATCH_E2E_REAL_FLAG =
   'confirm-one-real-commercial-image-dispatch';
@@ -104,14 +110,58 @@ export type CommercialImageDispatchE2ERunResult =
 
 type E2EJob = Pick<Job<WhatsAppDispatchJob>, 'id' | 'waitUntilFinished'>;
 
+export type CommercialImageDispatchReadRepositories = {
+  whatsappDestinations: {
+    findById(id: string): Promise<WhatsAppDestinationRecord | null>;
+  };
+  whatsappDispatches: {
+    list(query: { productId: string }): Promise<WhatsAppDispatchRecord[]>;
+  };
+};
+
+export type CommercialImageDispatchWriteRepositories = CommercialImageDispatchReadRepositories & {
+  whatsappDispatches: CommercialImageDispatchReadRepositories['whatsappDispatches'] & {
+    findByIdWithDetails(id: string): Promise<WhatsAppDispatchDetails | null>;
+    createPending(data: {
+      id: string;
+      productId: string;
+      generatedCopyId: string;
+      destinationId: string;
+    }): Promise<WhatsAppDispatchRecord | null>;
+  };
+};
+
+export type CommercialImageDispatchCandidateReader = {
+  commercialPromotionCandidate: {
+    findUnique(args: {
+      where: { id: string };
+      include: {
+        product: true;
+        snapshot: true;
+        generatedCopy: true;
+      };
+    }): Promise<CommercialMessageDraftCandidate | null>;
+  };
+};
+
+export type CommercialImageDispatchDispatchReader = {
+  whatsAppDispatch: {
+    findUnique(args: { where: { id: string } }): Promise<WhatsAppDispatchRecord | null>;
+  };
+};
+
+export type CommercialImageDispatchDispatchWriter = CommercialImageDispatchDispatchReader & {};
+
 export type CommercialImageDispatchE2EReadOnlyRuntime = {
-  repositories: ApplicationRepositories;
-  draftService: CommercialMessageDraftService;
-  prisma: ReturnType<typeof createPrismaClient>;
+  repositories: CommercialImageDispatchReadRepositories;
+  draftService: Pick<CommercialMessageDraftService, 'createDraft'>;
+  prisma: CommercialImageDispatchCandidateReader;
   close(force?: boolean): Promise<void>;
 };
 
-export type CommercialImageDispatchE2ERuntime = CommercialImageDispatchE2EReadOnlyRuntime & {
+export type CommercialImageDispatchE2ERuntime = Omit<CommercialImageDispatchE2EReadOnlyRuntime, 'repositories' | 'prisma'> & {
+  repositories: CommercialImageDispatchWriteRepositories;
+  prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDispatchWriter;
   assertNoCompetingWork(): Promise<void>;
   findJob(jobId: string): Promise<unknown | null>;
   enqueue(dispatchId: string, jobId: string): Promise<E2EJob>;
@@ -299,13 +349,13 @@ export const runCommercialImageDispatchE2EExternalPreflight = async (
 };
 
 const validateEntities = async (
-  repositories: ApplicationRepositories,
-  draftService: CommercialMessageDraftService,
+  repositories: CommercialImageDispatchReadRepositories,
+  draftService: Pick<CommercialMessageDraftService, 'createDraft'>,
   candidateId: string,
   copyId: string,
   destinationId: string,
   expectedDestination: string,
-  prisma: ReturnType<typeof createPrismaClient>
+  prisma: CommercialImageDispatchCandidateReader
 ) => {
   const candidate = await prisma.commercialPromotionCandidate.findUnique({
     where: { id: candidateId },
@@ -572,17 +622,8 @@ const safeFailure = (
   error: unknown,
   maskedDestination?: string,
 ): CommercialImageDispatchE2EFailureOutput => {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code: unknown }).code === 'string' &&
-    (
-      (error as { code: string }).code.startsWith('COMMERCIAL_E2E_') ||
-      (error as { code: string }).code.startsWith('COMMERCIAL_MESSAGE_')
-    )
-  ) {
-    const e2eError = error as { code: string; message: string; details?: { destination?: string; dispatchId?: string; status?: string; investigationRequired?: boolean; [key: string]: unknown } };
+  if (error instanceof CommercialImageDispatchE2EError) {
+    const e2eError = error;
     return {
       code: e2eError.code,
       message: e2eError.message,

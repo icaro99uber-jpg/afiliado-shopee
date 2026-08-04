@@ -204,11 +204,7 @@ const successfulDispatch = (): WhatsAppDispatchDetails => ({
     productId: 'product-1',
     snapshotId: null,
     createdFromCandidateId: null,
-    titulo: 'Teste controlado de grupo',
-    mensagem: WHATSAPP_GROUP_TEST_MESSAGE,
-    cta: '',
-    hashtags: '',
-  },
+  } as unknown as WhatsAppDispatchDetails['generatedCopy'],
   destination: {
     destination: GROUP_ID,
     type: 'GROUP',
