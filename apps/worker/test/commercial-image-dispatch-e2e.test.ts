@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { maskEvolutionDestination } from '@shopee-auto-affiliate-ai/providers';
+import {
+  fingerprintWhatsAppGroupId,
+  maskEvolutionDestination,
+} from '@shopee-auto-affiliate-ai/providers';
 import {
   runCommercialImageDispatchE2E,
   COMMERCIAL_IMAGE_DISPATCH_E2E_REAL_FLAG,
@@ -24,6 +27,8 @@ import type {
 } from '../../api/src/commercial-message-draft-service';
 
 const DESTINATION = '0000000000000';
+const GROUP_DESTINATION = '100000000000000000@g.us';
+const GROUP_FINGERPRINT = fingerprintWhatsAppGroupId(GROUP_DESTINATION);
 const API_KEY = 'unit-test-api-key-never-real';
 const EXPECTED_EVOLUTION_INSTANCE = 'afiliado-shopee-local';
 const baseEnv: NodeJS.ProcessEnv = {
@@ -276,17 +281,106 @@ describe('Commercial Image Dispatch E2E CLI', () => {
       runtimeFactory: createMockRuntimeFactory(state),
     });
 
-  it('dry-run performs no DB writes or provider calls', async () => {
+  const useGroupDestination = (
+    overrides: Partial<WhatsAppDestinationRecord> = {},
+  ) => {
+    state.destinations['dest-1'] = {
+      ...state.destinations['dest-1'],
+      type: 'GROUP',
+      destination: GROUP_DESTINATION,
+      active: true,
+      available: true,
+      fingerprint: GROUP_FINGERPRINT,
+      sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE,
+      ...overrides,
+    };
+  };
+
+  const groupArgs = [
+    '--candidate-id', 'candidate-1',
+    '--copy-id', 'copy-1',
+    '--destination-id', 'dest-1',
+  ];
+
+  const groupEnv: NodeJS.ProcessEnv = {
+    WHATSAPP_GROUP_SEND_ENABLED: 'true',
+    WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN: '1',
+  };
+
+  const runBlockedGroup = async (envOverrides: NodeJS.ProcessEnv = {}, destinationOverrides: Partial<WhatsAppDestinationRecord> = {}) => {
+    useGroupDestination(destinationOverrides);
+    const runtimeFactory = vi.fn(createMockRuntimeFactory(state));
+    const result = await runCommercialImageDispatchE2E({
+      args: groupArgs,
+      env: { ...baseEnv, ...groupEnv, ...envOverrides },
+      readEnvFile: () => '', logger, preflight,
+      readOnlyRuntimeFactory: createMockReadOnlyRuntimeFactory(state), runtimeFactory,
+    });
+    return { result, runtimeFactory };
+  };
+
+  const expectGroupBlockedBeforeSideEffects = (observation: Awaited<ReturnType<typeof runBlockedGroup>>, code: string) => {
+    expect(observation.result).toMatchObject({ exitCode: 1, output: { code } });
+    expect(preflight).not.toHaveBeenCalled();
+    expect(observation.runtimeFactory).not.toHaveBeenCalled();
+    expect(state.dispatches).toHaveLength(0);
+    expect(state.dispatch).toBeNull();
+    expect(state.job).toBeNull();
+  };
+
+  it('INDIVIDUAL with one allowed matching destination returns GO in dry-run', async () => {
     const result = await runWithEnv([
       '--candidate-id', 'candidate-1',
       '--copy-id', 'copy-1',
       '--destination-id', 'dest-1'
-    ]);
-    expect(result.exitCode).toBe(0);
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'dry-run', result: 'GO' })
-    );
+    ], { EVOLUTION_ALLOWED_DESTINATIONS: DESTINATION });
+    expect(result).toMatchObject({
+      exitCode: 0,
+      output: {
+        mode: 'dry-run',
+        result: 'GO',
+        destination: maskEvolutionDestination(DESTINATION),
+      },
+    });
     expect(state.dispatches).toHaveLength(0);
+  });
+
+  it('GROUP valid returns GO without placing the group in the individual allowlist', async () => {
+    useGroupDestination();
+    const result = await runWithEnv(groupArgs, { ...groupEnv, EVOLUTION_ALLOWED_DESTINATIONS: DESTINATION });
+    expect(result).toMatchObject({ exitCode: 0, output: { mode: 'dry-run', result: 'GO', destination: GROUP_FINGERPRINT } });
+    expect(preflight).not.toHaveBeenCalled();
+    expect(state.dispatches).toHaveLength(0);
+    expect(state.job).toBeNull();
+  });
+
+  it('GROUP valid remains GO with an empty individual allowlist', async () => {
+    useGroupDestination();
+    const result = await runWithEnv(groupArgs, { ...groupEnv, EVOLUTION_ALLOWED_DESTINATIONS: '' });
+    expect(result).toMatchObject({ exitCode: 0, output: { mode: 'dry-run', result: 'GO', destination: GROUP_FINGERPRINT } });
+    expect(preflight).not.toHaveBeenCalled();
+    expect(state.dispatches).toHaveLength(0);
+    expect(state.job).toBeNull();
+  });
+
+  it('GROUP blocks when WHATSAPP_GROUP_SEND_ENABLED is false', async () => {
+    const observation = await runBlockedGroup({ WHATSAPP_GROUP_SEND_ENABLED: 'false' });
+    expectGroupBlockedBeforeSideEffects(observation, 'COMMERCIAL_E2E_GROUP_SEND_REQUIRED');
+  });
+
+  it('GROUP blocks when WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN is not one', async () => {
+    const observation = await runBlockedGroup({ WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN: '2' });
+    expectGroupBlockedBeforeSideEffects(observation, 'COMMERCIAL_E2E_GROUP_LIMIT_MUST_BE_ONE');
+  });
+
+  it('GROUP blocks when sourceInstanceName differs from the current instance', async () => {
+    const observation = await runBlockedGroup({}, { sourceInstanceName: 'other-instance' });
+    expectGroupBlockedBeforeSideEffects(observation, 'COMMERCIAL_E2E_GROUP_INSTANCE_MISMATCH');
+  });
+
+  it('GROUP blocks when fingerprint differs from the stored identity', async () => {
+    const observation = await runBlockedGroup({}, { fingerprint: 'grp_invalid' });
+    expectGroupBlockedBeforeSideEffects(observation, 'COMMERCIAL_E2E_GROUP_IDENTITY_MISMATCH');
   });
 
   it('missing flag blocks real execution (runs dry-run)', async () => {
