@@ -11,6 +11,7 @@ import {
   type CommercialImageDispatchReadRepositories,
   type CommercialImageDispatchWriteRepositories,
   type CommercialImageDispatchCandidateReader,
+  type CommercialImageDispatchDestinationReader,
   type CommercialImageDispatchDispatchWriter,
   type CommercialImageDispatchE2EPreflight,
 } from '../src/commercial-image-dispatch-e2e';
@@ -72,14 +73,20 @@ const createMockReadOnlyRuntimeFactory = (state: RuntimeState) => {
   return async (): Promise<CommercialImageDispatchE2EReadOnlyRuntime> => {
     const repositories: CommercialImageDispatchReadRepositories = {
       whatsappDestinations: {
-        findById: vi.fn(async (id: string) => state.destinations[id] || null),
+        findById: vi.fn(async (id: string) => {
+          const destination = state.destinations[id];
+          return destination?.type === 'INDIVIDUAL' ? destination : null;
+        }),
       },
       whatsappDispatches: {
         list: vi.fn(async () => state.dispatches),
       },
     };
 
-    const prisma: CommercialImageDispatchCandidateReader = {
+    const prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDestinationReader = {
+      whatsAppDestination: {
+        findUnique: vi.fn(async (args: { where: { id: string } }) => state.destinations[args.where.id] || null),
+      },
       commercialPromotionCandidate: {
         findUnique: vi.fn(async (args: { where: { id: string } }) => state.candidates[args.where.id] || null)
       },
@@ -138,7 +145,7 @@ const createMockRuntimeFactory = (state: RuntimeState) => {
       },
     };
 
-    const prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDispatchWriter = {
+    const prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDestinationReader & CommercialImageDispatchDispatchWriter = {
       ...ro.prisma,
       whatsAppDispatch: {
         findUnique: vi.fn(async (args: { where: { id: string } }) => state.dispatches.find(d => d.id === args.where.id) || null)
@@ -345,7 +352,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
     expect(state.dispatches).toHaveLength(0);
   });
 
-  it('GROUP valid returns GO without placing the group in the individual allowlist', async () => {
+  it('GROUP valid returns GO even though the individual destination repository cannot read GROUP', async () => {
     useGroupDestination();
     const result = await runWithEnv(groupArgs, { ...groupEnv, EVOLUTION_ALLOWED_DESTINATIONS: DESTINATION });
     expect(result).toMatchObject({ exitCode: 0, output: { mode: 'dry-run', result: 'GO', destination: GROUP_FINGERPRINT } });

@@ -126,6 +126,12 @@ export type CommercialImageDispatchWriteRepositories = CommercialImageDispatchRe
   };
 };
 
+export type CommercialImageDispatchDestinationReader = {
+  whatsAppDestination: {
+    findUnique(args: { where: { id: string } }): Promise<WhatsAppDestinationRecord | null>;
+  };
+};
+
 export type CommercialImageDispatchCandidateReader = {
   commercialPromotionCandidate: {
     findUnique(args: {
@@ -150,13 +156,13 @@ export type CommercialImageDispatchDispatchWriter = CommercialImageDispatchDispa
 export type CommercialImageDispatchE2EReadOnlyRuntime = {
   repositories: CommercialImageDispatchReadRepositories;
   draftService: Pick<CommercialMessageDraftService, 'createDraft'>;
-  prisma: CommercialImageDispatchCandidateReader;
+  prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDestinationReader;
   close(force?: boolean): Promise<void>;
 };
 
 export type CommercialImageDispatchE2ERuntime = Omit<CommercialImageDispatchE2EReadOnlyRuntime, 'repositories' | 'prisma'> & {
   repositories: CommercialImageDispatchWriteRepositories;
-  prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDispatchWriter;
+  prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDestinationReader & CommercialImageDispatchDispatchWriter;
   assertNoCompetingWork(): Promise<void>;
   findJob(jobId: string): Promise<unknown | null>;
   enqueue(dispatchId: string, jobId: string): Promise<E2EJob>;
@@ -430,7 +436,7 @@ const validateEntities = async (
   copyId: string,
   destinationId: string,
   config: AppEnv,
-  prisma: CommercialImageDispatchCandidateReader
+  prisma: CommercialImageDispatchCandidateReader & CommercialImageDispatchDestinationReader
 ) => {
   const candidate = await prisma.commercialPromotionCandidate.findUnique({
     where: { id: candidateId },
@@ -477,7 +483,7 @@ const validateEntities = async (
     );
   }
 
-  const dest = await repositories.whatsappDestinations.findById(destinationId);
+  const dest = await prisma.whatsAppDestination.findUnique({ where: { id: destinationId } });
   if (!dest) {
     throw new CommercialImageDispatchE2EError(
       'Destino nao encontrado',
