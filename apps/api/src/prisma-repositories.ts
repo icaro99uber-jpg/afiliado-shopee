@@ -827,19 +827,37 @@ const commercialCampaignInclude = {
   },
 };
 
+type CommercialGroupCampaignPrismaClient = Pick<
+  DatabaseClient,
+  'commercialGroupCampaign'
+>;
+
+const findCommercialGroupCampaign = (
+  client: CommercialGroupCampaignPrismaClient,
+  where: { id: string } | { logicalGroupFingerprint: string },
+) =>
+  client.commercialGroupCampaign.findUnique({
+    where,
+    include: commercialCampaignInclude,
+  });
+
+type CommercialGroupCampaignWithRelations = NonNullable<
+  Awaited<ReturnType<typeof findCommercialGroupCampaign>>
+>;
+
 const mapCommercialGroupCampaign = (
-  record: Record<string, unknown>,
+  record: CommercialGroupCampaignWithRelations,
 ): CommercialGroupCampaignRecord => {
-  const anchor = record.anchorDestination as Record<string, unknown> | null;
+  const anchor = record.anchorDestination;
   return {
-    ...(record as unknown as CommercialGroupCampaignRecord),
+    ...record,
     anchorDestination: anchor
       ? {
-          id: String(anchor.id),
-          name: String(anchor.name),
-          fingerprint: (anchor.fingerprint as string | null) ?? null,
-          active: Boolean(anchor.active),
-          available: Boolean(anchor.available),
+          id: anchor.id,
+          name: anchor.name,
+          fingerprint: anchor.fingerprint,
+          active: anchor.active,
+          available: anchor.available,
         }
       : null,
   };
@@ -923,9 +941,7 @@ export class PrismaCommercialGroupCampaignRepository implements CommercialGroupC
           include: commercialCampaignInclude,
         });
       });
-      return mapCommercialGroupCampaign(
-        record as unknown as Record<string, unknown>,
-      );
+      return mapCommercialGroupCampaign(record);
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new AppError(
@@ -950,38 +966,32 @@ export class PrismaCommercialGroupCampaignRepository implements CommercialGroupC
       this.prisma.commercialGroupCampaign.count({ where }),
     ]);
     return {
-      items: records.map((record) =>
-        mapCommercialGroupCampaign(
-          record as unknown as Record<string, unknown>,
-        ),
-      ),
+      items: records.map((record) => mapCommercialGroupCampaign(record)),
       total,
     };
   }
 
   async findById(id: string) {
-    const record = await this.prisma.commercialGroupCampaign.findUnique({
-      where: { id },
-      include: commercialCampaignInclude,
-    });
+    const record = await findCommercialGroupCampaign(this.prisma, { id });
     return record
-      ? mapCommercialGroupCampaign(record as unknown as Record<string, unknown>)
+      ? mapCommercialGroupCampaign(record)
       : null;
   }
 
   async findByLogicalGroupFingerprint(logicalGroupFingerprint: string) {
-    const record = await this.prisma.commercialGroupCampaign.findUnique({
-      where: { logicalGroupFingerprint },
-      include: commercialCampaignInclude,
+    const record = await findCommercialGroupCampaign(this.prisma, {
+      logicalGroupFingerprint,
     });
     return record
-      ? mapCommercialGroupCampaign(record as unknown as Record<string, unknown>)
+      ? mapCommercialGroupCampaign(record)
       : null;
   }
 
   async update(id: string, data: CommercialGroupCampaignUpdateData) {
     try {
-      const updateCampaign = async (client: DatabaseClient) => {
+      const updateCampaign = async (
+        client: Pick<DatabaseClient, 'commercialGroupCampaign' | 'commercialNiche'>,
+      ) => {
         if (data.nicheId) {
           const [campaign, niche] = await Promise.all([
             client.commercialGroupCampaign.findUnique({
@@ -1014,14 +1024,12 @@ export class PrismaCommercialGroupCampaignRepository implements CommercialGroupC
         });
       };
       const record = data.nicheId
-        ? await this.prisma.$transaction(updateCampaign as never, {
+        ? await this.prisma.$transaction(updateCampaign, {
             isolationLevel: 'Serializable',
           })
         : await updateCampaign(this.prisma);
       if (!record) return null;
-      return mapCommercialGroupCampaign(
-        record as unknown as Record<string, unknown>,
-      );
+      return mapCommercialGroupCampaign(record);
     } catch (error) {
       if (isRecordNotFoundError(error)) return null;
       if (isTransactionConflictError(error)) {
@@ -1092,11 +1100,7 @@ export class PrismaCommercialGroupCampaignRepository implements CommercialGroupC
         },
         { isolationLevel: 'Serializable' },
       );
-      return record
-        ? mapCommercialGroupCampaign(
-            record as unknown as Record<string, unknown>,
-          )
-        : null;
+      return record ? mapCommercialGroupCampaign(record) : null;
     } catch (error) {
       if (isTransactionConflictError(error)) {
         throw new AppError(
@@ -1215,7 +1219,7 @@ const commercialPromotionCopyContextFromRecord = (
   record: Record<string, unknown>,
   previousSnapshot: CommercialPromotionSnapshotRecord | null,
 ): CommercialPromotionCopyContext => {
-  const campaign = record.campaign as Record<string, unknown>;
+  const campaign = record.campaign as CommercialGroupCampaignWithRelations;
   const product = record.product as Record<string, unknown>;
   const snapshot = record.snapshot as Record<string, unknown>;
   return {
