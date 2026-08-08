@@ -11,8 +11,10 @@ import {
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
 import {
   createWhatsAppProvider,
+  fingerprintWhatsAppGroupId,
   maskEvolutionDestination,
   normalizeEvolutionDestination,
+  normalizeWhatsAppGroupId,
   parseEvolutionConnectionState,
 } from '@shopee-auto-affiliate-ai/providers';
 import {
@@ -32,6 +34,7 @@ import type {
   WhatsAppDestinationRecord,
   WhatsAppDispatchRecord,
 } from '../../api/src/repositories';
+import { WhatsAppGroupSendPolicy } from '../../api/src/whatsapp-group-send-policy';
 import { createWhatsAppDispatchWorker } from './whatsapp-dispatch-worker';
 import { CommercialMessageDraftService, type CommercialMessageDraftCandidate } from '../../api/src/commercial-message-draft-service';
 
@@ -227,6 +230,12 @@ const loadLocalEnvironment = ({
   return { ...fileEnv, ...(env ?? process.env) };
 };
 
+type CommercialImageDispatchDestinationConfig = {
+  type: 'INDIVIDUAL' | 'GROUP';
+  destination: string;
+  maskedDestination: string;
+};
+
 const validateControlledConfig = (config: AppEnv) => {
   if (config.WHATSAPP_PROVIDER !== 'evolution') {
     throw new CommercialImageDispatchE2EError(
@@ -258,6 +267,12 @@ const validateControlledConfig = (config: AppEnv) => {
       'COMMERCIAL_E2E_SCHEDULER_MUST_BE_DISABLED',
     );
   }
+};
+
+const validateIndividualDestinationConfig = (
+  config: AppEnv,
+  dest: WhatsAppDestinationRecord,
+): CommercialImageDispatchDestinationConfig => {
   if (config.EVOLUTION_ALLOWED_DESTINATIONS.length !== 1) {
     throw new CommercialImageDispatchE2EError(
       'O teste E2E exige exatamente um destino permitido',
@@ -270,15 +285,84 @@ const validateControlledConfig = (config: AppEnv) => {
       'COMMERCIAL_E2E_LIMIT_MUST_BE_ONE',
     );
   }
-
   const destination = normalizeEvolutionDestination(
     config.EVOLUTION_ALLOWED_DESTINATIONS[0],
   );
+  if (normalizeEvolutionDestination(dest.destination) !== destination) {
+    throw new CommercialImageDispatchE2EError(
+      'Destino informado nao e o unico permitido na allowlist',
+      'COMMERCIAL_E2E_DESTINATION_NOT_ALLOWED',
+    );
+  }
+  if (!dest.active || !dest.available) {
+    throw new CommercialImageDispatchE2EError(
+      'Destino inativo ou indisponivel',
+      'COMMERCIAL_E2E_DESTINATION_UNAVAILABLE',
+    );
+  }
   return {
+    type: 'INDIVIDUAL',
     destination,
     maskedDestination: maskEvolutionDestination(destination),
   };
 };
+
+const validateGroupDestinationConfig = (
+  config: AppEnv,
+  dest: WhatsAppDestinationRecord,
+): CommercialImageDispatchDestinationConfig => {
+  if (dest.type !== 'GROUP') {
+    throw new CommercialImageDispatchE2EError(
+      'O destino de grupo deve possuir type=GROUP',
+      'COMMERCIAL_E2E_GROUP_TYPE_REQUIRED',
+    );
+  }
+  if (!config.WHATSAPP_GROUP_SEND_ENABLED) {
+    throw new CommercialImageDispatchE2EError(
+      'O teste E2E para grupo exige WHATSAPP_GROUP_SEND_ENABLED=true',
+      'COMMERCIAL_E2E_GROUP_SEND_REQUIRED',
+    );
+  }
+  if (config.WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN !== 1) {
+    throw new CommercialImageDispatchE2EError(
+      'O teste E2E para grupo exige WHATSAPP_GROUP_MAX_MESSAGES_PER_RUN=1',
+      'COMMERCIAL_E2E_GROUP_LIMIT_MUST_BE_ONE',
+    );
+  }
+  if (!dest.active || !dest.available) {
+    throw new CommercialImageDispatchE2EError(
+      'Destino inativo ou indisponivel',
+      'COMMERCIAL_E2E_DESTINATION_UNAVAILABLE',
+    );
+  }
+  if (dest.sourceInstanceName !== config.EVOLUTION_INSTANCE_NAME) {
+    throw new CommercialImageDispatchE2EError(
+      'Grupo nao pertence a instancia Evolution atual',
+      'COMMERCIAL_E2E_GROUP_INSTANCE_MISMATCH',
+    );
+  }
+  const destination = normalizeWhatsAppGroupId(dest.destination);
+  const fingerprint = fingerprintWhatsAppGroupId(destination);
+  if (dest.fingerprint !== fingerprint) {
+    throw new CommercialImageDispatchE2EError(
+      'Identidade do grupo nao corresponde ao cadastro',
+      'COMMERCIAL_E2E_GROUP_IDENTITY_MISMATCH',
+    );
+  }
+  return {
+    type: 'GROUP',
+    destination,
+    maskedDestination: fingerprint,
+  };
+};
+
+const validateDestinationConfig = (
+  config: AppEnv,
+  dest: WhatsAppDestinationRecord,
+): CommercialImageDispatchDestinationConfig =>
+  dest.type === 'GROUP'
+    ? validateGroupDestinationConfig(config, dest)
+    : validateIndividualDestinationConfig(config, dest);
 
 export const runCommercialImageDispatchE2EExternalPreflight = async (
   config: AppEnv,
@@ -345,7 +429,7 @@ const validateEntities = async (
   candidateId: string,
   copyId: string,
   destinationId: string,
-  expectedDestination: string,
+  config: AppEnv,
   prisma: CommercialImageDispatchCandidateReader
 ) => {
   const candidate = await prisma.commercialPromotionCandidate.findUnique({
@@ -401,19 +485,7 @@ const validateEntities = async (
     );
   }
 
-  if (normalizeEvolutionDestination(dest.destination) !== expectedDestination) {
-    throw new CommercialImageDispatchE2EError(
-      'Destino informado nao e o unico permitido na allowlist',
-      'COMMERCIAL_E2E_DESTINATION_NOT_ALLOWED',
-    );
-  }
-
-  if (!dest.active || !dest.available) {
-    throw new CommercialImageDispatchE2EError(
-      'Destino inativo ou indisponivel',
-      'COMMERCIAL_E2E_DESTINATION_UNAVAILABLE',
-    );
-  }
+  const destinationConfig = validateDestinationConfig(config, dest);
 
   let draft;
   try {
@@ -456,7 +528,7 @@ const validateEntities = async (
     );
   }
 
-  return { candidate, copy, dest, draft };
+  return { candidate, copy, dest, draft, destinationConfig };
 };
 
 export const createReadOnlyCommercialImageDispatchE2ERuntime = async (
@@ -492,6 +564,11 @@ export const createRealCommercialImageDispatchE2ERuntime = async (
     error: (data: unknown) => logger.error(safeWorkerLog(data)),
   };
   const provider = createWhatsAppProvider(config, { logger: workerLogger });
+  const groupSendPolicy = new WhatsAppGroupSendPolicy({
+    enabled: config.WHATSAPP_GROUP_SEND_ENABLED,
+    safeMode: config.EVOLUTION_SAFE_MODE,
+    instanceName: config.EVOLUTION_INSTANCE_NAME,
+  });
   const repositories = createPrismaRepositories(prisma);
   const draftService = new CommercialMessageDraftService();
   let worker: ReturnType<typeof createWhatsAppDispatchWorker> | undefined;
@@ -542,6 +619,7 @@ export const createRealCommercialImageDispatchE2ERuntime = async (
         prisma,
         logger: workerLogger,
         whatsAppProvider: provider,
+        groupSendPolicy,
       });
       await worker.whatsappDispatchWorker.waitUntilReady();
     },
@@ -638,16 +716,14 @@ const safeFailure = (
 
 export const executeCommercialImageDispatchE2E = async ({
   runtime,
-  destination,
-  maskedDestination,
+  config,
   candidateId,
   copyId,
   destinationId,
   timeoutMs = DEFAULT_JOB_TIMEOUT_MS,
 }: {
   runtime: CommercialImageDispatchE2ERuntime;
-  destination: string;
-  maskedDestination: string;
+  config: AppEnv;
   candidateId: string;
   copyId: string;
   destinationId: string;
@@ -669,13 +745,13 @@ export const executeCommercialImageDispatchE2E = async ({
       );
     }
 
-    const { candidate, copy, dest } = await validateEntities(
+    const { candidate, copy, dest, destinationConfig } = await validateEntities(
       runtime.repositories,
       runtime.draftService,
       candidateId,
       copyId,
       destinationId,
-      destination,
+      config,
       runtime.prisma
     );
 
@@ -733,7 +809,7 @@ export const executeCommercialImageDispatchE2E = async ({
       apiDispatch.status !== finalDispatch.status ||
       apiDispatch.attemptCount !== finalDispatch.attemptCount ||
       apiDispatch.destination.destination !==
-        maskEvolutionDestination(destination)
+        destinationConfig.maskedDestination
     ) {
       throw new CommercialImageDispatchE2EError(
         'Resultado do dispatch E2E e ambiguo',
@@ -767,7 +843,7 @@ export const executeCommercialImageDispatchE2E = async ({
       externalMessageIdPresent: Boolean(finalDispatch.externalMessageId),
       sentAtPresent: Boolean(finalDispatch.sentAt),
       apiQueryValidated: true,
-      destination: maskedDestination,
+      destination: destinationConfig.maskedDestination,
       investigationRequired: !success,
       messagesSent: success ? 1 : 'unknown',
     };
@@ -819,8 +895,7 @@ export const runCommercialImageDispatchE2E = async (
       );
     }
     const config = loadConfig(env);
-    const destinationConfig = validateControlledConfig(config);
-    maskedDestination = destinationConfig.maskedDestination;
+    validateControlledConfig(config);
     const readOnlyRuntime = await (
       options.readOnlyRuntimeFactory ?? createReadOnlyCommercialImageDispatchE2ERuntime
     )(config, logger);
@@ -833,12 +908,13 @@ export const runCommercialImageDispatchE2E = async (
         candidateId,
         copyId,
         destinationId,
-        destinationConfig.destination,
+        config,
         readOnlyRuntime.prisma
       );
     } finally {
       await readOnlyRuntime.close(false);
     }
+    maskedDestination = validationOutput.destinationConfig.maskedDestination;
 
     if (mode === 'dry-run') {
       const output: CommercialImageDispatchE2EDryRunOutput = {
@@ -867,8 +943,7 @@ export const runCommercialImageDispatchE2E = async (
 
     const result = await executeCommercialImageDispatchE2E({
       runtime,
-      destination: destinationConfig.destination,
-      maskedDestination,
+      config,
       candidateId,
       copyId,
       destinationId,
