@@ -741,7 +741,7 @@ export const executeCommercialImageDispatchE2E = async ({
   let forceClose = false;
   try {
     await runtime.assertNoCompetingWork();
-    const jobId = `commercial-image-e2e-${candidateId}-${copyId}`;
+    const jobId = `commercial-image-e2e-${candidateId}-${copyId}-${destinationId}`;
 
     if (await runtime.findJob(jobId)) {
       throw new CommercialImageDispatchE2EError(
@@ -761,7 +761,7 @@ export const executeCommercialImageDispatchE2E = async ({
       runtime.prisma
     );
 
-    const dispatchId = `dispatch-e2e-${candidate.id}-${copy.id}`;
+    const dispatchId = `dispatch-e2e-${candidate.id}-${copy.id}-${dest.id}`;
     const existingDispatch = await runtime.prisma.whatsAppDispatch.findUnique({
       where: { id: dispatchId }
     });

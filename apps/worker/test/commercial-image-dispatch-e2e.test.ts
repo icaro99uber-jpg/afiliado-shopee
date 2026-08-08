@@ -160,7 +160,7 @@ const createMockRuntimeFactory = (state: RuntimeState) => {
         if (state.activeCount > 0 || state.workerCount > 0)
           throw new Error('Ha worker ou pipeline ativo; execucao E2E bloqueada');
       }),
-      findJob: vi.fn(async () => state.job),
+      findJob: vi.fn(async (jobId: string) => state.job?.id === jobId ? state.job : null),
       enqueue: vi.fn(async (dispatchId: string, jobId: string) => {
         const job = { id: jobId, waitUntilFinished: vi.fn() };
         state.job = job;
@@ -243,7 +243,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
     };
 
     const apiDispatch: WhatsAppDispatchDetails = {
-      id: 'dispatch-e2e-candidate-1-copy-1',
+      id: 'dispatch-e2e-candidate-1-copy-1-dest-1',
       productId: 'product-1',
       generatedCopyId: 'copy-1',
       destinationId: 'dest-1',
@@ -463,7 +463,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
 
   it('previous dispatch blocks execution', async () => {
     state.dispatches.push({
-      id: 'dispatch-e2e-candidate-1-copy-1',
+      id: 'dispatch-e2e-candidate-1-copy-1-dest-1',
       productId: 'product-1',
       generatedCopyId: 'copy-1',
       destinationId: 'dest-1',
@@ -515,7 +515,7 @@ describe('Commercial Image Dispatch E2E CLI', () => {
 
   it('real mode success path', async () => {
     state.dispatch = {
-      id: 'dispatch-e2e-candidate-1-copy-1',
+      id: 'dispatch-e2e-candidate-1-copy-1-dest-1',
       productId: 'product-1',
       generatedCopyId: 'copy-1',
       destinationId: 'dest-1',
@@ -545,8 +545,122 @@ describe('Commercial Image Dispatch E2E CLI', () => {
   });
 
   it('blocks if job anterior exists', async () => {
-    state.job = { id: 'job-x', waitUntilFinished: vi.fn() };
+    state.job = { id: 'commercial-image-e2e-candidate-1-copy-1-dest-1', waitUntilFinished: vi.fn() };
     const result = await runWithEnv(['--candidate-id', 'candidate-1', '--copy-id', 'copy-1', '--destination-id', 'dest-1', '--confirm-one-real-commercial-image-dispatch']);
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_PREVIOUS_JOB_BLOCKED' }));
+  });
+
+  it('legacy INDIVIDUAL dispatch for another destination does not block GROUP', async () => {
+    state.dispatches.push({
+      id: 'dispatch-e2e-candidate-1-copy-1',
+      productId: 'product-1',
+      generatedCopyId: 'copy-1',
+      destinationId: 'dest-individual-legacy',
+      status: 'SENT',
+      attemptCount: 1,
+      externalMessageId: 'legacy-message-id',
+      sentAt: new Date(),
+      errorMessage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    useGroupDestination();
+
+    const result = await runWithEnv(groupArgs, groupEnv);
+
+    expect(result).toMatchObject({ exitCode: 0, output: { mode: 'dry-run', result: 'GO', destination: GROUP_FINGERPRINT } });
+    expect(state.dispatches).toHaveLength(1);
+    expect(state.job).toBeNull();
+    expect(preflight).not.toHaveBeenCalled();
+  });
+
+  it('previous dispatch for the same GROUP blocks regardless of dispatch id format', async () => {
+    useGroupDestination();
+    state.dispatches.push({
+      id: 'legacy-dispatch-id-for-group',
+      productId: 'product-1',
+      generatedCopyId: 'copy-1',
+      destinationId: 'dest-1',
+      status: 'SENT',
+      attemptCount: 1,
+      externalMessageId: 'previous-message-id',
+      sentAt: new Date(),
+      errorMessage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await runWithEnv(groupArgs, groupEnv);
+
+    expect(result.exitCode).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_PREVIOUS_DISPATCH_BLOCKED' }));
+    expect(state.job).toBeNull();
+    expect(preflight).not.toHaveBeenCalled();
+  });
+
+  it('job scoped to another destination does not block GROUP and GROUP ids include destinationId', async () => {
+    const groupDestinationId = 'dest-group';
+    state.destinations[groupDestinationId] = {
+      ...state.destinations['dest-1'],
+      id: groupDestinationId,
+      type: 'GROUP',
+      destination: GROUP_DESTINATION,
+      fingerprint: GROUP_FINGERPRINT,
+      sourceInstanceName: EXPECTED_EVOLUTION_INSTANCE,
+    };
+    if (!state.apiDispatch) throw new Error('Expected apiDispatch fixture');
+    state.apiDispatch = {
+      ...state.apiDispatch,
+      id: 'dispatch-e2e-candidate-1-copy-1-' + groupDestinationId,
+      destinationId: groupDestinationId,
+      destination: {
+        ...state.apiDispatch.destination,
+        type: 'GROUP',
+        destination: GROUP_FINGERPRINT,
+      },
+    };
+    state.job = {
+      id: 'commercial-image-e2e-candidate-1-copy-1-dest-individual',
+      waitUntilFinished: vi.fn(),
+    };
+
+    const result = await runWithEnv([
+      '--candidate-id', 'candidate-1',
+      '--copy-id', 'copy-1',
+      '--destination-id', groupDestinationId,
+      '--' + COMMERCIAL_IMAGE_DISPATCH_E2E_REAL_FLAG,
+    ], groupEnv);
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      output: {
+        mode: 'confirmed',
+        dispatchId: 'dispatch-e2e-candidate-1-copy-1-' + groupDestinationId,
+        jobId: 'commercial-image-e2e-candidate-1-copy-1-' + groupDestinationId,
+        jobAttempts: 1,
+        retryEnabled: false,
+        status: 'SENT',
+        attemptCount: 1,
+      },
+    });
+    if (!('mode' in result.output) || result.output.mode !== 'confirmed') throw new Error('Expected confirmed output');
+    expect(result.output.dispatchId).not.toBe('dispatch-e2e-candidate-1-copy-1-dest-1');
+    expect(result.output.jobId).not.toBe('commercial-image-e2e-candidate-1-copy-1-dest-1');
+  });
+
+  it('job scoped to the same GROUP destination blocks', async () => {
+    useGroupDestination();
+    state.job = {
+      id: 'commercial-image-e2e-candidate-1-copy-1-dest-1',
+      waitUntilFinished: vi.fn(),
+    };
+
+    const result = await runWithEnv([
+      ...groupArgs,
+      '--' + COMMERCIAL_IMAGE_DISPATCH_E2E_REAL_FLAG,
+    ], groupEnv);
+
     expect(result.exitCode).toBe(1);
     expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'COMMERCIAL_E2E_PREVIOUS_JOB_BLOCKED' }));
   });
