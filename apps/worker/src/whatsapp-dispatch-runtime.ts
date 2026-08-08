@@ -1,3 +1,4 @@
+import { isMainModule } from './main-module';
 import { loadConfig, type AppEnv } from '@shopee-auto-affiliate-ai/config';
 import {
   createWhatsAppProvider,
@@ -62,7 +63,10 @@ export const startIsolatedWhatsAppDispatchWorker = (
   return runtime;
 };
 
-if (process.env.NODE_ENV !== 'test') {
+if (
+  process.env.NODE_ENV !== 'test' &&
+  isMainModule(import.meta.url)
+) {
   const runtime = startIsolatedWhatsAppDispatchWorker(loadConfig());
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => {

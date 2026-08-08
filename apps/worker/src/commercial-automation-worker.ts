@@ -1,3 +1,4 @@
+import { isMainModule } from './main-module';
 import { Worker, type Job } from 'bullmq';
 import { loadConfig, type AppEnv } from '@shopee-auto-affiliate-ai/config';
 import { createPrismaClient } from '@shopee-auto-affiliate-ai/database';
@@ -231,7 +232,10 @@ export const startCommercialAutomationWorker = async (
   };
 };
 
-if (process.env.NODE_ENV !== 'test') {
+if (
+  process.env.NODE_ENV !== 'test' &&
+  isMainModule(import.meta.url)
+) {
   const runtime = await startCommercialAutomationWorker(loadConfig());
   const shutdown = () => void runtime.close();
   process.once('SIGINT', shutdown);

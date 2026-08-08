@@ -1,3 +1,4 @@
+import { isMainModule } from './main-module';
 import type { Job } from 'bullmq';
 import { Worker } from 'bullmq';
 import { loadConfig, type AppEnv } from '@shopee-auto-affiliate-ai/config';
@@ -318,7 +319,10 @@ export const startWorker = async (
   };
 };
 
-if (process.env.NODE_ENV !== 'test') {
+if (
+  process.env.NODE_ENV !== 'test' &&
+  isMainModule(import.meta.url)
+) {
   const config = loadConfig();
   const runtime = await startWorker(config);
   let shutdownPromise: Promise<void> | undefined;
